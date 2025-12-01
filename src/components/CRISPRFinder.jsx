@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import axios from 'axios';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { findCRISPRSites, getAIExplanation, validateSequence } from '../apiUtils';
 
 export default function CRISPRFinder() {
   const [sequence, setSequence] = useState('');
@@ -12,49 +10,49 @@ export default function CRISPRFinder() {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const findPAMSites = async () => {
+  const handleFindPAMSites = async () => {
     if (!sequence.trim()) {
       setError('Please enter a DNA sequence');
+      return;
+    }
+
+    // Validate sequence
+    const validation = validateSequence(sequence);
+    if (!validation.valid) {
+      setError(validation.error);
       return;
     }
 
     setLoading(true);
     setError('');
     setAiExplanation('');
+    setPamSites(null);
 
-    try {
-      const response = await axios.post(`${API_URL}/api/crispr`, {
-        sequence: sequence
-      });
+    const response = await findCRISPRSites(validation.cleaned);
 
+    setLoading(false);
+
+    if (response.success) {
       setPamSites(response.data);
       setSelectedSite(null);
-    } catch (err) {
-      console.error('CRISPR API Error:', err);
-      setError(err.response?.data?.error || err.message || 'Error finding PAM sites. Check if backend is running.');
-    } finally {
-      setLoading(false);
+    } else {
+      setError(response.error);
     }
   };
 
-  const explainWithAI = async () => {
+  const handleExplainWithAI = async () => {
     if (!pamSites) return;
     
     setLoadingAI(true);
     
-    try {
-      const response = await axios.post(`${API_URL}/api/explain`, {
-        tool: 'CRISPR Finder',
-        data: pamSites
-      });
-
+    const response = await getAIExplanation('CRISPR Finder', pamSites);
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
       setAiExplanation(response.data.explanation);
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      setAiExplanation('Error generating AI explanation. Please check backend connection.');
-    } finally {
-      setLoadingAI(false);
+    } else {
+      setError(response.error);
     }
   };
 
@@ -346,7 +344,7 @@ export default function CRISPRFinder() {
       </div>
 
       <button 
-        onClick={findPAMSites} 
+        onClick={handleFindPAMSites} 
         className="analyze-btn"
         disabled={loading}
         style={{
@@ -362,12 +360,9 @@ export default function CRISPRFinder() {
 
       {error && (
         <div className="error-alert">
-          <span className="error-icon">Warning</span>
+          <span className="error-icon">⚠️</span>
           <div>
             <div>{error}</div>
-            <div style={{ fontSize: '0.875rem', marginTop: '0.5rem', opacity: 0.8 }}>
-              Backend server required at {API_URL}
-            </div>
           </div>
         </div>
       )}
@@ -376,10 +371,10 @@ export default function CRISPRFinder() {
         <div className="results-container">
           <div className="action-buttons" style={{ display: 'flex', gap: '1rem' }}>
             <button onClick={() => downloadReport('txt')} className="export-btn">
-              Download TXT Report
+              📄 Download TXT Report
             </button>
             <button onClick={() => downloadReport('pdf')} className="export-btn">
-              Download PDF Report
+              🖨️ Download PDF Report
             </button>
           </div>
 
@@ -409,7 +404,7 @@ export default function CRISPRFinder() {
 
           <div style={{ marginBottom: '1.5rem' }}>
             <button 
-              onClick={explainWithAI}
+              onClick={handleExplainWithAI}
               disabled={loadingAI}
               style={{
                 width: '100%',
@@ -430,7 +425,7 @@ export default function CRISPRFinder() {
               }}
             >
               {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : 'Get AI Guidance'}
+              {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Guidance'}
             </button>
           </div>
 
@@ -449,7 +444,7 @@ export default function CRISPRFinder() {
                 fontWeight: 600,
                 fontFamily: 'Montserrat, sans-serif'
               }}>
-                AI Guidance
+                🤖 AI Guidance
               </h3>
               <div style={{ 
                 color: '#1F2937',

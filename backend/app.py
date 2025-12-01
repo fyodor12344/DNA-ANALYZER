@@ -14,8 +14,9 @@ import requests
 import os
 import sys
 
-app = Flask(__name__)
-CORS(app)
+from flask_cors import CORS
+
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Load environment variables
 load_dotenv()

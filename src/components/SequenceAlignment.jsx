@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+import { useState } from 'react';
+import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';
 
 const SequenceAlignment = () => {
   const [sequence1, setSequence1] = useState('');
@@ -12,9 +11,23 @@ const SequenceAlignment = () => {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const performAlignment = async () => {
+  const handlePerformAlignment = async () => {
     if (!sequence1 || !sequence2) {
       setError('Please enter both sequences');
+      return;
+    }
+
+    // Validate sequences
+    const validation1 = validateSequence(sequence1);
+    const validation2 = validateSequence(sequence2);
+
+    if (!validation1.valid) {
+      setError(`Sequence 1: ${validation1.error}`);
+      return;
+    }
+
+    if (!validation2.valid) {
+      setError(`Sequence 2: ${validation2.error}`);
       return;
     }
 
@@ -23,54 +36,30 @@ const SequenceAlignment = () => {
     setAlignment(null);
     setAiExplanation('');
 
-    try {
-      const response = await fetch(`${API_URL}/api/align`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sequence1,
-          sequence2,
-          algorithm
-        })
-      });
+    const response = await performAlignment(validation1.cleaned, validation2.cleaned, algorithm);
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Error performing alignment');
-      }
+    setLoading(false);
 
-      setAlignment(data);
-    } catch (err) {
-      setError(err.message || 'Error performing alignment');
-    } finally {
-      setLoading(false);
+    if (response.success) {
+      setAlignment(response.data);
+    } else {
+      setError(response.error);
     }
   };
 
-  const explainWithAI = async () => {
+  const handleExplainWithAI = async () => {
     if (!alignment) return;
     
     setLoadingAI(true);
     
-    try {
-      const response = await fetch(`${API_URL}/api/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'Sequence Alignment',
-          data: alignment
-        })
-      });
-
-      const data = await response.json();
-      setAiExplanation(data.explanation);
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      setAiExplanation('Error generating AI explanation. Please check backend connection.');
-    } finally {
-      setLoadingAI(false);
+    const response = await getAIExplanation('Sequence Alignment', alignment);
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
+      setAiExplanation(response.data.explanation);
+    } else {
+      setError(response.error);
     }
   };
 
@@ -229,7 +218,6 @@ const SequenceAlignment = () => {
         </p>
       </div>
 
-      {/* Input Section */}
       <div style={{
         background: '#fff',
         borderRadius: '12px',
@@ -343,7 +331,7 @@ const SequenceAlignment = () => {
         </div>
 
         <button
-          onClick={performAlignment}
+          onClick={handlePerformAlignment}
           disabled={loading}
           style={{
             width: '100%',
@@ -368,7 +356,6 @@ const SequenceAlignment = () => {
         </button>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div style={{
           background: '#FEE2E2',
@@ -382,7 +369,6 @@ const SequenceAlignment = () => {
         </div>
       )}
 
-      {/* Results Section */}
       {alignment && (
         <div style={{
           background: '#fff',
@@ -409,7 +395,6 @@ const SequenceAlignment = () => {
             </div>
           </div>
 
-          {/* Summary Stats */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -473,10 +458,9 @@ const SequenceAlignment = () => {
             </div>
           </div>
 
-          {/* AI Explanation Button */}
           <div style={{ marginBottom: '1.5rem' }}>
             <button 
-              onClick={explainWithAI}
+              onClick={handleExplainWithAI}
               disabled={loadingAI}
               style={{
                 width: '100%',
@@ -497,11 +481,10 @@ const SequenceAlignment = () => {
               }}
             >
               {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : 'Interpret with AI'}
+              {loadingAI ? 'Generating AI Analysis...' : '🤖 Interpret with AI'}
             </button>
           </div>
 
-          {/* AI Explanation */}
           {aiExplanation && (
             <div style={{
               background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))',
@@ -520,7 +503,7 @@ const SequenceAlignment = () => {
                 gap: '0.5rem',
                 fontFamily: 'Montserrat, sans-serif'
               }}>
-                AI Interpretation
+                🤖 AI Interpretation
               </h3>
               <div style={{ 
                 color: '#1F2937',
@@ -536,7 +519,6 @@ const SequenceAlignment = () => {
             </div>
           )}
 
-          {/* Alignment Visualization */}
           <div>
             <h3 style={{ color: '#374151', marginBottom: '1rem', fontSize: '1.1rem', fontFamily: 'Montserrat, sans-serif' }}>
               Alignment Visualization

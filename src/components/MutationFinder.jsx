@@ -1,7 +1,6 @@
 import { useState } from 'react';
+import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
- 
 export default function MutationFinder() {
   const [seq1, setSeq1] = useState('');
   const [seq2, setSeq2] = useState('');
@@ -11,63 +10,55 @@ export default function MutationFinder() {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const findMutations = async () => {
+  const handleFindMutations = async () => {
     if (!seq1.trim() || !seq2.trim()) {
       setError('Please enter both sequences');
+      return;
+    }
+
+    // Validate sequences
+    const validation1 = validateSequence(seq1);
+    const validation2 = validateSequence(seq2);
+
+    if (!validation1.valid) {
+      setError(`Sequence 1: ${validation1.error}`);
+      return;
+    }
+
+    if (!validation2.valid) {
+      setError(`Sequence 2: ${validation2.error}`);
       return;
     }
 
     setLoading(true);
     setError('');
     setAiExplanation('');
+    setMutations(null);
 
-    try {
-      const response = await fetch(`${API_URL}/api/mutations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sequence1: seq1,
-          sequence2: seq2
-        })
-      });
+    const response = await findMutations(validation1.cleaned, validation2.cleaned);
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Error finding mutations');
-      }
+    setLoading(false);
 
-      setMutations(data);
-    } catch (err) {
-      setError(err.message || 'Error finding mutations');
-    } finally {
-      setLoading(false);
+    if (response.success) {
+      setMutations(response.data);
+    } else {
+      setError(response.error);
     }
   };
 
-  const explainWithAI = async () => {
+  const handleExplainWithAI = async () => {
     if (!mutations) return;
     
     setLoadingAI(true);
     
-    try {
-      const response = await fetch(`${API_URL}/api/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'Mutation Finder',
-          data: mutations
-        })
-      });
-
-      const data = await response.json();
-      setAiExplanation(data.explanation);
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      setAiExplanation('Error generating AI explanation. Please check backend connection.');
-    } finally {
-      setLoadingAI(false);
+    const response = await getAIExplanation('Mutation Finder', mutations);
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
+      setAiExplanation(response.data.explanation);
+    } else {
+      setError(response.error);
     }
   };
 
@@ -127,7 +118,7 @@ export default function MutationFinder() {
       </div>
 
       <button 
-        onClick={findMutations} 
+        onClick={handleFindMutations} 
         className="analyze-btn"
         disabled={loading}
         style={{
@@ -143,7 +134,7 @@ export default function MutationFinder() {
 
       {error && (
         <div className="error-alert">
-          <span className="error-icon">Warning</span>
+          <span className="error-icon">⚠️</span>
           {error}
         </div>
       )}
@@ -152,7 +143,7 @@ export default function MutationFinder() {
         <div className="results-container">
           <div style={{ marginBottom: '1.5rem' }}>
             <button 
-              onClick={explainWithAI}
+              onClick={handleExplainWithAI}
               disabled={loadingAI}
               style={{
                 width: '100%',
@@ -192,7 +183,7 @@ export default function MutationFinder() {
                 fontWeight: 600,
                 fontFamily: 'Montserrat, sans-serif'
               }}>
-                AI Analysis
+                🤖 AI Analysis
               </h3>
               <div style={{ 
                 color: '#1F2937',

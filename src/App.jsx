@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { summary } from "./dnaUtils";
 import "./App.css";
 
+// Import API configuration
+import { API_ENDPOINTS } from "./config";
+
 // Import components
 import OverviewTab from './components/OverviewTab';
 import MutationFinder from './components/MutationFinder';
@@ -38,21 +41,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [showSampleMenu, setShowSampleMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState(false); // Start with light mode
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
-
-  // Load dark mode preference from localStorage
-  useEffect(() => {
-    const savedDarkMode = localStorage.getItem('darkMode');
-    if (savedDarkMode === 'true') {
-      setDarkMode(true);
-    }
-  }, []);
-
-  // Save dark mode preference
-  useEffect(() => {
-    localStorage.setItem('darkMode', darkMode);
-  }, [darkMode]);
 
   // Close sample menu when clicking outside
   useEffect(() => {
@@ -705,7 +695,7 @@ function App() {
                   <li>Use "Load Sample" to quickly test with example sequences</li>
                   <li>Upload FASTA files for easy sequence input</li>
                   <li>Most tools work independently - no need to analyze first</li>
-                  <li>Enable Dark Mode for comfortable viewing (preference is saved)</li>
+                  <li>Dark Mode preference is saved in your session</li>
                   <li>Use AI explanations for detailed insights</li>
                 </ul>
                 

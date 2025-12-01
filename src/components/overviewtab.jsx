@@ -1,47 +1,33 @@
 import { useState } from 'react';
-
-const API_URL = 'http://localhost:5000';
+import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';
 
 export default function OverviewTab({ result, originalSequence }) {
-  const [showCodonTable, setShowCodonTable] = useState(false);
-  const [showSixFrame, setShowSixFrame] = useState(false);
-  const [showRestrictionSites, setShowRestrictionSites] = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const explainWithAI = async () => {
+  const handleExplainWithAI = async () => {
     if (!result) return;
     
     setLoadingAI(true);
     
-    try {
-      const response = await fetch(`${API_URL}/api/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'DNA Sequence Analyzer',
-          data: {
-            length: result.length,
-            gc_content: result.gc,
-            at_content: result.at,
-            tm: result.tm,
-            molecular_weight: result.molecularWeight,
-            nucleotides: result.nucleotides,
-            orfs_found: result.nORFs,
-            longest_orf: result.longestORF,
-            restriction_sites_count: result.restrictionSites?.length || 0
-          }
-        })
-      });
-
-      const data = await response.json();
-      setAiExplanation(data.explanation || 'No explanation available');
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      setAiExplanation('Error generating AI explanation. Please check backend connection.');
-    } finally {
-      setLoadingAI(false);
+    const response = await getAIExplanation('DNA Sequence Analyzer', {
+      length: result.length,
+      gc_content: result.gc,
+      at_content: result.at,
+      tm: result.tm,
+      molecular_weight: result.molecularWeight,
+      nucleotides: result.nucleotides,
+      orfs_found: result.nORFs,
+      longest_orf: result.longestORF,
+      restriction_sites_count: result.restrictionSites?.length || 0
+    });
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
+      setAiExplanation(response.data.explanation || 'No explanation available');
+    } else {
+      setAiExplanation(`Error: ${response.error}`);
     }
   };
 
@@ -88,7 +74,7 @@ export default function OverviewTab({ result, originalSequence }) {
       report += `Type: ${result.longestORF.type}\n\n`;
     }
 
-    if (aiExplanation && aiExplanation !== 'Error generating AI explanation. Please check backend connection.') {
+    if (aiExplanation && !aiExplanation.startsWith('Error:')) {
       report += 'AI ANALYSIS\n';
       report += '-'.repeat(80) + '\n';
       report += aiExplanation + '\n\n';
@@ -103,6 +89,21 @@ export default function OverviewTab({ result, originalSequence }) {
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto' }}>
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .loading-spinner {
+          display: inline-block;
+          width: 16px;
+          height: 16px;
+          border: 2px solid #ffffff40;
+          border-top-color: #ffffff;
+          border-radius: 50%;
+          animation: spin 0.6s linear infinite;
+        }
+      `}</style>
+
       {/* Action Buttons */}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
         <button 
@@ -125,7 +126,7 @@ export default function OverviewTab({ result, originalSequence }) {
 
       {/* AI Explanation Button */}
       <button 
-        onClick={explainWithAI}
+        onClick={handleExplainWithAI}
         disabled={loadingAI}
         style={{
           width: '100%',
@@ -137,13 +138,18 @@ export default function OverviewTab({ result, originalSequence }) {
           fontSize: '1rem',
           fontWeight: 600,
           cursor: loadingAI ? 'not-allowed' : 'pointer',
-          marginBottom: '1.5rem'
+          marginBottom: '1.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '0.5rem'
         }}
       >
-        {loadingAI ? '🔄 Generating AI Analysis...' : '🤖 Get AI Analysis'}
+        {loadingAI && <span className="loading-spinner"></span>}
+        {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Analysis'}
       </button>
 
-      {/* AI Explanation Display - FIXED VISIBILITY */}
+      {/* AI Explanation Display */}
       {aiExplanation && (
         <div style={{
           background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(124, 58, 237, 0.08))',
@@ -162,7 +168,7 @@ export default function OverviewTab({ result, originalSequence }) {
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            🧠 AI Analysis
+            🤖 AI Analysis
           </h3>
           <div style={{ 
             color: '#1F2937',
@@ -224,7 +230,7 @@ export default function OverviewTab({ result, originalSequence }) {
         </div>
       </div>
 
-      {/* Reverse Complement - FIXED TEXT WRAPPING */}
+      {/* Reverse Complement */}
       <div style={{ 
         background: '#fff', 
         borderRadius: '12px', 
@@ -306,7 +312,7 @@ export default function OverviewTab({ result, originalSequence }) {
         </div>
       )}
 
-      {/* All ORFs - IMPROVED LAYOUT */}
+      {/* All ORFs */}
       {result.allORFs && result.allORFs.length > 0 && (
         <div style={{ 
           background: '#fff', 

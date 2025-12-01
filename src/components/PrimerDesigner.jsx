@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';;
 
 export default function PrimerDesigner() {
   const [sequence, setSequence] = useState('');
@@ -9,15 +10,20 @@ export default function PrimerDesigner() {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
 
-  const API_URL = 'http://localhost:5000';
- 
-  const designPrimers = async () => {
+  const handleDesignPrimers = async () => {
     if (!sequence.trim()) {
       setError('Please enter a DNA sequence');
       return;
     }
 
-    const cleanSeq = sequence.trim().toUpperCase().replace(/[^ATGC]/g, '');
+    // Validate sequence
+    const validation = validateSequence(sequence);
+    if (!validation.valid) {
+      setError(validation.error);
+      return;
+    }
+
+    const cleanSeq = validation.cleaned;
     
     let productSizeRange = [200, 500];
     if (cleanSeq.length < 150) {
@@ -31,66 +37,30 @@ export default function PrimerDesigner() {
     setAiExplanation('');
     setPrimers(null);
 
-    try {
-      const response = await fetch(`${API_URL}/api/primers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sequence: cleanSeq,
-          product_size_range: productSizeRange
-        })
-      });
+    const response = await designPrimers(cleanSeq, 60, 20, productSizeRange);
 
-      const data = await response.json();
+    setLoading(false);
 
-      if (!response.ok) {
-        let errorMsg = data.error || 'Failed to design primers';
-        if (data.suggestion) errorMsg += `\n\nSuggestion: ${data.suggestion}`;
-        if (data.suggestions?.length > 0) {
-          errorMsg += '\n\nSuggestions:\n' + data.suggestions.map(s => `• ${s}`).join('\n');
-        }
-        if (data.recommended_range) {
-          errorMsg += `\n\nRecommended product size: ${data.recommended_range[0]}-${data.recommended_range[1]} bp`;
-        }
-        throw new Error(errorMsg);
-      }
-
-      setPrimers(data);
-    } catch (err) {
-      setError(err.message || 'Failed to connect to server');
-    } finally {
-      setLoading(false);
+    if (response.success) {
+      setPrimers(response.data);
+    } else {
+      setError(response.error);
     }
   };
 
-  const explainWithAI = async () => {
+  const handleExplainWithAI = async () => {
     if (!primers) return;
     
     setLoadingAI(true);
     
-    try {
-      const response = await fetch(`${API_URL}/api/explain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'PCR Primer Designer',
-          data: primers
-        })
-      });
-
-      const data = await response.json();
-      
-      if (response.ok && data.explanation) {
-        setAiExplanation(data.explanation);
-      } else {
-        setAiExplanation('Error generating AI explanation. Please check backend connection.');
-      }
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      setAiExplanation('Error generating AI explanation. Please check backend connection.');
-    } finally {
-      setLoadingAI(false);
+    const response = await getAIExplanation('PCR Primer Designer', primers);
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
+      setAiExplanation(response.data.explanation);
+    } else {
+      setError(response.error);
     }
   };
 
@@ -171,7 +141,7 @@ export default function PrimerDesigner() {
                 fontSize: '0.85rem'
               }}
             >
-              Copy
+              📋 Copy
             </button>
           </div>
           <div style={{
@@ -269,6 +239,21 @@ export default function PrimerDesigner() {
       padding: '2rem',
       color: '#fff'
     }}>
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        .loading-spinner {
+          display: inline-block;
+          width: 16px;
+          height: 16px;
+          border: 2px solid #ffffff40;
+          border-top-color: #ffffff;
+          border-radius: 50%;
+          animation: spin 0.6s linear infinite;
+        }
+      `}</style>
+
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
           <h1 style={{ 
@@ -331,7 +316,7 @@ export default function PrimerDesigner() {
         </div>
 
         <button 
-          onClick={designPrimers}
+          onClick={handleDesignPrimers}
           disabled={loading}
           style={{
             width: '100%',
@@ -343,10 +328,15 @@ export default function PrimerDesigner() {
             fontSize: '1.1rem',
             fontWeight: 600,
             cursor: loading ? 'not-allowed' : 'pointer',
-            marginBottom: '2rem'
+            marginBottom: '2rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem'
           }}
         >
-          {loading ? '🔄 Designing...' : '🚀 Design Primers'}
+          {loading && <span className="loading-spinner"></span>}
+          {loading ? 'Designing...' : '🚀 Design Primers'}
         </button>
 
         {error && (
@@ -388,7 +378,7 @@ export default function PrimerDesigner() {
             </div>
 
             <button
-              onClick={explainWithAI}
+              onClick={handleExplainWithAI}
               disabled={loadingAI}
               style={{
                 width: '100%',
@@ -400,10 +390,15 @@ export default function PrimerDesigner() {
                 fontSize: '1rem',
                 fontWeight: 600,
                 cursor: loadingAI ? 'not-allowed' : 'pointer',
-                marginBottom: '2rem'
+                marginBottom: '2rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
               }}
             >
-              {loadingAI ? '🔄 AI Analysis in Progress...' : '🤖 Get AI Explanation'}
+              {loadingAI && <span className="loading-spinner"></span>}
+              {loadingAI ? 'AI Analysis in Progress...' : '🤖 Get AI Explanation'}
             </button>
 
             {aiExplanation && (
@@ -423,7 +418,7 @@ export default function PrimerDesigner() {
                   fontSize: '1.2rem',
                   fontWeight: 700
                 }}>
-                  🧠 AI Explanation
+                  🤖 AI Explanation
                 </h3>
                 <div style={{ 
                   color: '#F3F4F6',
