@@ -140,3 +140,5 @@ credentials.json
 # Documentation builds
 docs/_build/
 site/
+.vercel
+.env*.local
