@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';;
+// ✅ FIXED: Added designPrimers import
+import { designPrimers, getAIExplanation, validateSequence } from '../utils/apiUtils';
 
 export default function PrimerDesigner() {
   const [sequence, setSequence] = useState('');
@@ -37,13 +38,17 @@ export default function PrimerDesigner() {
     setAiExplanation('');
     setPrimers(null);
 
+    console.log('📤 Designing primers for sequence length:', cleanSeq.length); // Debug
+
     const response = await designPrimers(cleanSeq, 60, 20, productSizeRange);
 
     setLoading(false);
 
     if (response.success) {
+      console.log('✅ Primers designed successfully'); // Debug
       setPrimers(response.data);
     } else {
+      console.error('❌ Primer design failed:', response.error); // Debug
       setError(response.error);
     }
   };
@@ -53,13 +58,17 @@ export default function PrimerDesigner() {
     
     setLoadingAI(true);
     
+    console.log('📤 Requesting AI explanation for primers...'); // Debug
+    
     const response = await getAIExplanation('PCR Primer Designer', primers);
     
     setLoadingAI(false);
     
     if (response.success) {
+      console.log('✅ AI explanation received'); // Debug
       setAiExplanation(response.data.explanation);
     } else {
+      console.error('❌ AI explanation failed:', response.error); // Debug
       setError(response.error);
     }
   };
@@ -332,7 +341,8 @@ export default function PrimerDesigner() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '0.5rem'
+            gap: '0.5rem',
+            transition: 'all 0.3s ease'
           }}
         >
           {loading && <span className="loading-spinner"></span>}
@@ -349,7 +359,7 @@ export default function PrimerDesigner() {
             color: '#EF4444',
             whiteSpace: 'pre-wrap'
           }}>
-            {error}
+            <strong>❌ Error:</strong> {error}
           </div>
         )}
 
@@ -394,7 +404,8 @@ export default function PrimerDesigner() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.5rem'
+                gap: '0.5rem',
+                transition: 'all 0.3s ease'
               }}
             >
               {loadingAI && <span className="loading-spinner"></span>}
@@ -427,7 +438,9 @@ export default function PrimerDesigner() {
                   fontSize: '0.95rem',
                   background: 'rgba(15, 23, 42, 0.5)',
                   padding: '1rem',
-                  borderRadius: '8px'
+                  borderRadius: '8px',
+                  maxHeight: '600px',
+                  overflowY: 'auto'
                 }}>
                   {aiExplanation}
                 </div>

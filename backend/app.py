@@ -3,23 +3,29 @@ DNA Sequence Analyzer - Flask Backend API
 Provides endpoints for mutations, alignment, CRISPR, and primer design
 Now with FREE AI explanations powered by Groq!
 """
+import os
+import sys
+import requests
+from datetime import datetime, timedelta
+from collections import defaultdict
+
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
 from algorithms.alignment import needleman_wunsch, smith_waterman, calculate_alignment_stats
 from algorithms.mutation_finder import find_mutations
 from algorithms.crispr import find_pam_sites
 from algorithms.primer_design import design_primers
-import requests
-import os
-import sys
 
-from flask_cors import CORS
-
-CORS(app, resources={r"/*": {"origins": "*"}})
-
-# Load environment variables
+# Load environment variables FIRST
 load_dotenv()
+
+# Initialize Flask app
+app = Flask(__name__)
+
+# Enable CORS for all routes
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # CRITICAL: Never hardcode API keys! Always use environment variables
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -36,9 +42,6 @@ if not GROQ_API_KEY:
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Rate limiting configuration (simple in-memory)
-from collections import defaultdict
-from datetime import datetime, timedelta
-
 request_counts = defaultdict(list)
 RATE_LIMIT_WINDOW = 60  # seconds
 MAX_REQUESTS_PER_WINDOW = 30  # requests per minute per IP
@@ -278,7 +281,7 @@ def primers():
 
 @app.route('/api/explain', methods=['POST'])
 def explain_with_ai():
-    """Generate AI explanations using FREE Groq API"""
+    """Generate AI explanations using FREE Groq API with extended responses"""
     try:
         # Check if API key is configured
         if not GROQ_API_KEY:
@@ -310,17 +313,17 @@ def explain_with_ai():
                 'messages': [
                     {
                         'role': 'system',
-                        'content': 'You are a helpful molecular biology assistant. Explain scientific results in simple, conversational language that students and researchers can easily understand. Be practical, clear, and actionable. Keep responses concise and focused.'
+                        'content': 'You are an expert molecular biology assistant. Provide comprehensive, detailed explanations of scientific results. Include biological significance, practical implications, interpretation guidelines, and actionable recommendations. Use clear language that both students and researchers can understand. Be thorough but organized - use sections, examples, and specific details to make complex concepts accessible.'
                     },
                     {
                         'role': 'user',
                         'content': context
                     }
                 ],
-                'max_tokens': 800,
+                'max_tokens': 2500,
                 'temperature': 0.7
             },
-            timeout=30
+            timeout=45
         )
         
         if response.status_code != 200:
@@ -332,7 +335,7 @@ def explain_with_ai():
         result = response.json()
         explanation = result['choices'][0]['message']['content']
         
-        print(f"AI explanation generated for {tool}")
+        print(f"AI explanation generated for {tool} (length: {len(explanation)} chars)")
         return jsonify({'explanation': explanation})
     
     except requests.exceptions.Timeout:
@@ -349,90 +352,177 @@ def explain_with_ai():
 
 
 def build_ai_context(tool, results):
-    """Build context string for AI based on tool type"""
+    """Build detailed context string for AI based on tool type"""
     
     if tool == "PCR Primer Designer":
         fwd = results.get('forward_primer', {})
         rev = results.get('reverse_primer', {})
         
-        return f"""I designed PCR primers with these results:
+        return f"""I designed PCR primers for amplification. Please provide a comprehensive analysis:
 
-Forward Primer:
+FORWARD PRIMER:
 - Sequence: {fwd.get('sequence', 'N/A')}
-- Tm: {fwd.get('tm', 'N/A')}°C
+- Melting Temperature (Tm): {fwd.get('tm', 'N/A')}°C
 - GC Content: {fwd.get('gc_content', 'N/A')}%
-- Quality: {fwd.get('quality_grade', 'N/A')} ({fwd.get('quality_score', 'N/A')}/100)
+- Quality Score: {fwd.get('quality_score', 'N/A')}/100
+- Quality Grade: {fwd.get('quality_grade', 'N/A')}
+- Issues: {', '.join(fwd.get('issues', [])) if fwd.get('issues') else 'None detected'}
 
-Reverse Primer:
+REVERSE PRIMER:
 - Sequence: {rev.get('sequence', 'N/A')}
-- Tm: {rev.get('tm', 'N/A')}°C
+- Melting Temperature (Tm): {rev.get('tm', 'N/A')}°C
 - GC Content: {rev.get('gc_content', 'N/A')}%
-- Quality: {rev.get('quality_grade', 'N/A')} ({rev.get('quality_score', 'N/A')}/100)
+- Quality Score: {rev.get('quality_score', 'N/A')}/100
+- Quality Grade: {rev.get('quality_grade', 'N/A')}
+- Issues: {', '.join(rev.get('issues', [])) if rev.get('issues') else 'None detected'}
 
-Explain briefly: Are these primers suitable for PCR? Any concerns?"""
+AMPLICON DETAILS:
+- Product Size: {results.get('product_size', 'N/A')} bp
+- Tm Difference: {abs(fwd.get('tm', 0) - rev.get('tm', 0)):.1f}°C
+
+Please provide a detailed analysis covering:
+1. Overall primer quality assessment and suitability for PCR
+2. Explanation of the Tm values and whether they're optimal
+3. GC content analysis and implications
+4. Any potential issues (primer dimers, hairpins, mispriming risks)
+5. Recommended PCR conditions (annealing temperature, extension time)
+6. Troubleshooting suggestions if quality is suboptimal
+7. Best practices for using these primers"""
     
     elif tool == "Mutation Finder":
         summary = results.get('summary', {})
         mutations = results.get('mutations', [])
         
-        mutation_examples = '\n'.join([
-            f"  - Position {m.get('position')}: {m.get('type')} - {m.get('mutation_class', 'Unknown')}"
-            for m in mutations[:5]
-        ]) if mutations else "No mutations found"
+        mutation_details = []
+        for i, m in enumerate(mutations[:10], 1):
+            mutation_details.append(
+                f"{i}. Position {m.get('position')}: {m.get('type')} - "
+                f"{m.get('from_base', '?')} → {m.get('to_base', '?')} "
+                f"[{m.get('mutation_class', 'Unknown')}]"
+            )
         
-        return f"""I compared two DNA sequences and found these mutations:
+        mutation_list = '\n'.join(mutation_details) if mutation_details else "No mutations detected"
+        
+        return f"""I performed comparative sequence analysis and found the following mutations:
 
-Summary:
+SUMMARY STATISTICS:
 - Total Mutations: {summary.get('total_mutations', 0)}
-- SNPs: {summary.get('snps', 0)}
+- Single Nucleotide Polymorphisms (SNPs): {summary.get('snps', 0)}
 - Insertions: {summary.get('insertions', 0)}
 - Deletions: {summary.get('deletions', 0)}
-- Silent: {summary.get('silent_mutations', 0)}
-- Missense: {summary.get('missense_mutations', 0)}
-- Nonsense: {summary.get('nonsense_mutations', 0)}
 
-Examples:
-{mutation_examples}
+FUNCTIONAL CLASSIFICATION:
+- Silent Mutations: {summary.get('silent_mutations', 0)}
+- Missense Mutations: {summary.get('missense_mutations', 0)}
+- Nonsense Mutations: {summary.get('nonsense_mutations', 0)}
 
-Explain briefly: What do these mutations mean biologically? Any concerning patterns?"""
+DETAILED MUTATION LIST (showing first 10):
+{mutation_list}
+
+Please provide comprehensive analysis:
+1. Biological significance of these mutation types
+2. Interpretation of silent vs. missense vs. nonsense mutations
+3. Potential functional impacts on the protein product
+4. Clinical or research implications
+5. Patterns or hotspots in the mutations
+6. Recommendations for follow-up analysis
+7. What these mutations might tell us about evolutionary relationships or disease"""
     
     elif tool == "CRISPR Finder":
         sites_count = results.get('total_sites', 0)
         forward = results.get('forward_strand_sites', 0)
         reverse = results.get('reverse_strand_sites', 0)
+        sites = results.get('sites', [])
         
-        return f"""I found {sites_count} CRISPR PAM sites in my DNA sequence:
-- Forward strand: {forward}
-- Reverse strand: {reverse}
+        site_details = []
+        for i, site in enumerate(sites[:8], 1):
+            site_details.append(
+                f"{i}. Position {site.get('position')}: {site.get('pam_sequence')} "
+                f"({site.get('strand')} strand, {site.get('cut_position')} bp from start)"
+            )
+        
+        site_list = '\n'.join(site_details) if site_details else "No PAM sites found"
+        
+        return f"""I analyzed a DNA sequence for CRISPR-Cas9 targeting sites:
 
-Explain briefly: What are PAM sites and how do I choose the best one for CRISPR editing?"""
+SUMMARY:
+- Total PAM Sites Found: {sites_count}
+- Forward Strand Sites: {forward}
+- Reverse Strand Sites: {reverse}
+
+PAM SITE DETAILS (showing first 8):
+{site_list}
+
+Please provide detailed explanation:
+1. What are PAM (Protospacer Adjacent Motif) sites and why they're essential for CRISPR
+2. How to evaluate and choose the best PAM site for gene editing
+3. Considerations for on-target vs. off-target effects
+4. Guide RNA design recommendations for these sites
+5. Strand selection strategy (forward vs. reverse)
+6. Potential challenges and how to address them
+7. Best practices for experimental validation
+8. Tips for maximizing editing efficiency and specificity"""
     
     elif tool == "Sequence Alignment":
-        return f"""I performed sequence alignment with these results:
+        return f"""I performed sequence alignment with the following results:
 
-Algorithm: {results.get('algorithm', 'N/A')}
-Score: {results.get('score', 'N/A')}
-Similarity: {results.get('similarity_percentage', 'N/A')}%
-- Matches: {results.get('matches', 'N/A')}
-- Mismatches: {results.get('mismatches', 'N/A')}
-- Gaps: {results.get('gaps', 'N/A')}
+ALIGNMENT DETAILS:
+- Algorithm Used: {results.get('algorithm', 'N/A')}
+- Alignment Score: {results.get('score', 'N/A')}
+- Overall Similarity: {results.get('similarity_percentage', 'N/A')}%
 
-Explain briefly: What does this alignment tell me about these sequences? Are they related?"""
+DETAILED STATISTICS:
+- Matching Positions: {results.get('matches', 'N/A')}
+- Mismatched Positions: {results.get('mismatches', 'N/A')}
+- Gap Positions: {results.get('gaps', 'N/A')}
+- Total Alignment Length: {results.get('length', 'N/A')} positions
+
+Please provide comprehensive analysis:
+1. Interpretation of the alignment score and similarity percentage
+2. What this level of similarity indicates about sequence relationship
+3. Biological implications of matches, mismatches, and gaps
+4. Whether these sequences are likely homologs, orthologs, or paralogs
+5. Evolutionary insights from the alignment pattern
+6. Recommendations for further analysis
+7. How to use this information in research or diagnostics
+8. Confidence level and potential limitations of the alignment"""
     
     elif tool == "DNA Sequence Analyzer":
-        return f"""I analyzed a DNA sequence with these results:
+        return f"""I performed comprehensive DNA sequence analysis:
 
-Length: {results.get('length', 'N/A')} bp
-GC Content: {results.get('gc_content', 'N/A')}%
-AT Content: {results.get('at_content', 'N/A')}%
-Tm: {results.get('tm', 'N/A')}°C
-ORFs Found: {results.get('orfs_found', 'N/A')}
-Longest ORF: {results.get('longest_orf', {}).get('length_nt', 'N/A')} nt
+SEQUENCE CHARACTERISTICS:
+- Length: {results.get('length', 'N/A')} base pairs
+- GC Content: {results.get('gc_content', 'N/A')}%
+- AT Content: {results.get('at_content', 'N/A')}%
+- Melting Temperature (Tm): {results.get('tm', 'N/A')}°C
 
-Explain briefly: What do these metrics tell me about this sequence?"""
+CODING POTENTIAL:
+- Open Reading Frames (ORFs) Detected: {results.get('orfs_found', 'N/A')}
+- Longest ORF: {results.get('longest_orf', {}).get('length_nt', 'N/A')} nucleotides
+  ({results.get('longest_orf', {}).get('length_aa', 'N/A')} amino acids)
+
+Please provide detailed interpretation:
+1. What the GC content reveals about the sequence (stability, gene density, organism type)
+2. Significance of the melting temperature for molecular biology applications
+3. Interpretation of ORF analysis and coding potential
+4. Sequence composition implications for cloning and expression
+5. Recommendations for molecular biology experiments
+6. Potential challenges or considerations
+7. How these metrics compare to typical sequences
+8. Next steps for characterization or functional analysis"""
     
     else:
-        return f"""Please briefly explain these {tool} results: {str(results)[:500]}"""
+        return f"""Please provide a comprehensive, detailed explanation of these {tool} results:
+
+DATA:
+{str(results)[:1000]}
+
+Include:
+1. Interpretation of key metrics and values
+2. Biological significance
+3. Practical implications
+4. Recommendations for next steps
+5. Potential applications or considerations"""
 
 
 @app.route('/api/health', methods=['GET'])
@@ -443,6 +533,11 @@ def health():
         'message': 'DNA Analyzer API is running',
         'version': '1.0.0',
         'ai_enabled': bool(GROQ_API_KEY),
+        'ai_config': {
+            'model': 'llama-3.3-70b-versatile',
+            'max_tokens': 2500,
+            'provider': 'Groq'
+        },
         'rate_limit': f'{MAX_REQUESTS_PER_WINDOW} requests per {RATE_LIMIT_WINDOW}s',
         'endpoints': {
             'mutations': '/api/mutations',
@@ -471,7 +566,7 @@ def info():
             'Sequence Alignment (Global & Local)',
             'CRISPR PAM Site Finder',
             'PCR Primer Design with Tm calculation',
-            'AI-powered result explanations'
+            'AI-powered detailed result explanations (2500 token responses)'
         ],
         'limits': {
             'max_sequence_length': '100,000 bp',
@@ -524,7 +619,7 @@ if __name__ == '__main__':
     print("=" * 70)
     print(f"Server: http://localhost:5000")
     print(f"CORS: Enabled for frontend requests")
-    print(f"AI Explanations: {'ENABLED (Groq)' if GROQ_API_KEY else 'DISABLED (No API key)'}")
+    print(f"AI Explanations: {'ENABLED (Groq - 2500 tokens)' if GROQ_API_KEY else 'DISABLED (No API key)'}")
     print(f"Rate Limit: {MAX_REQUESTS_PER_WINDOW} requests per minute")
     print("=" * 70)
     print("\nAvailable Endpoints:")

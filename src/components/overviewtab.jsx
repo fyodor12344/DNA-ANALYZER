@@ -1,33 +1,50 @@
 import { useState } from 'react';
-import { performAlignment, getAIExplanation, validateSequence } from '../utils/apiUtils';
+// ✅ FIXED: Removed performAlignment import (not needed here)
+import { getAIExplanation } from '../utils/apiUtils';
 
 export default function OverviewTab({ result, originalSequence }) {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
+  const [error, setError] = useState('');
 
   const handleExplainWithAI = async () => {
     if (!result) return;
     
     setLoadingAI(true);
+    setError('');
     
-    const response = await getAIExplanation('DNA Sequence Analyzer', {
-      length: result.length,
-      gc_content: result.gc,
-      at_content: result.at,
-      tm: result.tm,
-      molecular_weight: result.molecularWeight,
-      nucleotides: result.nucleotides,
-      orfs_found: result.nORFs,
-      longest_orf: result.longestORF,
-      restriction_sites_count: result.restrictionSites?.length || 0
-    });
-    
-    setLoadingAI(false);
-    
-    if (response.success) {
-      setAiExplanation(response.data.explanation || 'No explanation available');
-    } else {
-      setAiExplanation(`Error: ${response.error}`);
+    try {
+      console.log('📤 Sending AI request for Overview Tab...'); // Debug log
+      
+      const response = await getAIExplanation('DNA Sequence Analyzer', {
+        length: result.length,
+        gc_content: result.gc,
+        at_content: result.at,
+        tm: result.tm,
+        molecular_weight: result.molecularWeight,
+        nucleotides: result.nucleotides,
+        orfs_found: result.nORFs,
+        longest_orf: result.longestORF,
+        restriction_sites_count: result.restrictionSites?.length || 0
+      });
+      
+      console.log('📥 AI Response:', response); // Debug log
+      
+      if (response.success) {
+        const explanation = response.data.explanation || 'No explanation available';
+        console.log('✅ AI Explanation received:', explanation.substring(0, 100) + '...'); // Debug
+        setAiExplanation(explanation);
+      } else {
+        console.error('❌ AI Error:', response.error);
+        setError(response.error || 'Failed to generate AI explanation');
+        setAiExplanation(`Error: ${response.error}`);
+      }
+    } catch (err) {
+      console.error('💥 Exception in handleExplainWithAI:', err);
+      setError(err.message || 'Unexpected error occurred');
+      setAiExplanation(`Error: ${err.message || 'Unexpected error occurred'}`);
+    } finally {
+      setLoadingAI(false);
     }
   };
 
@@ -117,7 +134,8 @@ export default function OverviewTab({ result, originalSequence }) {
             color: '#fff',
             fontSize: '1rem',
             fontWeight: 600,
-            cursor: 'pointer'
+            cursor: 'pointer',
+            transition: 'all 0.3s ease'
           }}
         >
           📄 Download Report (TXT)
@@ -142,12 +160,35 @@ export default function OverviewTab({ result, originalSequence }) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '0.5rem'
+          gap: '0.5rem',
+          transition: 'all 0.3s ease'
         }}
       >
         {loadingAI && <span className="loading-spinner"></span>}
         {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Analysis'}
       </button>
+
+      {/* Error Display */}
+      {error && !aiExplanation && (
+        <div style={{
+          background: '#FEE2E2',
+          border: '2px solid #EF4444',
+          borderRadius: '12px',
+          padding: '1.5rem',
+          marginBottom: '2rem',
+          color: '#991B1B'
+        }}>
+          <strong>❌ Error:</strong> {error}
+          <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
+            Please check:
+            <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
+              <li>Backend is running and accessible</li>
+              <li>CORS is enabled on backend</li>
+              <li>GROQ_API_KEY is set in backend environment</li>
+            </ul>
+          </div>
+        </div>
+      )}
 
       {/* AI Explanation Display */}
       {aiExplanation && (
@@ -179,7 +220,9 @@ export default function OverviewTab({ result, originalSequence }) {
             whiteSpace: 'pre-wrap',
             fontSize: '0.95rem',
             border: '1px solid rgba(139, 92, 246, 0.2)',
-            fontFamily: 'system-ui, -apple-system, sans-serif'
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            maxHeight: '600px',
+            overflowY: 'auto'
           }}>
             {aiExplanation}
           </div>
