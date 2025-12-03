@@ -16,10 +16,10 @@ export const API_BASE_URL = isLocalhost
 console.log("🔗 API Base URL:", API_BASE_URL); // For debugging
 
 
-// ---- ENDPOINTS ----
+// ---- ENDPOINTS ---- ✅ FIXED: Added /api/ prefix to all endpoints
 export const API_ENDPOINTS = {
-  health: `${API_BASE_URL}/health`,
-  info: `${API_BASE_URL}/info`,
+  health: `${API_BASE_URL}/api/health`,        // ✅ FIXED
+  info: `${API_BASE_URL}/api/info`,            // ✅ FIXED
   mutations: `${API_BASE_URL}/api/mutations`,
   align: `${API_BASE_URL}/api/align`,
   crispr: `${API_BASE_URL}/api/crispr`,
