@@ -1,25 +1,17 @@
 // config.js - API Configuration
 
-// ---- BACKEND URL SETUP ----
-
-// Deployed backend on Render
+// BACKEND URL - ALWAYS use Render for deployed app
 const RENDER_URL = "https://dna-analyzer-1-ipxr.onrender.com";
 
-// If running locally (during development), use localhost.
-// If deployed (Vercel), always use Render URL.
-const isLocalhost = typeof window !== "undefined" && window.location.hostname === "localhost";
+// For local development, you can change this manually
+export const API_BASE_URL = RENDER_URL;
 
-export const API_BASE_URL = isLocalhost 
-  ? "http://localhost:5000" 
-  : RENDER_URL;
+console.log("🔗 API Base URL:", API_BASE_URL);
 
-console.log("🔗 API Base URL:", API_BASE_URL); // For debugging
-
-
-// ---- ENDPOINTS ---- ✅ FIXED: Added /api/ prefix to all endpoints
+// ENDPOINTS - All must have /api/ prefix
 export const API_ENDPOINTS = {
-  health: `${API_BASE_URL}/api/health`,        // ✅ FIXED
-  info: `${API_BASE_URL}/api/info`,            // ✅ FIXED
+  health: `${API_BASE_URL}/api/health`,
+  info: `${API_BASE_URL}/api/info`,
   mutations: `${API_BASE_URL}/api/mutations`,
   align: `${API_BASE_URL}/api/align`,
   crispr: `${API_BASE_URL}/api/crispr`,
@@ -27,18 +19,15 @@ export const API_ENDPOINTS = {
   explain: `${API_BASE_URL}/api/explain`,
 };
 
-
-// ---- REQUEST CONFIG ----
+// REQUEST CONFIG
 export const API_CONFIG = {
-  timeout: 60000, // Allow slow cold starts on Render
+  timeout: 60000,
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",
   },
 };
 
-
-// ---- DEFAULT EXPORT ----
 export default {
   API_BASE_URL,
   API_ENDPOINTS,
