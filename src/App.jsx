@@ -1,16 +1,13 @@
 import { useState, useEffect } from "react";
-import { summary } from "./dnaUtils";
+import { summary } from "./utils/dnaUtils";
 import "./App.css";
 
-// Import API configuration
-import { API_ENDPOINTS } from "./config";
-
 // Import components
-import OverviewTab from './components/OverviewTab';
-import MutationFinder from './components/MutationFinder';
-import SequenceAlignment from './components/SequenceAlignment';
-import CRISPRFinder from './components/CRISPRFinder';
-import PrimerDesigner from './components/PrimerDesigner';
+import OverviewTab from './components/OverviewTab.jsx';
+import MutationFinder from './components/MutationFinder.jsx';
+import SequenceAlignment from './components/SequenceAlignment.jsx';
+import CRISPRFinder from './components/CRISPRFinder.jsx';
+import PrimerDesigner from './components/PrimerDesigner.jsx';
 
 // Loading Spinner Component
 const LoadingSpinner = () => (
@@ -41,7 +38,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [showSampleMenu, setShowSampleMenu] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const [darkMode, setDarkMode] = useState(false); // Start with light mode
+  const darkMode = true; // Always dark mode
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
 
   // Close sample menu when clicking outside
@@ -121,7 +118,6 @@ function App() {
   const copySequence = () => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(dna).then(() => {
-        // Show brief success feedback
         const btn = event.target;
         const originalText = btn.textContent;
         btn.textContent = 'Copied!';
@@ -158,7 +154,7 @@ function App() {
   const stats = getSequenceStats();
 
   return (
-    <div className={`app ${darkMode ? 'dark-mode' : ''}`} style={{ fontFamily: 'Inter, sans-serif' }}>
+    <div className="app dark-mode" style={{ fontFamily: 'Inter, sans-serif' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700;800&display=swap');
         
@@ -370,35 +366,6 @@ function App() {
           align-items: center;
         }
         
-        .toggle-switch {
-          position: relative;
-          width: 50px;
-          height: 26px;
-          background: #cbd5e1;
-          border-radius: 13px;
-          cursor: pointer;
-          transition: background 0.3s ease;
-        }
-        
-        .toggle-switch.active {
-          background: #00A389;
-        }
-        
-        .toggle-slider {
-          position: absolute;
-          top: 3px;
-          left: 3px;
-          width: 20px;
-          height: 20px;
-          background: white;
-          border-radius: 50%;
-          transition: transform 0.3s ease;
-        }
-        
-        .toggle-switch.active .toggle-slider {
-          transform: translateX(24px);
-        }
-        
         .success-toast {
           position: fixed;
           top: 2rem;
@@ -462,17 +429,6 @@ function App() {
               >
                 Help
               </button>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.875rem', color: darkMode ? '#94a3b8' : '#6B7280' }}>
-                  Dark Mode
-                </span>
-                <div 
-                  className={`toggle-switch ${darkMode ? 'active' : ''}`}
-                  onClick={() => setDarkMode(!darkMode)}
-                >
-                  <div className="toggle-slider"></div>
-                </div>
-              </div>
             </div>
           </div>
         </header>
@@ -640,7 +596,7 @@ function App() {
           <div className="tab-content">
             {activeTab === "overview" && result && <OverviewTab result={result} originalSequence={dna} />}
             {activeTab === "overview" && !result && (
-              <div style={{ padding: '3rem', textAlign: 'center', color: darkMode ? '#94a3b8' : '#6B7280' }}>
+              <div style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>
                 <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
                   Analyze a DNA sequence to view overview
                 </p>
@@ -669,7 +625,7 @@ function App() {
                     border: 'none', 
                     fontSize: '1.5rem', 
                     cursor: 'pointer',
-                    color: darkMode ? '#94a3b8' : '#6B7280'
+                    color: '#94a3b8'
                   }}
                 >
                   ×
@@ -695,7 +651,7 @@ function App() {
                   <li>Use "Load Sample" to quickly test with example sequences</li>
                   <li>Upload FASTA files for easy sequence input</li>
                   <li>Most tools work independently - no need to analyze first</li>
-                  <li>Dark Mode preference is saved in your session</li>
+                  <li>Dark Mode is enabled for comfortable viewing</li>
                   <li>Use AI explanations for detailed insights</li>
                 </ul>
                 

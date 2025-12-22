@@ -1,14 +1,19 @@
-// config.js - API Configuration
+// src/utils/config.js - AUTO-DETECT VERSION
 
-// BACKEND URL - ALWAYS use Render for deployed app
+// Automatically detect if running locally or deployed
+const isDevelopment = 
+  window.location.hostname === 'localhost' || 
+  window.location.hostname === '127.0.0.1';
+
+const LOCAL_URL = "http://localhost:5000";
 const RENDER_URL = "https://dna-analyzer-1-ipxr.onrender.com";
 
-// For local development, you can change this manually
-export const API_BASE_URL = RENDER_URL;
+// Use local backend when on localhost, Render when deployed
+export const API_BASE_URL = isDevelopment ? LOCAL_URL : RENDER_URL;
 
 console.log("🔗 API Base URL:", API_BASE_URL);
+console.log("📍 Environment:", isDevelopment ? "Local Development" : "Production");
 
-// ENDPOINTS - All must have /api/ prefix
 export const API_ENDPOINTS = {
   health: `${API_BASE_URL}/api/health`,
   info: `${API_BASE_URL}/api/info`,
@@ -19,7 +24,6 @@ export const API_ENDPOINTS = {
   explain: `${API_BASE_URL}/api/explain`,
 };
 
-// REQUEST CONFIG
 export const API_CONFIG = {
   timeout: 60000,
   headers: {

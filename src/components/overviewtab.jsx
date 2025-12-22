@@ -1,48 +1,45 @@
 import { useState } from 'react';
-// ✅ FIXED: Removed performAlignment import (not needed here)
-import { getAIExplanation } from '../utils/apiUtils';
+
+const API_URL = 'http://localhost:5000';
 
 export default function OverviewTab({ result, originalSequence }) {
+  const [showCodonTable, setShowCodonTable] = useState(false);
+  const [showSixFrame, setShowSixFrame] = useState(false);
+  const [showRestrictionSites, setShowRestrictionSites] = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
-  const [error, setError] = useState('');
 
-  const handleExplainWithAI = async () => {
+  const explainWithAI = async () => {
     if (!result) return;
     
     setLoadingAI(true);
-    setError('');
     
     try {
-      console.log('📤 Sending AI request for Overview Tab...'); // Debug log
-      
-      const response = await getAIExplanation('DNA Sequence Analyzer', {
-        length: result.length,
-        gc_content: result.gc,
-        at_content: result.at,
-        tm: result.tm,
-        molecular_weight: result.molecularWeight,
-        nucleotides: result.nucleotides,
-        orfs_found: result.nORFs,
-        longest_orf: result.longestORF,
-        restriction_sites_count: result.restrictionSites?.length || 0
+      const response = await fetch(`${API_URL}/api/explain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tool: 'DNA Sequence Analyzer',
+          data: {
+            length: result.length,
+            gc_content: result.gc,
+            at_content: result.at,
+            tm: result.tm,
+            molecular_weight: result.molecularWeight,
+            nucleotides: result.nucleotides,
+            orfs_found: result.nORFs,
+            longest_orf: result.longestORF,
+            restriction_sites_count: result.restrictionSites?.length || 0
+          }
+        })
       });
+
+      const data = await response.json();
+      setAiExplanation(data.explanation || 'No explanation available');
       
-      console.log('📥 AI Response:', response); // Debug log
-      
-      if (response.success) {
-        const explanation = response.data.explanation || 'No explanation available';
-        console.log('✅ AI Explanation received:', explanation.substring(0, 100) + '...'); // Debug
-        setAiExplanation(explanation);
-      } else {
-        console.error('❌ AI Error:', response.error);
-        setError(response.error || 'Failed to generate AI explanation');
-        setAiExplanation(`Error: ${response.error}`);
-      }
     } catch (err) {
-      console.error('💥 Exception in handleExplainWithAI:', err);
-      setError(err.message || 'Unexpected error occurred');
-      setAiExplanation(`Error: ${err.message || 'Unexpected error occurred'}`);
+      console.error('AI Error:', err);
+      setAiExplanation('Error generating AI explanation. Please check backend connection.');
     } finally {
       setLoadingAI(false);
     }
@@ -91,7 +88,7 @@ export default function OverviewTab({ result, originalSequence }) {
       report += `Type: ${result.longestORF.type}\n\n`;
     }
 
-    if (aiExplanation && !aiExplanation.startsWith('Error:')) {
+    if (aiExplanation && aiExplanation !== 'Error generating AI explanation. Please check backend connection.') {
       report += 'AI ANALYSIS\n';
       report += '-'.repeat(80) + '\n';
       report += aiExplanation + '\n\n';
@@ -106,21 +103,6 @@ export default function OverviewTab({ result, originalSequence }) {
 
   return (
     <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto' }}>
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        .loading-spinner {
-          display: inline-block;
-          width: 16px;
-          height: 16px;
-          border: 2px solid #ffffff40;
-          border-top-color: #ffffff;
-          border-radius: 50%;
-          animation: spin 0.6s linear infinite;
-        }
-      `}</style>
-
       {/* Action Buttons */}
       <div style={{ display: 'flex', gap: '1rem', marginBottom: '2rem' }}>
         <button 
@@ -134,8 +116,7 @@ export default function OverviewTab({ result, originalSequence }) {
             color: '#fff',
             fontSize: '1rem',
             fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.3s ease'
+            cursor: 'pointer'
           }}
         >
           📄 Download Report (TXT)
@@ -144,7 +125,7 @@ export default function OverviewTab({ result, originalSequence }) {
 
       {/* AI Explanation Button */}
       <button 
-        onClick={handleExplainWithAI}
+        onClick={explainWithAI}
         disabled={loadingAI}
         style={{
           width: '100%',
@@ -156,41 +137,13 @@ export default function OverviewTab({ result, originalSequence }) {
           fontSize: '1rem',
           fontWeight: 600,
           cursor: loadingAI ? 'not-allowed' : 'pointer',
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.5rem',
-          transition: 'all 0.3s ease'
+          marginBottom: '1.5rem'
         }}
       >
-        {loadingAI && <span className="loading-spinner"></span>}
-        {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Analysis'}
+        {loadingAI ? '🔄 Generating AI Analysis...' : '🤖 Get AI Analysis'}
       </button>
 
-      {/* Error Display */}
-      {error && !aiExplanation && (
-        <div style={{
-          background: '#FEE2E2',
-          border: '2px solid #EF4444',
-          borderRadius: '12px',
-          padding: '1.5rem',
-          marginBottom: '2rem',
-          color: '#991B1B'
-        }}>
-          <strong>❌ Error:</strong> {error}
-          <div style={{ marginTop: '0.5rem', fontSize: '0.9rem' }}>
-            Please check:
-            <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
-              <li>Backend is running and accessible</li>
-              <li>CORS is enabled on backend</li>
-              <li>GROQ_API_KEY is set in backend environment</li>
-            </ul>
-          </div>
-        </div>
-      )}
-
-      {/* AI Explanation Display */}
+      {/* AI Explanation Display - FIXED VISIBILITY */}
       {aiExplanation && (
         <div style={{
           background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(124, 58, 237, 0.08))',
@@ -209,7 +162,7 @@ export default function OverviewTab({ result, originalSequence }) {
             alignItems: 'center',
             gap: '0.5rem'
           }}>
-            🤖 AI Analysis
+            🧠 AI Analysis
           </h3>
           <div style={{ 
             color: '#1F2937',
@@ -220,9 +173,7 @@ export default function OverviewTab({ result, originalSequence }) {
             whiteSpace: 'pre-wrap',
             fontSize: '0.95rem',
             border: '1px solid rgba(139, 92, 246, 0.2)',
-            fontFamily: 'system-ui, -apple-system, sans-serif',
-            maxHeight: '600px',
-            overflowY: 'auto'
+            fontFamily: 'system-ui, -apple-system, sans-serif'
           }}>
             {aiExplanation}
           </div>
@@ -273,7 +224,7 @@ export default function OverviewTab({ result, originalSequence }) {
         </div>
       </div>
 
-      {/* Reverse Complement */}
+      {/* Reverse Complement - FIXED TEXT WRAPPING */}
       <div style={{ 
         background: '#fff', 
         borderRadius: '12px', 
@@ -355,7 +306,7 @@ export default function OverviewTab({ result, originalSequence }) {
         </div>
       )}
 
-      {/* All ORFs */}
+      {/* All ORFs - IMPROVED LAYOUT */}
       {result.allORFs && result.allORFs.length > 0 && (
         <div style={{ 
           background: '#fff', 

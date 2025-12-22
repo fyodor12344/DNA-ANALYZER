@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { findCRISPRSites, getAIExplanation, validateSequence } from '../apiUtils';
+import { findCRISPRSites, getAIExplanation, validateSequence } from "../utils/apiUtils";
 
 export default function CRISPRFinder() {
   const [sequence, setSequence] = useState('');
