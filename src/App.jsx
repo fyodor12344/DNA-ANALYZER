@@ -3,11 +3,11 @@ import { summary } from "./utils/dnaUtils";
 import "./App.css";
 
 // Import components
-import OverviewTab from './components/OverviewTab.jsx';
-import MutationFinder from './components/MutationFinder.jsx';
-import SequenceAlignment from './components/SequenceAlignment.jsx';
-import CRISPRFinder from './components/CRISPRFinder.jsx';
-import PrimerDesigner from './components/PrimerDesigner.jsx';
+import OverviewTab from './components/OverviewTab';
+import MutationFinder from './components/MutationFinder';
+import SequenceAlignment from './components/SequenceAlignment';
+import CRISPRFinder from './components/CRISPRFinder';
+import PrimerDesigner from './components/PrimerDesigner';
 
 // Loading Spinner Component
 const LoadingSpinner = () => (
