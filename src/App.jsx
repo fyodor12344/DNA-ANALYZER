@@ -75,7 +75,7 @@ function App() {
 
     try {
       setTimeout(() => {
-        const res = summary(dna);
+       const res = summary(cleaned);
         setResult(res);
         setActiveTab("overview");
         setLoading(false);
@@ -115,18 +115,19 @@ function App() {
     setActiveTab("overview");
   };
 
-  const copySequence = () => {
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(dna).then(() => {
-        const btn = event.target;
-        const originalText = btn.textContent;
-        btn.textContent = 'Copied!';
-        setTimeout(() => {
-          btn.textContent = originalText;
-        }, 2000);
-      });
-    }
-  };
+  const copySequence = (e) => {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(dna).then(() => {
+      const btn = e.target;   // ✅ now works
+      const originalText = btn.textContent;
+      btn.textContent = "Copied!";
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 2000);
+    });
+  }
+};
+
 
   const downloadSequence = () => {
     const blob = new Blob([dna], { type: 'text/plain' });
