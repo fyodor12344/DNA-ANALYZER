@@ -115,14 +115,14 @@ export default function MutationFinder() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for AI
 
-      const response = await fetch(`${API_URL}/api/ai-explain`, {
+      const response = await fetch(`${API_URL}/api/explain`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          analysisType: 'Mutation Finder',
-          results: mutations
+          tool: 'Mutation Finder',
+          data: mutations
         }),
         signal: controller.signal
       });
