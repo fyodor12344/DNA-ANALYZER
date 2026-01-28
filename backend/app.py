@@ -384,7 +384,7 @@ Be thorough, scientific, but accessible to both students and researchers."""
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'llama-3.1-70b-versatile',  # Current supported model
+                'model': 'llama-3.3-70b-versatile',  # Current supported model
                 'messages': [
                     {
                         'role': 'system',
@@ -427,7 +427,7 @@ Be thorough, scientific, but accessible to both students and researchers."""
             'explanation': explanation,
             'tool': tool,
             'sequence_length': len(sequence),
-            'ai_model': 'llama-3.1-70b-versatile',
+            'ai_model': 'llama-3.3-70b-versatile',
             'status': 'success'
         }), 200
         
@@ -487,7 +487,7 @@ def explain_with_ai():
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'llama-3.1-70b-versatile',  # Current supported model
+                'model': 'llama-3.3-70b-versatile',  # Current supported model
                 'messages': [
                     {
                         'role': 'system',
@@ -712,7 +712,7 @@ def health():
         'version': '1.0.0',
         'ai_enabled': bool(GROQ_API_KEY),
         'ai_config': {
-            'model': 'llama-3.1-70b-versatile',  # Current supported model
+            'model': 'llama-3.3-70b-versatile',  # Current supported model
             'max_tokens': 1500,
             'provider': 'Groq'
         },
@@ -807,7 +807,7 @@ if __name__ == '__main__':
     print(f"  - Allowed Origins: https://dna-analyzer-taupe.vercel.app, http://localhost:3000")
     print(f"  - Methods: GET, POST, OPTIONS")
     print(f"  - Preflight Handling: Enabled ✓")
-    print(f"AI Explanations: {'ENABLED ✓ (Groq - llama-3.1-70b-versatile)' if GROQ_API_KEY else 'DISABLED ✗ (No API key)'}")
+    print(f"AI Explanations: {'ENABLED ✓ (Groq - llama-3.3-70b-versatile)' if GROQ_API_KEY else 'DISABLED ✗ (No API key)'}")
     print(f"Rate Limit: {MAX_REQUESTS_PER_WINDOW} requests per minute")
     print("=" * 70)
     print("\nAvailable Endpoints:")
