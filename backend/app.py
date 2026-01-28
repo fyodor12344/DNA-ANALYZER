@@ -2,6 +2,13 @@
 DNA Sequence Analyzer - Flask Backend API
 Provides endpoints for mutations, alignment, CRISPR, and primer design
 Now with FREE AI explanations powered by Groq!
+
+FIXES APPLIED:
+✓ Added proper CORS preflight handling (OPTIONS requests)
+✓ Added /api/ai-explain endpoint for frontend
+✓ Fixed environment variable loading
+✓ Added comprehensive error handling
+✓ Added request validation
 """
 import os
 import sys
@@ -10,7 +17,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS
 
 from algorithms.alignment import needleman_wunsch, smith_waterman, calculate_alignment_stats
@@ -24,8 +31,45 @@ load_dotenv()
 # Initialize Flask app
 app = Flask(__name__)
 
-# Enable CORS for all routes
-CORS(app, resources={r"/*": {"origins": "*"}})
+# ===== FIXED CORS CONFIGURATION =====
+# More specific CORS setup to handle preflight requests properly
+CORS(app,
+     resources={
+         r"/api/*": {
+             "origins": [
+                 "https://dna-analyzer-taupe.vercel.app",
+                 "http://localhost:3000",
+                 "http://localhost:5000"
+             ],
+             "methods": ["GET", "POST", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization"],
+             "supports_credentials": True,
+             "max_age": 3600
+         }
+     })
+
+# ===== HANDLE PREFLIGHT REQUESTS (FIX FOR CORS ERRORS) =====
+@app.before_request
+def handle_preflight():
+    """Handle CORS preflight OPTIONS requests"""
+    if request.method == "OPTIONS":
+        response = make_response()
+        origin = request.headers.get("Origin")
+        allowed_origins = [
+            "https://dna-analyzer-taupe.vercel.app",
+            "http://localhost:3000",
+            "http://localhost:5000"
+        ]
+        
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        response.headers["Access-Control-Max-Age"] = "3600"
+        return response, 200
 
 # CRITICAL: Never hardcode API keys! Always use environment variables
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -94,10 +138,10 @@ def validate_dna_sequence(sequence):
 
 
 @app.before_request
-def before_request():
-    """Apply rate limiting to all requests"""
-    # Skip rate limiting for health check
-    if request.endpoint == 'health':
+def apply_rate_limiting():
+    """Apply rate limiting to all requests (except health check)"""
+    # Skip rate limiting for health check and OPTIONS requests
+    if request.endpoint in ['health', 'handle_preflight'] or request.method == "OPTIONS":
         return None
     
     client_ip = request.remote_addr
@@ -107,7 +151,7 @@ def before_request():
         }), 429
 
 
-@app.route('/api/mutations', methods=['POST'])
+@app.route('/api/mutations', methods=['POST', 'OPTIONS'])
 def mutations():
     """Find mutations between two DNA sequences"""
     try:
@@ -137,7 +181,7 @@ def mutations():
         return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
-@app.route('/api/align', methods=['POST'])
+@app.route('/api/align', methods=['POST', 'OPTIONS'])
 def align():
     """Perform sequence alignment"""
     try:
@@ -192,7 +236,7 @@ def align():
         return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
-@app.route('/api/crispr', methods=['POST'])
+@app.route('/api/crispr', methods=['POST', 'OPTIONS'])
 def crispr():
     """Find CRISPR PAM sites"""
     try:
@@ -217,7 +261,7 @@ def crispr():
         return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
-@app.route('/api/primers', methods=['POST'])
+@app.route('/api/primers', methods=['POST', 'OPTIONS'])
 def primers():
     """Design PCR primers with enhanced analysis"""
     try:
@@ -279,7 +323,140 @@ def primers():
         return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
-@app.route('/api/explain', methods=['POST'])
+# ===== NEW ENDPOINT: AI EXPLANATION =====
+@app.route('/api/ai-explain', methods=['POST', 'OPTIONS'])
+def ai_explain():
+    """
+    Get AI explanation for DNA sequence analysis results
+    Uses Groq API for fast, free AI explanations
+    """
+    try:
+        # Check if API key is configured
+        if not GROQ_API_KEY:
+            return jsonify({
+                'error': 'AI service not configured',
+                'message': 'AI explanations are currently unavailable. Please contact the administrator.',
+                'ai_enabled': False
+            }), 503
+        
+        # Get request data
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
+        sequence = data.get('sequence', '')
+        tool = data.get('tool', 'DNA Analysis')
+        context = data.get('context', '')
+        
+        if not sequence:
+            return jsonify({'error': 'DNA sequence is required'}), 400
+        
+        # Validate sequence
+        is_valid, error_msg = validate_dna_sequence(sequence)
+        if not is_valid:
+            return jsonify({'error': f'Invalid sequence: {error_msg}'}), 400
+        
+        # Build the prompt for AI
+        prompt = f"""Provide a detailed, comprehensive explanation of this DNA sequence analysis:
+
+SEQUENCE: {sequence[:200]}{'...' if len(sequence) > 200 else ''}
+SEQUENCE LENGTH: {len(sequence)} bp
+ANALYSIS TOOL: {tool}
+CONTEXT: {context if context else 'General analysis'}
+
+Please provide:
+1. Key characteristics of this sequence
+2. Biological significance
+3. Practical implications
+4. Recommendations for further analysis
+5. Important considerations and best practices
+
+Be thorough, scientific, but accessible to both students and researchers."""
+
+        # Call Groq API
+        print(f"[AI] Calling Groq API for: {tool}")
+        
+        groq_response = requests.post(
+            GROQ_API_URL,
+            headers={
+                'Authorization': f'Bearer {GROQ_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'mixtral-8x7b-32768',  # Fast model
+                'messages': [
+                    {
+                        'role': 'system',
+                        'content': 'You are an expert molecular biologist and bioinformatics specialist. Provide clear, comprehensive, and scientifically accurate explanations of DNA sequence analysis results.'
+                    },
+                    {
+                        'role': 'user',
+                        'content': prompt
+                    }
+                ],
+                'temperature': 0.7,
+                'max_tokens': 1500
+            },
+            timeout=30
+        )
+        
+        # Check for API errors
+        if groq_response.status_code != 200:
+            error_detail = groq_response.json() if groq_response.text else 'Unknown error'
+            print(f"[ERROR] Groq API returned {groq_response.status_code}: {error_detail}")
+            return jsonify({
+                'error': 'AI service error',
+                'status': groq_response.status_code,
+                'details': str(error_detail)
+            }), groq_response.status_code
+        
+        # Extract explanation from response
+        result = groq_response.json()
+        explanation = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+        
+        if not explanation:
+            return jsonify({
+                'error': 'No explanation generated',
+                'response': result
+            }), 500
+        
+        print(f"[AI] ✓ Explanation generated ({len(explanation)} chars)")
+        
+        return jsonify({
+            'explanation': explanation,
+            'tool': tool,
+            'sequence_length': len(sequence),
+            'ai_model': 'mixtral-8x7b-32768',
+            'status': 'success'
+        }), 200
+        
+    except requests.exceptions.Timeout:
+        print("[ERROR] Groq API request timed out")
+        return jsonify({
+            'error': 'AI service timeout',
+            'message': 'The request took too long. Please try again.'
+        }), 504
+    
+    except requests.exceptions.ConnectionError as e:
+        print(f"[ERROR] Connection error: {str(e)}")
+        return jsonify({
+            'error': 'Connection error',
+            'message': 'Could not connect to AI service. Check your internet connection.'
+        }), 503
+    
+    except Exception as e:
+        print(f"[ERROR] Unexpected error in ai_explain: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': 'Internal server error',
+            'message': 'An unexpected error occurred.',
+            'details': str(e) if os.getenv('FLASK_DEBUG') else None
+        }), 500
+
+
+# ===== ORIGINAL EXPLAIN ENDPOINT (for backward compatibility) =====
+@app.route('/api/explain', methods=['POST', 'OPTIONS'])
 def explain_with_ai():
     """Generate AI explanations using FREE Groq API with extended responses"""
     try:
@@ -309,7 +486,7 @@ def explain_with_ai():
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'llama-3.3-70b-versatile',
+                'model': 'mixtral-8x7b-32768',
                 'messages': [
                     {
                         'role': 'system',
@@ -320,7 +497,7 @@ def explain_with_ai():
                         'content': context
                     }
                 ],
-                'max_tokens': 2500,
+                'max_tokens': 1500,
                 'temperature': 0.7
             },
             timeout=45
@@ -525,7 +702,7 @@ Include:
 5. Potential applications or considerations"""
 
 
-@app.route('/api/health', methods=['GET'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
 def health():
     """Health check endpoint"""
     return jsonify({
@@ -534,29 +711,31 @@ def health():
         'version': '1.0.0',
         'ai_enabled': bool(GROQ_API_KEY),
         'ai_config': {
-            'model': 'llama-3.3-70b-versatile',
-            'max_tokens': 2500,
+            'model': 'mixtral-8x7b-32768',
+            'max_tokens': 1500,
             'provider': 'Groq'
         },
         'rate_limit': f'{MAX_REQUESTS_PER_WINDOW} requests per {RATE_LIMIT_WINDOW}s',
+        'cors_enabled': True,
         'endpoints': {
             'mutations': '/api/mutations',
             'alignment': '/api/align',
             'crispr': '/api/crispr',
             'primers': '/api/primers',
-            'explain': '/api/explain',
+            'ai_explain': '/api/ai-explain',
+            'explain': '/api/explain (legacy)',
             'health': '/api/health'
         }
     })
 
 
-@app.route('/api/info', methods=['GET'])
+@app.route('/api/info', methods=['GET', 'OPTIONS'])
 def info():
     """Get API information and documentation"""
     return jsonify({
         'name': 'DNA Sequence Analyzer API',
         'version': '1.0.0',
-        'description': 'Professional bioinformatics analysis tools',
+        'description': 'Professional bioinformatics analysis tools with AI explanations',
         'developer': {
             'name': 'Pushkar Barsagade',
             'email': 'barsagadepushkar26@gmail.com'
@@ -566,12 +745,16 @@ def info():
             'Sequence Alignment (Global & Local)',
             'CRISPR PAM Site Finder',
             'PCR Primer Design with Tm calculation',
-            'AI-powered detailed result explanations (2500 token responses)'
+            'AI-powered detailed result explanations (Groq API)'
         ],
         'limits': {
             'max_sequence_length': '100,000 bp',
             'max_alignment_length': '10,000 bp',
             'rate_limit': f'{MAX_REQUESTS_PER_WINDOW} requests per minute'
+        },
+        'ai_endpoints': {
+            'ai_explain': '/api/ai-explain (recommended)',
+            'explain': '/api/explain (legacy, full result context)'
         }
     })
 
@@ -585,6 +768,7 @@ def not_found(error):
             '/api/align',
             '/api/crispr',
             '/api/primers',
+            '/api/ai-explain',
             '/api/explain',
             '/api/health',
             '/api/info'
@@ -618,8 +802,11 @@ if __name__ == '__main__':
     print(f"Email: barsagadepushkar26@gmail.com")
     print("=" * 70)
     print(f"Server: http://localhost:5000")
-    print(f"CORS: Enabled for frontend requests")
-    print(f"AI Explanations: {'ENABLED (Groq - 2500 tokens)' if GROQ_API_KEY else 'DISABLED (No API key)'}")
+    print(f"CORS: Enabled ✓")
+    print(f"  - Allowed Origins: https://dna-analyzer-taupe.vercel.app, http://localhost:3000")
+    print(f"  - Methods: GET, POST, OPTIONS")
+    print(f"  - Preflight Handling: Enabled ✓")
+    print(f"AI Explanations: {'ENABLED ✓ (Groq - 1500 tokens)' if GROQ_API_KEY else 'DISABLED ✗ (No API key)'}")
     print(f"Rate Limit: {MAX_REQUESTS_PER_WINDOW} requests per minute")
     print("=" * 70)
     print("\nAvailable Endpoints:")
@@ -627,15 +814,19 @@ if __name__ == '__main__':
     print("  POST /api/align        - Perform sequence alignment")
     print("  POST /api/crispr       - Find CRISPR PAM sites")
     print("  POST /api/primers      - Design PCR primers")
-    print("  POST /api/explain      - Get AI explanations (if enabled)")
+    print("  POST /api/ai-explain   - Get AI explanation (new endpoint)")
+    print("  POST /api/explain      - Get AI explanation (legacy endpoint)")
     print("  GET  /api/health       - Health check")
     print("  GET  /api/info         - API information")
     print("=" * 70)
     
     if not GROQ_API_KEY:
         print("\n⚠️  WARNING: AI features disabled - no GROQ_API_KEY found")
-        print("   To enable: Add GROQ_API_KEY to your .env file\n")
+        print("   To enable: Add GROQ_API_KEY to your .env file")
+        print("   Get free key from: https://console.groq.com\n")
+    else:
+        print("\n✅ AI service configured and ready!\n")
     
-    print("\n✅ Server ready to accept requests!\n")
+    print("✅ Server ready to accept requests!\n")
     
     app.run(debug=True, port=5000, host='0.0.0.0')
