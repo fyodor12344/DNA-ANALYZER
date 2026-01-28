@@ -110,6 +110,7 @@ export default function MutationFinder() {
     
     try {
       console.log('📤 Sending AI explanation request...');
+      console.log('Payload:', JSON.stringify({ analysisType: 'Mutation Finder', results: mutations }));
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for AI
@@ -120,8 +121,8 @@ export default function MutationFinder() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          type: 'Mutation Finder',
-          data: mutations
+          analysisType: 'Mutation Finder',
+          results: mutations
         }),
         signal: controller.signal
       });
@@ -131,17 +132,23 @@ export default function MutationFinder() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
+        console.error('❌ Error response:', errorData);
         throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
       console.log('📥 AI Response:', data);
 
-      if (data.success) {
-        const explanation = data.data?.explanation || data.explanation || 'No explanation available';
-        setAiExplanation(explanation);
+      // Handle different response formats
+      if (data.success && data.explanation) {
+        setAiExplanation(data.explanation);
+      } else if (data.explanation) {
+        setAiExplanation(data.explanation);
+      } else if (data.data?.explanation) {
+        setAiExplanation(data.data.explanation);
       } else {
-        const errorMsg = data.error || 'Failed to generate explanation';
+        const errorMsg = data.error || 'No explanation received from AI';
+        console.error('❌ No explanation in response:', data);
         setError(errorMsg);
       }
     } catch (err) {
