@@ -10,6 +10,146 @@ const SequenceAlignment = () => {
   const [error, setError] = useState('');
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
+  const [biologicalInterpretation, setBiologicalInterpretation] = useState(null);
+
+  // Calculate biological interpretation
+  const generateBiologicalInterpretation = (alignmentData) => {
+    const align1 = alignmentData.alignment1;
+    const align2 = alignmentData.alignment2;
+    
+    // Find conserved regions (continuous matches >= 10 bp)
+    const conservedRegions = [];
+    let currentConserved = { start: null, length: 0 };
+    
+    for (let i = 0; i < align1.length; i++) {
+      if (align1[i] === align2[i] && align1[i] !== '-') {
+        if (currentConserved.start === null) {
+          currentConserved.start = i;
+          currentConserved.length = 1;
+        } else {
+          currentConserved.length++;
+        }
+      } else {
+        if (currentConserved.length >= 10) {
+          conservedRegions.push({ ...currentConserved });
+        }
+        currentConserved = { start: null, length: 0 };
+      }
+    }
+    if (currentConserved.length >= 10) {
+      conservedRegions.push({ ...currentConserved });
+    }
+
+    // Find variable regions (continuous mismatches/gaps >= 5 bp)
+    const variableRegions = [];
+    let currentVariable = { start: null, length: 0, type: '' };
+    
+    for (let i = 0; i < align1.length; i++) {
+      if (align1[i] !== align2[i]) {
+        if (currentVariable.start === null) {
+          currentVariable.start = i;
+          currentVariable.length = 1;
+          currentVariable.type = (align1[i] === '-' || align2[i] === '-') ? 'gap' : 'substitution';
+        } else {
+          currentVariable.length++;
+        }
+      } else {
+        if (currentVariable.length >= 5) {
+          variableRegions.push({ ...currentVariable });
+        }
+        currentVariable = { start: null, length: 0, type: '' };
+      }
+    }
+    if (currentVariable.length >= 5) {
+      variableRegions.push({ ...currentVariable });
+    }
+
+    // Calculate confidence level
+    const similarity = parseFloat(alignmentData.similarity_percentage);
+    const gapFrequency = (alignmentData.gaps / align1.length) * 100;
+    
+    let confidence;
+    let confidenceColor;
+    let confidenceReason;
+    
+    if (similarity >= 90 && gapFrequency < 5) {
+      confidence = 'High';
+      confidenceColor = '#10B981';
+      confidenceReason = 'Excellent sequence similarity with minimal gaps';
+    } else if (similarity >= 70 && gapFrequency < 15) {
+      confidence = 'Moderate';
+      confidenceColor = '#F59E0B';
+      confidenceReason = 'Good sequence similarity with acceptable gap frequency';
+    } else {
+      confidence = 'Low';
+      confidenceColor = '#EF4444';
+      confidenceReason = 'Low similarity or high gap frequency may indicate distant relationship';
+    }
+
+    // Generate biological insights
+    const insights = [];
+    
+    if (conservedRegions.length > 0) {
+      insights.push({
+        type: 'conserved',
+        icon: '🧬',
+        title: 'Conserved Regions Detected',
+        description: `${conservedRegions.length} conserved region(s) found, suggesting functionally important sequences that are preserved across variations.`,
+        regions: conservedRegions
+      });
+    }
+
+    if (variableRegions.length > 0) {
+      const gapRegions = variableRegions.filter(r => r.type === 'gap');
+      const subRegions = variableRegions.filter(r => r.type === 'substitution');
+      
+      if (gapRegions.length > 0) {
+        insights.push({
+          type: 'gaps',
+          icon: '📍',
+          title: 'Insertion/Deletion Events',
+          description: `${gapRegions.length} gap region(s) detected, possibly indicating insertion/deletion events that may affect protein length or structure.`,
+          regions: gapRegions
+        });
+      }
+      
+      if (subRegions.length > 0) {
+        insights.push({
+          type: 'substitutions',
+          icon: '🔄',
+          title: 'Variable Regions',
+          description: `${subRegions.length} substitution region(s) found, representing sequence divergence that may result from mutations or evolutionary changes.`,
+          regions: subRegions
+        });
+      }
+    }
+
+    if (similarity >= 95) {
+      insights.push({
+        type: 'similarity',
+        icon: '✨',
+        title: 'High Sequence Identity',
+        description: 'These sequences are highly similar, suggesting they may be from closely related organisms, same gene family, or recent evolutionary divergence.'
+      });
+    } else if (similarity < 50) {
+      insights.push({
+        type: 'divergence',
+        icon: '⚠️',
+        title: 'Significant Sequence Divergence',
+        description: 'Low similarity indicates these sequences may be distantly related or from different functional domains. Consider validating alignment parameters.'
+      });
+    }
+
+    return {
+      confidence,
+      confidenceColor,
+      confidenceReason,
+      conservedRegions,
+      variableRegions,
+      insights,
+      gapFrequency: gapFrequency.toFixed(2)
+    };
+  };
 
   const handlePerformAlignment = async () => {
     if (!sequence1 || !sequence2) {
@@ -17,7 +157,6 @@ const SequenceAlignment = () => {
       return;
     }
 
-    // Validate sequences
     const validation1 = validateSequence(sequence1);
     const validation2 = validateSequence(sequence2);
 
@@ -35,6 +174,7 @@ const SequenceAlignment = () => {
     setError('');
     setAlignment(null);
     setAiExplanation('');
+    setBiologicalInterpretation(null);
 
     const response = await performAlignment(validation1.cleaned, validation2.cleaned, algorithm);
 
@@ -42,6 +182,8 @@ const SequenceAlignment = () => {
 
     if (response.success) {
       setAlignment(response.data);
+      const interpretation = generateBiologicalInterpretation(response.data);
+      setBiologicalInterpretation(interpretation);
     } else {
       setError(response.error);
     }
@@ -63,8 +205,83 @@ const SequenceAlignment = () => {
     }
   };
 
+  // Export to FASTA format
+  const exportFASTA = () => {
+    if (!alignment) return;
+
+    const fastaContent = `>Sequence1_aligned
+${alignment.alignment1}
+>Sequence2_aligned
+${alignment.alignment2}
+`;
+
+    const blob = new Blob([fastaContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'alignment.fasta';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Export alignment report
+  const exportReport = () => {
+    if (!alignment || !biologicalInterpretation) return;
+
+    const reportContent = `SEQUENCE ALIGNMENT REPORT
+${'='.repeat(60)}
+
+Algorithm: ${alignment.algorithm}
+Alignment Score: ${alignment.score}
+Similarity: ${alignment.similarity_percentage}%
+
+Statistics:
+- Matches: ${alignment.matches}
+- Mismatches: ${alignment.mismatches}
+- Gaps: ${alignment.gaps}
+- Gap Frequency: ${biologicalInterpretation.gapFrequency}%
+
+Confidence Level: ${biologicalInterpretation.confidence}
+Reason: ${biologicalInterpretation.confidenceReason}
+
+${'='.repeat(60)}
+BIOLOGICAL INTERPRETATION
+${'='.repeat(60)}
+
+${biologicalInterpretation.insights.map(insight => `
+${insight.icon} ${insight.title}
+${insight.description}
+${insight.regions ? `Found at positions: ${insight.regions.map(r => `${r.start}-${r.start + r.length}`).join(', ')}` : ''}
+`).join('\n')}
+
+${'='.repeat(60)}
+ALIGNMENT VISUALIZATION
+${'='.repeat(60)}
+
+Seq1: ${alignment.alignment1}
+      ${alignment.alignment1.split('').map((c, i) => c === alignment.alignment2[i] && c !== '-' ? '|' : ' ').join('')}
+Seq2: ${alignment.alignment2}
+
+${'='.repeat(60)}
+Generated: ${new Date().toLocaleString()}
+${'='.repeat(60)}
+`;
+
+    const blob = new Blob([reportContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'alignment_report.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   const renderAlignment = () => {
-    if (!alignment) return null;
+    if (!alignment || !biologicalInterpretation) return null;
 
     const align1 = alignment.alignment1;
     const align2 = alignment.alignment2;
@@ -88,52 +305,96 @@ const SequenceAlignment = () => {
         borderRadius: '8px',
         overflowX: 'auto'
       }}>
-        {chunks.map((chunk, idx) => (
-          <div key={idx} style={{ marginBottom: '1.5rem' }}>
-            <div style={{ color: '#6B7280', fontSize: '0.8rem', marginBottom: '0.5rem', fontFamily: 'Inter, sans-serif' }}>
-              Position {chunk.start + 1} - {Math.min(chunk.start + chunkSize, align1.length)}
-            </div>
-            
-            <div style={{ marginBottom: '0.25rem' }}>
-              <span style={{ color: '#3B82F6', fontWeight: 600 }}>Seq1: </span>
-              {chunk.seq1.split('').map((char, i) => (
-                <span key={i} style={{
-                  background: char === '-' ? '#FEE2E2' : 
-                             char === chunk.seq2[i] ? '#D1FAE5' : '#FEF3C7',
-                  padding: '2px 1px',
-                  color: char === '-' ? '#991B1B' :
-                         char === chunk.seq2[i] ? '#065F46' : '#92400E'
-                }}>
-                  {char}
-                </span>
-              ))}
-            </div>
+        {chunks.map((chunk, idx) => {
+          // Check if this chunk contains conserved or variable regions
+          const hasConserved = biologicalInterpretation.conservedRegions.some(
+            r => r.start < chunk.start + chunkSize && r.start + r.length > chunk.start
+          );
+          const hasVariable = biologicalInterpretation.variableRegions.some(
+            r => r.start < chunk.start + chunkSize && r.start + r.length > chunk.start
+          );
 
-            <div style={{ marginBottom: '0.25rem' }}>
-              <span style={{ color: '#6B7280', fontWeight: 600 }}>      </span>
-              {chunk.seq1.split('').map((char, i) => (
-                <span key={i}>
-                  {char === chunk.seq2[i] && char !== '-' ? '|' : ' '}
-                </span>
-              ))}
-            </div>
+          return (
+            <div key={idx} style={{ marginBottom: '1.5rem' }}>
+              <div style={{ 
+                color: '#6B7280', 
+                fontSize: '0.8rem', 
+                marginBottom: '0.5rem', 
+                fontFamily: 'Inter, sans-serif',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span>Position {chunk.start + 1} - {Math.min(chunk.start + chunkSize, align1.length)}</span>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  {hasConserved && (
+                    <span style={{
+                      background: '#D1FAE5',
+                      color: '#065F46',
+                      padding: '0.125rem 0.5rem',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600
+                    }}>
+                      Conserved
+                    </span>
+                  )}
+                  {hasVariable && (
+                    <span style={{
+                      background: '#FEF3C7',
+                      color: '#92400E',
+                      padding: '0.125rem 0.5rem',
+                      borderRadius: '4px',
+                      fontSize: '0.7rem',
+                      fontWeight: 600
+                    }}>
+                      Variable
+                    </span>
+                  )}
+                </div>
+              </div>
+              
+              <div style={{ marginBottom: '0.25rem' }}>
+                <span style={{ color: '#3B82F6', fontWeight: 600 }}>Seq1: </span>
+                {chunk.seq1.split('').map((char, i) => (
+                  <span key={i} style={{
+                    background: char === '-' ? '#FEE2E2' : 
+                               char === chunk.seq2[i] ? '#D1FAE5' : '#FEF3C7',
+                    padding: '2px 1px',
+                    color: char === '-' ? '#991B1B' :
+                           char === chunk.seq2[i] ? '#065F46' : '#92400E'
+                  }}>
+                    {char}
+                  </span>
+                ))}
+              </div>
 
-            <div>
-              <span style={{ color: '#8B5CF6', fontWeight: 600 }}>Seq2: </span>
-              {chunk.seq2.split('').map((char, i) => (
-                <span key={i} style={{
-                  background: char === '-' ? '#FEE2E2' : 
-                             char === chunk.seq1[i] ? '#D1FAE5' : '#FEF3C7',
-                  padding: '2px 1px',
-                  color: char === '-' ? '#991B1B' :
-                         char === chunk.seq1[i] ? '#065F46' : '#92400E'
-                }}>
-                  {char}
-                </span>
-              ))}
+              <div style={{ marginBottom: '0.25rem' }}>
+                <span style={{ color: '#6B7280', fontWeight: 600 }}>      </span>
+                {chunk.seq1.split('').map((char, i) => (
+                  <span key={i}>
+                    {char === chunk.seq2[i] && char !== '-' ? '|' : ' '}
+                  </span>
+                ))}
+              </div>
+
+              <div>
+                <span style={{ color: '#8B5CF6', fontWeight: 600 }}>Seq2: </span>
+                {chunk.seq2.split('').map((char, i) => (
+                  <span key={i} style={{
+                    background: char === '-' ? '#FEE2E2' : 
+                               char === chunk.seq1[i] ? '#D1FAE5' : '#FEF3C7',
+                    padding: '2px 1px',
+                    color: char === '-' ? '#991B1B' :
+                           char === chunk.seq1[i] ? '#065F46' : '#92400E'
+                  }}>
+                    {char}
+                  </span>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         <div style={{ 
           marginTop: '1.5rem', 
@@ -369,17 +630,65 @@ const SequenceAlignment = () => {
         </div>
       )}
 
-      {alignment && (
+      {alignment && biologicalInterpretation && (
         <div style={{
           background: '#fff',
           borderRadius: '12px',
           padding: '1.5rem',
           boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
         }}>
-          <h2 style={{ color: '#1F2937', marginBottom: '1.5rem', fontSize: '1.5rem', fontFamily: 'Montserrat, sans-serif' }}>
-            Alignment Results
-          </h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+            <h2 style={{ color: '#1F2937', margin: 0, fontSize: '1.5rem', fontFamily: 'Montserrat, sans-serif' }}>
+              Alignment Results
+            </h2>
+            
+            {/* Confidence Badge */}
+            <div style={{
+              background: `${biologicalInterpretation.confidenceColor}20`,
+              border: `2px solid ${biologicalInterpretation.confidenceColor}`,
+              borderRadius: '8px',
+              padding: '0.5rem 1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              <span style={{ fontSize: '1.2rem' }}>
+                {biologicalInterpretation.confidence === 'High' ? '🎯' : 
+                 biologicalInterpretation.confidence === 'Moderate' ? '⚖️' : '⚠️'}
+              </span>
+              <div>
+                <div style={{ 
+                  fontWeight: 700, 
+                  color: biologicalInterpretation.confidenceColor,
+                  fontSize: '0.9rem'
+                }}>
+                  {biologicalInterpretation.confidence} Confidence
+                </div>
+                <div style={{ 
+                  fontSize: '0.7rem', 
+                  color: '#6B7280',
+                  marginTop: '0.125rem'
+                }}>
+                  Alignment Quality
+                </div>
+              </div>
+            </div>
+          </div>
 
+          {/* Confidence Explanation */}
+          <div style={{
+            background: `${biologicalInterpretation.confidenceColor}10`,
+            border: `1px solid ${biologicalInterpretation.confidenceColor}40`,
+            borderRadius: '8px',
+            padding: '1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.9rem',
+            color: '#374151'
+          }}>
+            <strong>Confidence Assessment:</strong> {biologicalInterpretation.confidenceReason}
+          </div>
+
+          {/* Algorithm and Score Info */}
           <div style={{
             background: '#F0FDF4',
             border: '2px solid #10B981',
@@ -395,6 +704,7 @@ const SequenceAlignment = () => {
             </div>
           </div>
 
+          {/* Statistics Grid */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
@@ -439,7 +749,7 @@ const SequenceAlignment = () => {
                 {alignment.gaps}
               </div>
               <div style={{ color: '#6B7280', fontSize: '0.9rem', marginTop: '0.25rem' }}>
-                Gaps
+                Gaps ({biologicalInterpretation.gapFrequency}%)
               </div>
             </div>
 
@@ -458,6 +768,154 @@ const SequenceAlignment = () => {
             </div>
           </div>
 
+          {/* Biological Interpretation */}
+          <div style={{
+            background: 'linear-gradient(135deg, #EEF2FF, #E0E7FF)',
+            border: '2px solid #6366F1',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            marginBottom: '1.5rem'
+          }}>
+            <h3 style={{ 
+              color: '#4F46E5', 
+              marginBottom: '1rem', 
+              fontSize: '1.2rem', 
+              fontFamily: 'Montserrat, sans-serif',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}>
+              🔬 Biological Interpretation
+            </h3>
+
+            {biologicalInterpretation.insights.map((insight, idx) => (
+              <div key={idx} style={{
+                background: '#fff',
+                borderRadius: '8px',
+                padding: '1rem',
+                marginBottom: idx < biologicalInterpretation.insights.length - 1 ? '1rem' : 0,
+                border: '1px solid #C7D2FE'
+              }}>
+                <div style={{ 
+                  fontSize: '0.95rem', 
+                  fontWeight: 600, 
+                  color: '#4338CA',
+                  marginBottom: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <span>{insight.icon}</span>
+                  <span>{insight.title}</span>
+                </div>
+                <div style={{ 
+                  fontSize: '0.9rem', 
+                  color: '#4B5563',
+                  lineHeight: '1.6'
+                }}>
+                  {insight.description}
+                </div>
+                {insight.regions && insight.regions.length > 0 && (
+                  <div style={{
+                    marginTop: '0.75rem',
+                    fontSize: '0.8rem',
+                    color: '#6B7280',
+                    fontFamily: 'monospace',
+                    background: '#F9FAFB',
+                    padding: '0.5rem',
+                    borderRadius: '4px'
+                  }}>
+                    <strong>Locations:</strong> {insight.regions.slice(0, 5).map(r => 
+                      `${r.start + 1}-${r.start + r.length}`
+                    ).join(', ')}
+                    {insight.regions.length > 5 && ` +${insight.regions.length - 5} more`}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* BLAST Comparison Note */}
+          <div style={{
+            background: '#F0FDFA',
+            border: '1px solid #14B8A6',
+            borderRadius: '8px',
+            padding: '1rem',
+            marginBottom: '1.5rem',
+            fontSize: '0.85rem',
+            color: '#134E4A'
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
+              ℹ️ About This Analysis
+            </div>
+            <div style={{ lineHeight: '1.6' }}>
+              Results are conceptually comparable to BLAST pairwise alignment, but optimized 
+              for educational and mutation analysis purposes. This tool uses classic dynamic 
+              programming algorithms (Needleman-Wunsch and Smith-Waterman) to provide detailed 
+              sequence comparison suitable for learning bioinformatics concepts.
+            </div>
+          </div>
+
+          {/* Export Options */}
+          <div style={{
+            background: '#F8FAFC',
+            border: '1px solid #CBD5E1',
+            borderRadius: '8px',
+            padding: '1rem',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ 
+              fontWeight: 600, 
+              color: '#1E293B',
+              marginBottom: '0.75rem',
+              fontSize: '0.95rem'
+            }}>
+              📥 Export Options
+            </div>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={exportFASTA}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#fff',
+                  border: '2px solid #3B82F6',
+                  borderRadius: '6px',
+                  color: '#3B82F6',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: 'Inter, sans-serif'
+                }}
+                onMouseOver={(e) => e.target.style.background = '#EFF6FF'}
+                onMouseOut={(e) => e.target.style.background = '#fff'}
+              >
+                💾 Download FASTA
+              </button>
+              
+              <button
+                onClick={exportReport}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: '#fff',
+                  border: '2px solid #10B981',
+                  borderRadius: '6px',
+                  color: '#10B981',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: 'Inter, sans-serif'
+                }}
+                onMouseOver={(e) => e.target.style.background = '#ECFDF5'}
+                onMouseOut={(e) => e.target.style.background = '#fff'}
+              >
+                📄 Download Report (TXT)
+              </button>
+            </div>
+          </div>
+
+          {/* AI Interpretation Button */}
           <div style={{ marginBottom: '1.5rem' }}>
             <button 
               onClick={handleExplainWithAI}
@@ -481,10 +939,11 @@ const SequenceAlignment = () => {
               }}
             >
               {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : '🤖 Interpret with AI'}
+              {loadingAI ? 'Generating AI Analysis...' : '🤖 Get Advanced AI Interpretation'}
             </button>
           </div>
 
+          {/* AI Explanation Display */}
           {aiExplanation && (
             <div style={{
               background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))',
@@ -519,8 +978,14 @@ const SequenceAlignment = () => {
             </div>
           )}
 
+          {/* Alignment Visualization */}
           <div>
-            <h3 style={{ color: '#374151', marginBottom: '1rem', fontSize: '1.1rem', fontFamily: 'Montserrat, sans-serif' }}>
+            <h3 style={{ 
+              color: '#374151', 
+              marginBottom: '1rem', 
+              fontSize: '1.1rem', 
+              fontFamily: 'Montserrat, sans-serif' 
+            }}>
               Alignment Visualization
             </h3>
             {renderAlignment()}
