@@ -691,36 +691,6 @@ export default function OverviewTab({ result, originalSequence }) {
           >
             💾 FASTA
           </button>
-          <button
-            onClick={() => alert('Send to Primer Design tool - Integration pending')}
-            style={{
-              padding: '0.625rem',
-              background: 'linear-gradient(135deg, #8B5CF6, #7C3AED)',
-              border: 'none',
-              borderRadius: '6px',
-              color: '#fff',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            🧪 Primer Design
-          </button>
-          <button
-            onClick={() => alert('Alignment view - Feature coming soon')}
-            style={{
-              padding: '0.625rem',
-              background: 'linear-gradient(135deg, #F59E0B, #D97706)',
-              border: 'none',
-              borderRadius: '6px',
-              color: '#fff',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            ↔️ Align
-          </button>
         </div>
         
         <div style={{
