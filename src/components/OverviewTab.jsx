@@ -14,6 +14,18 @@ export default function OverviewTab({ result, originalSequence }) {
     if (!result) return;
     
     setLoadingAI(true);
+    setAiExplanation(''); // Clear previous explanation
+    
+    console.log('🔍 Starting AI analysis...');
+    console.log('📊 Analysis data:', {
+      length: result.length,
+      gc_content: result.gc,
+      at_content: result.at,
+      tm: result.tm,
+      molecular_weight: result.molecularWeight,
+      nucleotides: result.nucleotides,
+      orfs_found: result.nORFs
+    });
     
     const analysisData = {
       length: result.length,
@@ -27,15 +39,106 @@ export default function OverviewTab({ result, originalSequence }) {
       restriction_sites_count: result.restrictionSites?.length || 0
     };
     
-    const response = await getAIExplanation('DNA Sequence Analyzer', analysisData);
-    
-    setLoadingAI(false);
-    
-    if (response.success) {
-      setAiExplanation(response.data.explanation);
-    } else {
-      setAiExplanation(`❌ ${response.error}`);
+    try {
+      const response = await getAIExplanation('DNA Sequence Analyzer', analysisData);
+      
+      console.log('📥 API Response:', response);
+      
+      if (response.success) {
+        console.log('✅ AI analysis successful');
+        setAiExplanation(response.data.explanation || 'Analysis completed but no explanation provided.');
+      } else {
+        console.error('❌ API Error:', response.error);
+        
+        // Provide detailed fallback explanation if API fails
+        const fallbackExplanation = generateFallbackExplanation(result);
+        setAiExplanation(`⚠️ Backend API unavailable. Here's a local analysis:\n\n${fallbackExplanation}\n\n(Note: For AI-powered insights, please ensure the backend server is running.)`);
+      }
+    } catch (error) {
+      console.error('💥 Exception caught:', error);
+      
+      // Provide fallback explanation on exception
+      const fallbackExplanation = generateFallbackExplanation(result);
+      setAiExplanation(`⚠️ Could not connect to AI service.\n\n${fallbackExplanation}\n\n(Note: For AI-powered insights, please ensure the backend server is running at the configured endpoint.)`);
+    } finally {
+      setLoadingAI(false);
     }
+  };
+
+  const generateFallbackExplanation = (data) => {
+    let explanation = `📊 SEQUENCE ANALYSIS SUMMARY\n\n`;
+    
+    // Length analysis
+    explanation += `🧬 Sequence Length: ${data.length} bp\n`;
+    if (data.length < 100) {
+      explanation += `   → Short sequence - suitable for primers or short DNA fragments\n`;
+    } else if (data.length < 500) {
+      explanation += `   → Medium-length sequence - typical for PCR products or small genes\n`;
+    } else {
+      explanation += `   → Long sequence - may represent a gene or genomic region\n`;
+    }
+    explanation += `\n`;
+    
+    // GC content analysis
+    explanation += `🎯 GC Content: ${data.gc}%\n`;
+    if (data.gc < 40) {
+      explanation += `   → AT-rich sequence. Common in intergenic regions and regulatory elements.\n`;
+      explanation += `   → Lower melting temperature - may require adjusted PCR conditions.\n`;
+    } else if (data.gc > 60) {
+      explanation += `   → GC-rich sequence. Often found in promoters and coding regions.\n`;
+      explanation += `   → Higher melting temperature - very stable DNA structure.\n`;
+      explanation += `   → May benefit from DMSO or betaine in PCR reactions.\n`;
+    } else {
+      explanation += `   → Balanced composition - optimal for most molecular biology applications.\n`;
+    }
+    explanation += `\n`;
+    
+    // Melting temperature
+    explanation += `🌡️ Melting Temperature: ${data.tm}°C\n`;
+    if (data.tm < 60) {
+      explanation += `   → Lower Tm suggests weaker base pairing strength.\n`;
+      explanation += `   → Use annealing temperature around ${(data.tm - 5).toFixed(1)}°C for PCR.\n`;
+    } else if (data.tm > 80) {
+      explanation += `   → High Tm indicates very stable DNA structure.\n`;
+      explanation += `   → May require higher denaturation temperatures in PCR.\n`;
+    } else {
+      explanation += `   → Moderate Tm - suitable for standard PCR protocols.\n`;
+      explanation += `   → Suggested annealing temperature: ${(data.tm - 5).toFixed(1)}°C\n`;
+    }
+    explanation += `\n`;
+    
+    // Base composition
+    explanation += `🧪 Base Composition:\n`;
+    explanation += `   A: ${data.nucleotides.A} | T: ${data.nucleotides.T} | G: ${data.nucleotides.G} | C: ${data.nucleotides.C}\n`;
+    const purine = data.nucleotides.A + data.nucleotides.G;
+    const pyrimidine = data.nucleotides.C + data.nucleotides.T;
+    explanation += `   Purines (A+G): ${purine} | Pyrimidines (C+T): ${pyrimidine}\n`;
+    explanation += `\n`;
+    
+    // ORF analysis
+    explanation += `🎯 Open Reading Frames: ${data.nORFs}\n`;
+    if (data.nORFs === 0) {
+      explanation += `   → No ORFs detected - likely a non-coding region, intron, or regulatory sequence.\n`;
+      explanation += `   → This sequence may not code for proteins.\n`;
+    } else if (data.nORFs === 1) {
+      explanation += `   → Single ORF detected - could represent a simple coding sequence.\n`;
+      if (data.longestORF) {
+        explanation += `   → Longest ORF: ${data.longestORF.length_nt} nt (${data.longestORF.aa_seq?.length || 0} amino acids)\n`;
+      }
+    } else {
+      explanation += `   → Multiple ORFs detected across different reading frames.\n`;
+      explanation += `   → This is common in genomic DNA with multiple potential start codons.\n`;
+      if (data.longestORF) {
+        explanation += `   → Longest ORF: ${data.longestORF.length_nt} nt in ${data.longestORF.frame}\n`;
+      }
+    }
+    explanation += `\n`;
+    
+    // Molecular weight
+    explanation += `⚖️ Molecular Weight: ${data.molecularWeight} g/mol\n`;
+    explanation += `   → Useful for calculations in DNA quantification and molecular cloning.\n`;
+    
+    return explanation;
   };
 
   const downloadPDF = () => {
