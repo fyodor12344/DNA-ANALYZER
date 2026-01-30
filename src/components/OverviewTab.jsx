@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_ENDPOINTS } from '../utils/config';
+import { getAIExplanation } from '../utils/apiUtils';
 
 export default function OverviewTab({ result, originalSequence }) {
   const [showCodonTable, setShowCodonTable] = useState(false);
@@ -15,50 +15,26 @@ export default function OverviewTab({ result, originalSequence }) {
     
     setLoadingAI(true);
     
-    try {
-      const response = await fetch(API_ENDPOINTS.explain, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tool: 'DNA Sequence Analyzer',
-          data: {
-            length: result.length,
-            gc_content: result.gc,
-            at_content: result.at,
-            tm: result.tm,
-            molecular_weight: result.molecularWeight,
-            nucleotides: result.nucleotides,
-            orfs_found: result.nORFs,
-            longest_orf: result.longestORF,
-            restriction_sites_count: result.restrictionSites?.length || 0
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.explanation) {
-        setAiExplanation(data.explanation);
-      } else {
-        setAiExplanation('No explanation available from AI.');
-      }
-      
-    } catch (err) {
-      console.error('AI Error:', err);
-      
-      if (err.message.includes('Failed to fetch')) {
-        setAiExplanation('❌ Cannot connect to backend server. Please ensure the backend is running on Render and accessible.');
-      } else if (err.message.includes('500')) {
-        setAiExplanation('❌ Server error occurred. The backend may be experiencing issues.');
-      } else {
-        setAiExplanation(`❌ Error: ${err.message}`);
-      }
-    } finally {
-      setLoadingAI(false);
+    const analysisData = {
+      length: result.length,
+      gc_content: result.gc,
+      at_content: result.at,
+      tm: result.tm,
+      molecular_weight: result.molecularWeight,
+      nucleotides: result.nucleotides,
+      orfs_found: result.nORFs,
+      longest_orf: result.longestORF,
+      restriction_sites_count: result.restrictionSites?.length || 0
+    };
+    
+    const response = await getAIExplanation('DNA Sequence Analyzer', analysisData);
+    
+    setLoadingAI(false);
+    
+    if (response.success) {
+      setAiExplanation(response.data.explanation);
+    } else {
+      setAiExplanation(`❌ ${response.error}`);
     }
   };
 
