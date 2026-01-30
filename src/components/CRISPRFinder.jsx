@@ -689,24 +689,25 @@ export default function CRISPRFinder() {
         }
 
         .legend-box {
-          background: #F9FAFB;
-          border: 1px solid #E5E7EB;
+          background: #FFFFFF;
+          border: 2px solid #10B981;
           border-radius: 8px;
-          padding: 1rem;
+          padding: 1.25rem;
           margin-bottom: 1rem;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
 
         .legend-items {
           display: flex;
           flex-wrap: wrap;
-          gap: 1rem;
-          font-size: 0.85rem;
+          gap: 1.5rem;
+          font-size: 0.9rem;
         }
 
         .legend-item {
           display: flex;
           align-items: center;
-          gap: 0.5rem;
+          gap: 0.75rem;
         }
 
         .legend-sample {
@@ -1074,36 +1075,64 @@ export default function CRISPRFinder() {
             <div className="legend-box">
               <h4 style={{ 
                 margin: '0 0 0.75rem 0', 
-                fontSize: '0.9rem',
+                fontSize: '0.95rem',
                 color: '#1F2937',
-                fontWeight: 600
+                fontWeight: 700
               }}>
                 📖 Visualization Legend
               </h4>
               <div className="legend-items">
                 <div className="legend-item">
-                  <span className="legend-sample" style={{ background: '#10B98130', color: '#10B981', fontWeight: 700 }}>
+                  <span className="legend-sample" style={{ 
+                    background: '#10B981', 
+                    color: '#FFFFFF', 
+                    fontWeight: 700,
+                    padding: '4px 10px',
+                    borderRadius: '4px'
+                  }}>
                     PAM
                   </span>
-                  <span>Forward PAM (highlighted green)</span>
+                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Forward PAM (green highlight)</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-sample" style={{ background: '#3B82F630', color: '#3B82F6', fontWeight: 700 }}>
+                  <span className="legend-sample" style={{ 
+                    background: '#3B82F6', 
+                    color: '#FFFFFF', 
+                    fontWeight: 700,
+                    padding: '4px 10px',
+                    borderRadius: '4px'
+                  }}>
                     PAM
                   </span>
-                  <span>Reverse PAM (highlighted blue)</span>
+                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Reverse PAM (blue highlight)</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-sample" style={{ textDecoration: 'underline', textDecorationColor: '#10B981', textDecorationThickness: '2px' }}>
+                  <span className="legend-sample" style={{ 
+                    textDecoration: 'underline', 
+                    textDecorationColor: '#10B981', 
+                    textDecorationThickness: '3px',
+                    textUnderlineOffset: '3px',
+                    color: '#1F2937',
+                    fontWeight: 600,
+                    padding: '2px 6px'
+                  }}>
                     ATGC
                   </span>
-                  <span>Forward sgRNA (green underline)</span>
+                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Forward sgRNA (green underline)</span>
                 </div>
                 <div className="legend-item">
-                  <span className="legend-sample" style={{ textDecoration: 'underline', textDecorationColor: '#3B82F6', textDecorationThickness: '2px' }}>
+                  <span className="legend-sample" style={{ 
+                    textDecoration: 'underline', 
+                    textDecorationColor: '#3B82F6', 
+                    textDecorationThickness: '3px',
+                    textUnderlineOffset: '3px',
+                    color: '#1F2937',
+                    fontWeight: 600,
+                    padding: '2px 6px'
+                  }}>
                     ATGC
                   </span>
-                  <span>Reverse sgRNA (blue underline)</span>
+                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Reverse sgRNA (blue underline)</span>
                 </div>
               </div>
             </div>
