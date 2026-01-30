@@ -666,6 +666,18 @@ Please provide comprehensive analysis:
 8. Confidence level and potential limitations of the alignment"""
     
     elif tool == "DNA Sequence Analyzer":
+        longest_orf = results.get('longest_orf')
+        
+        # Handle both None and empty dict cases
+        if longest_orf and isinstance(longest_orf, dict):
+            orf_length_nt = longest_orf.get('length_nt', 'N/A')
+            # Calculate amino acids from sequence if available
+            aa_seq = longest_orf.get('aa_seq', '')
+            orf_length_aa = len(aa_seq) if aa_seq else 'N/A'
+        else:
+            orf_length_nt = 'N/A'
+            orf_length_aa = 'N/A'
+        
         return f"""I performed comprehensive DNA sequence analysis:
 
 SEQUENCE CHARACTERISTICS:
@@ -674,11 +686,17 @@ SEQUENCE CHARACTERISTICS:
 - AT Content: {results.get('at_content', 'N/A')}%
 - Melting Temperature (Tm): {results.get('tm', 'N/A')}°C
 
-CODING POTENTIAL:
-- Open Reading Frames (ORFs) Detected: {results.get('orfs_found', 'N/A')}
-- Longest ORF: {results.get('longest_orf', {}).get('length_nt', 'N/A')} nucleotides
-  ({results.get('longest_orf', {}).get('length_aa', 'N/A')} amino acids)
+BASE COMPOSITION:
+- Adenine (A): {results.get('nucleotides', {}).get('A', 'N/A')}
+- Thymine (T): {results.get('nucleotides', {}).get('T', 'N/A')}
+- Guanine (G): {results.get('nucleotides', {}).get('G', 'N/A')}
+- Cytosine (C): {results.get('nucleotides', {}).get('C', 'N/A')}
+- Molecular Weight: {results.get('molecular_weight', 'N/A')} g/mol
 
+CODING POTENTIAL:
+- Open Reading Frames (ORFs) Detected: {results.get('orfs_found', 0)}
+- Longest ORF: {orf_length_nt} nucleotides ({orf_length_aa} amino acids)
+- Restriction Sites: {results.get('restriction_sites_count', 0)}
 Please provide detailed interpretation:
 1. What the GC content reveals about the sequence (stability, gene density, organism type)
 2. Significance of the melting temperature for molecular biology applications
