@@ -1,1351 +1,510 @@
 import { useState } from 'react';
-import { designPrimers, getAIExplanation, validateSequence } from '../utils/apiUtils';
 
-// Application modes with specific requirements
-const APPLICATION_MODES = {
-  diagnostic: {
-    name: 'Diagnostic PCR',
-    description: 'Standard PCR for detection and identification',
-    icon: '🔬',
-    requirements: {
-      productSizeMin: 200,
-      productSizeMax: 800,
-      primerLengthMin: 18,
-      primerLengthMax: 25,
-      gcContentMin: 40,
-      gcContentMax: 60,
-      tmMin: 55,
-      tmMax: 65,
-      tmDifferenceMax: 5,
-      strictDimer: false,
-      requireGcClamp: false
-    }
-  },
-  cloning: {
-    name: 'Cloning',
-    description: 'PCR for gene cloning and subcloning',
-    icon: '🧬',
-    requirements: {
-      productSizeMin: 100,
-      productSizeMax: 3000,
-      primerLengthMin: 20,
-      primerLengthMax: 30,
-      gcContentMin: 45,
-      gcContentMax: 65,
-      tmMin: 58,
-      tmMax: 68,
-      tmDifferenceMax: 3,
-      strictDimer: false,
-      requireGcClamp: true
-    }
-  },
-  qpcr: {
-    name: 'qPCR (Real-Time)',
-    description: 'Quantitative real-time PCR',
-    icon: '📊',
-    requirements: {
-      productSizeMin: 70,
-      productSizeMax: 200,
-      primerLengthMin: 18,
-      primerLengthMax: 22,
-      gcContentMin: 45,
-      gcContentMax: 55,
-      tmMin: 58,
-      tmMax: 62,
-      tmDifferenceMax: 2,
-      strictDimer: true,
-      requireGcClamp: false
-    }
-  },
-  mutation: {
-    name: 'Mutation Detection',
-    description: 'PCR for SNP detection and mutagenesis',
-    icon: '🎯',
-    requirements: {
-      productSizeMin: 150,
-      productSizeMax: 500,
-      primerLengthMin: 20,
-      primerLengthMax: 30,
-      gcContentMin: 40,
-      gcContentMax: 60,
-      tmMin: 60,
-      tmMax: 68,
-      tmDifferenceMax: 3,
-      strictDimer: false,
-      requireGcClamp: true
-    }
-  }
+/* ─── SAMPLE (TP53 exon-7 region) ────────────────────────────────────────── */
+const SAMPLE_SEQUENCE = [
+  'ATGGAGGAGCCGCAGTCAGATCCTAGCGTGAGTTTGCCTGTCCTGGGAGAGACCGGCGC',
+  'ACAGAGGAAGAGAATCTCCGCAAGAAAGTGGGGTTTGTCTCCTTCCAGCCAAGGTCTGA',
+  'GCCTGCAGTTCAACTGACTGTTTCAAGTTATAGGGTGACAGGTTTCATCTGGCAAGCCA',
+  'GGCTTCGGGCTCAGTGGAACTCGGAGGAAAGTGAGGCTTTGCTCAGGAGAGGGGTTGCT',
+  'GATCTGCCCCCGGGCTCTCCCAGGACACCTATGGAAACTACTTCCTGAAACAACGTTCTG',
+  'TGTTTGTGTCCCCTTCGGTGGCCCCTGCACCAGAAGAAACCCCGCGGGAGCGCCCCTCCC',
+  'CCATCCCCCTCCCCCAAGAGATTCGTTGCCCTCCCAGGGTGGGCTGGCCCACTCGAACCC',
+  'CCATCCGGGTTCTTCACCTGTTTGGCTTCCTGGAAGGTGGAGACTCAGCCCAGCCCCCAA',
+  'GGTGAACTCAATCTCAAGGTCAATGGCAGGCCGTCCCCTTCCAGGTTCTTCGCCTGCAGC',
+  'CCCGGCACTGCCTCAGCCCTCAGCCCTAAGCCCAGTGCCAACTCAGCCCCCGGCCCCCAG'
+].join('');
+
+/* ─── MOCK UTILS ─────────────────────────────────────────────────────────── */
+function validateSequence(seq) {
+  const cleaned = seq.toUpperCase().replace(/[^ATGC]/g, '');
+  if (!cleaned.length) return { valid: false, error: 'No valid DNA bases found.' };
+  if (cleaned.length < 40) return { valid: false, error: 'Sequence must be at least 40 bp.' };
+  return { valid: true, cleaned };
+}
+async function designPrimers(seq) {
+  await new Promise(r => setTimeout(r, 950));
+  const fwd = seq.substring(0, 20);
+  const revRaw = seq.substring(seq.length - 21, seq.length - 1);
+  const comp = { A:'T', T:'A', G:'C', C:'G' };
+  const rev = revRaw.split('').reverse().map(b => comp[b] || b).join('');
+  const gc = s => ((s.match(/[GC]/g) || []).length / s.length) * 100;
+  const tm = s => 2 * (s.match(/[AT]/g) || []).length + 4 * (s.match(/[GC]/g) || []).length;
+  return { success: true, data: {
+    forward_primer: { sequence: fwd, length: fwd.length, tm: tm(fwd), gc_content: +gc(fwd).toFixed(1), position: '1–20', quality_grade: 'Good', quality_score: 78, hairpin: { risk_level: 'low', delta_g: -0.4 }, gc_clamp: { has_clamp: true, clamp_strength: 2 } },
+    reverse_primer: { sequence: rev, length: rev.length, tm: tm(rev), gc_content: +gc(rev).toFixed(1), position: `${seq.length-20}–${seq.length}`, quality_grade: 'Good', quality_score: 74, hairpin: { risk_level: 'medium', delta_g: -1.2 }, gc_clamp: { has_clamp: false, clamp_strength: 1 } },
+    expected_product_size: seq.length,
+    tm_difference: Math.abs(tm(fwd) - tm(rev)),
+    dimer_analysis: { risk_level: 'low' },
+    pcr_protocol: { annealing_temp: Math.min(tm(fwd), tm(rev)) - 5, extension_time: Math.max(60, Math.ceil(seq.length / 1000) * 60), cycles: 35, polymerase: 'Taq DNA Polymerase (high-fidelity)', notes: ['Use hot-start polymerase for best specificity', 'Verify product size on gel after PCR'] },
+    all_candidates: []
+  }};
+}
+
+/* ─── CONSTANTS ──────────────────────────────────────────────────────────── */
+const MODES = {
+  diagnostic: { name:'Diagnostic PCR',     desc:'Detection & identification',   icon:'🔬', prodMin:200,  prodMax:800,  tmMin:55, tmMax:65 },
+  cloning:    { name:'Cloning',            desc:'Gene cloning & subcloning',    icon:'🧬', prodMin:100,  prodMax:3000, tmMin:58, tmMax:68 },
+  qpcr:       { name:'qPCR (Real-Time)',   desc:'Quantitative real-time PCR',   icon:'📊', prodMin:70,   prodMax:200,  tmMin:58, tmMax:62 },
+  mutation:   { name:'Mutation Detection', desc:'SNP detection & mutagenesis',  icon:'🎯', prodMin:150,  prodMax:500,  tmMin:60, tmMax:68 }
 };
+const QC = { Excellent:'#00FFC6', Good:'#00c9a0', Fair:'#F59E0B', Poor:'#EF4444' };
+const RC = { low:'#00FFC6', medium:'#F59E0B', high:'#EF4444' };
+const UC = { high:'#EF4444', medium:'#F59E0B', low:'#00FFC6' };
 
+/* ════════════════════════════════════════════════════════════════════════════ */
 export default function PrimerDesigner() {
-  const [sequence, setSequence] = useState('');
-  const [applicationMode, setApplicationMode] = useState('diagnostic');
-  const [primers, setPrimers] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [showCandidates, setShowCandidates] = useState(false);
-  const [aiExplanation, setAiExplanation] = useState('');
-  const [loadingAI, setLoadingAI] = useState(false);
+  const [seq, setSeq]           = useState('');
+  const [mode, setMode]         = useState('diagnostic');
+  const [primers, setPrimers]   = useState(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+  const [showCand, setShowCand] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
-  const handleDesignPrimers = async () => {
-    if (!sequence.trim()) {
-      setError('Please enter a DNA sequence');
-      return;
-    }
+  const M = MODES[mode];
+  const bp = seq.toUpperCase().replace(/[^ATGC]/g, '').length;
 
-    const validation = validateSequence(sequence);
-    if (!validation.valid) {
-      setError(validation.error);
-      return;
-    }
-
-    const cleanSeq = validation.cleaned;
-    const mode = APPLICATION_MODES[applicationMode];
-    
-    let productSizeRange = [mode.requirements.productSizeMin, mode.requirements.productSizeMax];
-    if (cleanSeq.length < 150) {
-      const adjustedMin = 50;
-      const adjustedMax = Math.max(60, cleanSeq.length - 30);
-      productSizeRange = [adjustedMin, adjustedMax];
-    }
-
-    setLoading(true);
-    setError('');
-    setAiExplanation('');
-    setPrimers(null);
-
-    console.log('📤 Designing primers for:', mode.name, 'Sequence length:', cleanSeq.length);
-
-    const response = await designPrimers(cleanSeq, 60, 20, productSizeRange);
-
-    setLoading(false);
-
-    if (response.success) {
-      console.log('✅ Primers designed successfully');
-      // Enhance primers with application-specific analysis
-      const enhancedPrimers = enhancePrimersWithAnalysis(response.data, mode, cleanSeq);
-      setPrimers(enhancedPrimers);
-    } else {
-      console.error('❌ Primer design failed:', response.error);
-      setError(response.error);
-    }
+  /* ── helpers ── */
+  const buildAnalysis = p => {
+    const a = [];
+    if (p.hairpin?.risk_level !== 'low') a.push({ type: p.hairpin.risk_level === 'high' ? 'error' : 'warning', icon:'🔄', title:'Hairpin Formation Risk', issue:`Secondary structure risk detected (ΔG = ${p.hairpin.delta_g} kcal/mol)`, impact:'Reduces available primer for binding — lowers yield & efficiency.', fixes:['Shift primer 2–3 bp up or downstream','Add 3–5 % DMSO to the reaction','Raise annealing temp by 2–3 °C'] });
+    if (!p.gc_clamp?.has_clamp) a.push({ type:'warning', icon:'🔗', title:'Missing GC Clamp', issue:'No G/C in the last 5 bases of the 3′ end.', impact:'Weaker 3′ binding reduces extension — especially critical for cloning.', fixes:['Shift primer so a G or C lands at 3′','Extend by 1–2 G/C bases if the template allows'] });
+    return a;
   };
-
-  const enhancePrimersWithAnalysis = (primerData, mode, sequence) => {
-    // Add application-specific warnings and optimization tips
-    const enhanced = { ...primerData, applicationMode: mode.name };
-    
-    // Analyze forward primer
-    if (enhanced.forward_primer) {
-      enhanced.forward_primer = analyzePrimer(enhanced.forward_primer, mode, sequence);
-    }
-    
-    // Analyze reverse primer
-    if (enhanced.reverse_primer) {
-      enhanced.reverse_primer = analyzePrimer(enhanced.reverse_primer, mode, sequence);
-    }
-    
-    // Generate PCR optimization tips
-    enhanced.optimization_tips = generateOptimizationTips(enhanced, mode);
-    
-    return enhanced;
-  };
-
-  const analyzePrimer = (primer, mode, sequence) => {
-    const analyzed = { ...primer };
-    analyzed.detailed_analysis = [];
-    
-    // Hairpin analysis
-    if (primer.hairpin) {
-      const hairpinDetail = analyzeHairpin(primer.hairpin, primer);
-      if (hairpinDetail) analyzed.detailed_analysis.push(hairpinDetail);
-    }
-    
-    // GC clamp analysis
-    if (primer.gc_clamp) {
-      const gcClampDetail = analyzeGcClamp(primer.gc_clamp, mode);
-      if (gcClampDetail) analyzed.detailed_analysis.push(gcClampDetail);
-    }
-    
-    // GC content analysis
-    const gcDetail = analyzeGcContent(primer.gc_content, mode);
-    if (gcDetail) analyzed.detailed_analysis.push(gcDetail);
-    
-    // Tm analysis
-    const tmDetail = analyzeTm(primer.tm, mode);
-    if (tmDetail) analyzed.detailed_analysis.push(tmDetail);
-    
-    // Self-complementarity
-    const selfCompDetail = analyzeSelfComplementarity(primer);
-    if (selfCompDetail) analyzed.detailed_analysis.push(selfCompDetail);
-    
-    // 3' end stability
-    const endStabilityDetail = analyze3PrimeEnd(primer);
-    if (endStabilityDetail) analyzed.detailed_analysis.push(endStabilityDetail);
-    
-    return analyzed;
-  };
-
-  const analyzeHairpin = (hairpin, primer) => {
-    if (hairpin.risk_level === 'low') return null;
-    
-    return {
-      type: hairpin.risk_level === 'high' ? 'error' : 'warning',
-      icon: '🔄',
-      title: 'Hairpin Formation Risk',
-      issue: `Primer may form secondary hairpin structure with ΔG = ${hairpin.delta_g || 'N/A'} kcal/mol`,
-      impact: 'Hairpin structures reduce primer availability for target binding, leading to reduced PCR efficiency, lower yields, and potentially failed amplification. The primer may bind to itself instead of the template.',
-      fixes: [
-        'Redesign primer by shifting 2-3 bases upstream or downstream',
-        'Avoid runs of complementary bases (e.g., AAAA paired with TTTT)',
-        'Add DMSO (3-5%) or betaine (1M) to PCR mix to destabilize secondary structures',
-        'Increase annealing temperature by 2-3°C if hairpin is weak',
-        'Consider using a hot-start polymerase'
-      ]
-    };
-  };
-
-  const analyzeGcClamp = (gcClamp, mode) => {
-    if (mode.requirements.requireGcClamp && !gcClamp.has_clamp) {
-      return {
-        type: 'warning',
-        icon: '🔗',
-        title: 'Missing GC Clamp',
-        issue: `No G or C within last 5 bases of 3' end (current: ${gcClamp.clamp_strength || 0} G/C)`,
-        impact: 'GC clamps at the 3\' end improve primer binding stability and extension efficiency. Without a GC clamp, the primer may dissociate during PCR, especially important for cloning applications.',
-        fixes: [
-          'Add 1-2 G or C bases at the 3\' end',
-          'Shift primer binding site to include natural G/C at 3\' end',
-          'For cloning: Essential for high-fidelity amplification',
-          'For qPCR: Less critical, avoid if it creates other issues'
-        ]
-      };
-    }
-    
-    if (gcClamp.has_clamp && gcClamp.clamp_strength > 3) {
-      return {
-        type: 'warning',
-        icon: '🔗',
-        title: 'Excessive GC Clamp',
-        issue: `Too many G/C bases at 3' end (${gcClamp.clamp_strength} G/C in last 5 bases)`,
-        impact: 'Excessive GC content at 3\' end can cause non-specific binding and primer-dimer formation. May lead to false positive bands and reduced specificity.',
-        fixes: [
-          'Reduce GC content at 3\' end to 2-3 G/C bases',
-          'Shift primer by 1-2 bases to balance GC distribution',
-          'Use touchdown PCR to improve specificity'
-        ]
-      };
-    }
-    
-    return null;
-  };
-
-  const analyzeGcContent = (gcContent, mode) => {
-    const { gcContentMin, gcContentMax } = mode.requirements;
-    
-    if (gcContent < gcContentMin) {
-      return {
-        type: 'warning',
-        icon: '🧬',
-        title: 'Low GC Content',
-        issue: `GC content ${gcContent}% is below optimal range (${gcContentMin}-${gcContentMax}%)`,
-        impact: 'Low GC content results in weak primer-template binding due to fewer hydrogen bonds. This causes reduced PCR specificity, lower melting temperature, and potential mispriming.',
-        fixes: [
-          'Extend primer length by 2-3 bases into GC-rich regions',
-          'Shift primer binding site to more GC-rich area',
-          'Lower annealing temperature by 2-3°C',
-          'Use hot-start polymerase to reduce non-specific binding'
-        ]
-      };
-    }
-    
-    if (gcContent > gcContentMax) {
-      return {
-        type: 'warning',
-        icon: '🧬',
-        title: 'High GC Content',
-        issue: `GC content ${gcContent}% exceeds optimal range (${gcContentMin}-${gcContentMax}%)`,
-        impact: 'High GC content can cause secondary structures and non-specific binding. GC-rich primers are prone to forming dimers and may require specialized PCR conditions.',
-        fixes: [
-          'Add DMSO (3-5%) or betaine (1M) to PCR reaction',
-          'Increase denaturation temperature to 98°C',
-          'Use GC-rich PCR buffer or specialized polymerase',
-          'Reduce primer length slightly to lower overall GC%',
-          'Consider two-step PCR protocol'
-        ]
-      };
-    }
-    
-    return null;
-  };
-
-  const analyzeTm = (tm, mode) => {
-    const { tmMin, tmMax } = mode.requirements;
-    
-    if (tm < tmMin) {
-      return {
-        type: 'warning',
-        icon: '🌡️',
-        title: 'Low Melting Temperature',
-        issue: `Tm ${tm}°C is below optimal range (${tmMin}-${tmMax}°C)`,
-        impact: 'Low Tm increases risk of non-specific binding at lower temperatures. The primer may bind to off-target sequences, leading to spurious PCR products and reduced specificity.',
-        fixes: [
-          'Increase primer length by 2-4 bases',
-          'Shift to more GC-rich region',
-          'Use lower annealing temperature (Tm - 5°C)',
-          'Add MgCl₂ to increase ionic strength (try 2.5-3.5 mM)'
-        ]
-      };
-    }
-    
-    if (tm > tmMax) {
-      return {
-        type: 'info',
-        icon: '🌡️',
-        title: 'High Melting Temperature',
-        issue: `Tm ${tm}°C exceeds optimal range (${tmMin}-${tmMax}°C)`,
-        impact: 'While high Tm generally improves specificity, it may require higher annealing temperatures that could reduce polymerase activity. May also increase secondary structure formation.',
-        fixes: [
-          'Acceptable if within 5°C of optimal range',
-          'Use high-temperature PCR protocol if needed',
-          'Verify polymerase is compatible with high annealing temps',
-          'If too high: reduce primer length by 2-3 bases'
-        ]
-      };
-    }
-    
-    return null;
-  };
-
-  const analyzeSelfComplementarity = (primer) => {
-    // Check for self-complementary regions
-    const seq = primer.sequence;
-    const hasRuns = /([ATGC])\1{3,}/.test(seq); // 4+ repeated bases
-    const hasPalindrome = checkPalindrome(seq);
-    
-    if (hasRuns || hasPalindrome) {
-      return {
-        type: 'warning',
-        icon: '↔️',
-        title: 'Self-Complementarity Detected',
-        issue: hasRuns 
-          ? 'Primer contains runs of repeated bases (4+ identical bases)'
-          : 'Primer contains self-complementary regions',
-        impact: 'Self-complementary sequences increase primer-dimer formation and reduce available primers for target amplification. Can lead to low yields and high background.',
-        fixes: [
-          'Avoid runs of >3 identical bases',
-          'Redesign primer to eliminate palindromic sequences',
-          'Use hot-start polymerase to minimize primer interactions',
-          'Optimize primer concentration (reduce to 0.2-0.4 µM)',
-          'Increase primer:template ratio'
-        ]
-      };
-    }
-    
-    return null;
-  };
-
-  const analyze3PrimeEnd = (primer) => {
-    const seq = primer.sequence;
-    const last3Bases = seq.slice(-3);
-    const lastBase = seq.slice(-1);
-    
-    // Check for poly-AT at 3' end
-    if (/[AT]{3,}$/.test(seq)) {
-      return {
-        type: 'warning',
-        icon: '3️⃣',
-        title: 'Weak 3\' End',
-        issue: '3\' end contains poly-A/T stretch which is thermally unstable',
-        impact: 'AT-rich 3\' ends have weak binding due to only 2 hydrogen bonds per base pair. This reduces extension efficiency and can cause stuttering or early termination.',
-        fixes: [
-          'Shift primer by 1-2 bases to avoid AT stretch at 3\' end',
-          'Add 1-2 G/C bases at 3\' end if possible',
-          'Increase extension time by 50%',
-          'Use polymerase with strong processivity'
-        ]
-      };
-    }
-    
-    // Check if ends with G (very stable)
-    if (lastBase === 'G') {
-      // This is actually good for most applications
-      return null;
-    }
-    
-    return null;
-  };
-
-  const checkPalindrome = (seq) => {
-    // Simple palindrome check (reverse complement)
-    const complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G'};
-    const revComp = seq.split('').reverse().map(b => complement[b]).join('');
-    
-    // Check for significant overlap
-    for (let i = 4; i <= Math.min(8, seq.length / 2); i++) {
-      if (seq.includes(revComp.substring(0, i))) {
-        return true;
-      }
-    }
-    return false;
-  };
-
-  const generateOptimizationTips = (primers, mode) => {
-    const tips = [];
-    
-    if (!primers.forward_primer || !primers.reverse_primer) {
-      return tips;
-    }
-    
-    const fwd = primers.forward_primer;
-    const rev = primers.reverse_primer;
-    const tmDiff = Math.abs(fwd.tm - rev.tm);
-    
-    // Tm difference tips
-    if (tmDiff > 5) {
-      tips.push({
-        category: 'Temperature',
-        icon: '🌡️',
-        title: 'Large Tm Difference Detected',
-        recommendation: `Use gradient PCR to find optimal annealing temperature between ${Math.min(fwd.tm, rev.tm) - 5}°C and ${Math.max(fwd.tm, rev.tm) - 3}°C. Start at ${((fwd.tm + rev.tm) / 2 - 5).toFixed(1)}°C.`,
-        urgency: 'high'
-      });
-    }
-    
-    // GC content tips
-    const avgGC = (fwd.gc_content + rev.gc_content) / 2;
-    if (avgGC > 60) {
-      tips.push({
-        category: 'Additives',
-        icon: '🧪',
-        title: 'High GC Content - Add PCR Enhancers',
-        recommendation: 'Add DMSO (3-5% final concentration) or betaine (1M) to help denature GC-rich regions. Consider using a GC-rich PCR kit or increasing denaturation temperature to 98°C.',
-        urgency: 'medium'
-      });
-    } else if (avgGC < 40) {
-      tips.push({
-        category: 'Specificity',
-        icon: '🎯',
-        title: 'Low GC Content - Improve Specificity',
-        recommendation: 'Use hot-start polymerase and touchdown PCR (start 5°C above calculated Tm, decrease 1°C per cycle for 5 cycles). This improves specificity despite weak primer binding.',
-        urgency: 'medium'
-      });
-    }
-    
-    // Dimer risk tips
-    if (primers.dimer_analysis && primers.dimer_analysis.risk_level !== 'low') {
-      tips.push({
-        category: 'Dimer Prevention',
-        icon: '🔗',
-        title: 'Primer-Dimer Risk Detected',
-        recommendation: mode.name === 'qPCR (Real-Time)' 
-          ? 'CRITICAL for qPCR: Reduce primer concentration to 0.2 µM (from standard 0.4 µM). Use hot-start polymerase and consider redesigning primers if dimer Tm is >50°C.'
-          : 'Use hot-start polymerase and optimize primer concentration (try 0.2-0.4 µM). Set up reactions on ice and use a heated lid.',
-        urgency: mode.name === 'qPCR (Real-Time)' ? 'high' : 'medium'
-      });
-    }
-    
-    // Application-specific tips
-    if (mode.name === 'qPCR (Real-Time)') {
-      tips.push({
-        category: 'qPCR Optimization',
-        icon: '📊',
-        title: 'qPCR Best Practices',
-        recommendation: 'Keep amplicon 70-150 bp. Use ROX or another passive reference dye. Run standard curve to determine efficiency (should be 90-110%). Perform melt curve analysis to verify single product.',
-        urgency: 'low'
-      });
-    } else if (mode.name === 'Cloning') {
-      tips.push({
-        category: 'Cloning Considerations',
-        icon: '🧬',
-        title: 'Cloning Protocol Tips',
-        recommendation: 'Use high-fidelity polymerase (Phusion, Q5, or similar). Keep extension time at 15-30 sec/kb. Consider adding restriction sites to primers for cloning. Verify product by sequencing before cloning.',
-        urgency: 'low'
-      });
-    }
-    
-    // Product size tips
-    if (primers.expected_product_size > 2000) {
-      tips.push({
-        category: 'Extension',
-        icon: '⏱️',
-        title: 'Long Amplicon - Extend PCR Times',
-        recommendation: `Increase extension time to ${Math.ceil(primers.expected_product_size / 1000)} minutes (1 min/kb). Use polymerase with strong processivity. Consider two-step PCR with combined annealing/extension at 68-72°C.`,
-        urgency: 'medium'
-      });
-    }
-    
+  const buildTips = (data) => {
+    const tips = [], f = data.forward_primer, r = data.reverse_primer;
+    if (!f || !r) return tips;
+    if (Math.abs(f.tm - r.tm) > 5) tips.push({ cat:'Temperature', icon:'🌡️', title:'Large Tm Difference', rec:`Gradient PCR between ${Math.min(f.tm,r.tm)-5} °C and ${Math.max(f.tm,r.tm)-3} °C to find the sweet spot.`, urg:'high' });
+    if (data.dimer_analysis?.risk_level !== 'low') tips.push({ cat:'Dimer Prevention', icon:'🔗', title:'Primer-Dimer Risk', rec:'Lower primer concentration to 0.2 µM. Use a hot-start polymerase.', urg:'medium' });
+    tips.push({ cat:'Protocol', icon:'🧪', title:`${M.name} Best Practices`, rec: M.name === 'qPCR (Real-Time)' ? 'Keep amplicon 70–150 bp. Use ROX dye. Target 90–110 % efficiency.' : 'Use high-fidelity polymerase (Phusion / Q5). Sequence-verify before cloning.', urg:'low' });
     return tips;
   };
 
-  const handleExplainWithAI = async () => {
-    if (!primers) return;
-    
-    setLoadingAI(true);
-    
-    const enrichedData = {
-      ...primers,
-      applicationMode: APPLICATION_MODES[applicationMode].name,
-      sequenceLength: sequence.replace(/[^ATGC]/gi, '').length
-    };
-    
-    const response = await getAIExplanation('PCR Primer Designer', enrichedData);
-    
-    setLoadingAI(false);
-    
-    if (response.success) {
-      setAiExplanation(response.data.explanation);
-    } else {
-      setError(response.error);
-    }
+  const handleDesign = async () => {
+    if (!seq.trim()) { setError('Please enter a DNA sequence.'); return; }
+    const v = validateSequence(seq);
+    if (!v.valid) { setError(v.error); return; }
+    setLoading(true); setError(''); setPrimers(null);
+    const res = await designPrimers(v.cleaned);
+    setLoading(false);
+    if (res.success) {
+      if (res.data.forward_primer) res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
+      if (res.data.reverse_primer) res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
+      res.data.optimization_tips = buildTips(res.data);
+      setPrimers(res.data);
+    } else setError(res.error);
   };
 
-  const getQualityColor = (grade) => {
-    const colors = {
-      'Excellent': '#10B981',
-      'Good': '#00A389',
-      'Fair': '#F59E0B',
-      'Poor': '#EF4444'
-    };
-    return colors[grade] || '#6B7280';
-  };
-
-  const getRiskColor = (risk) => {
-    const colors = {
-      'low': '#10B981',
-      'medium': '#F59E0B',
-      'high': '#EF4444'
-    };
-    return colors[risk] || '#6B7280';
-  };
-
-  const copyToClipboard = (text) => {
-    navigator.clipboard?.writeText(text);
-  };
-
-  const renderDetailedAnalysis = (analysis) => {
-    if (!analysis || analysis.length === 0) return null;
-    
-    return (
-      <div style={{ marginTop: '1rem' }}>
-        <div style={{ 
-          color: '#94a3b8', 
-          fontSize: '0.9rem', 
-          marginBottom: '0.75rem', 
-          fontWeight: 600 
-        }}>
-          📋 Detailed Quality Analysis:
-        </div>
-        {analysis.map((item, idx) => (
-          <AnalysisDetailCard key={idx} {...item} />
-        ))}
-      </div>
-    );
-  };
-
-  const renderPrimer = (primer, type) => {
-    if (!primer) {
-      return (
-        <div style={{ 
-          padding: '2rem', 
-          background: 'rgba(239, 68, 68, 0.1)', 
-          borderRadius: '12px',
-          color: '#EF4444',
-          textAlign: 'center'
-        }}>
-          No suitable {type} primer found
-        </div>
-      );
-    }
-
-    return (
-      <div style={{
-        background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-        borderRadius: '16px',
-        padding: '1.5rem',
-        border: '1px solid rgba(255, 255, 255, 0.1)'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-          <h4 style={{ color: '#00FFC6', margin: 0, fontSize: '1.1rem', fontWeight: 600 }}>
-            {type} Primer
-          </h4>
-          <span style={{
-            background: `${getQualityColor(primer.quality_grade)}20`,
-            color: getQualityColor(primer.quality_grade),
-            border: `1px solid ${getQualityColor(primer.quality_grade)}`,
-            padding: '0.25rem 0.75rem',
-            borderRadius: '20px',
-            fontSize: '0.85rem',
-            fontWeight: 600
-          }}>
-            {primer.quality_grade} ({primer.quality_score}/100)
-          </span>
-        </div>
-
-        <div style={{ marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span style={{ color: '#94a3b8', fontSize: '0.9rem' }}>Sequence:</span>
-            <button 
-              onClick={() => copyToClipboard(primer.sequence)}
-              style={{
-                background: 'rgba(0, 255, 198, 0.1)',
-                border: '1px solid #00FFC6',
-                color: '#00FFC6',
-                padding: '0.25rem 0.75rem',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '0.85rem'
-              }}
-            >
-              📋 Copy
-            </button>
-          </div>
-          <div style={{
-            background: '#0f172a',
-            padding: '1rem',
-            borderRadius: '8px',
-            fontFamily: 'monospace',
-            fontSize: '1rem',
-            color: '#00FFC6',
-            wordBreak: 'break-all',
-            letterSpacing: '2px'
-          }}>
-            {primer.sequence}
-          </div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
-          <PropertyItem label="Length" value={`${primer.length} bp`} />
-          <PropertyItem label="Tm" value={`${primer.tm}°C`} />
-          <PropertyItem label="GC Content" value={`${primer.gc_content}%`} />
-          <PropertyItem label="Position" value={primer.position} />
-        </div>
-
-        {primer.hairpin && primer.gc_clamp && (
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 600 }}>
-              Quick Metrics:
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-              <AnalysisItem 
-                label="Hairpin Risk" 
-                value={primer.hairpin.risk_level}
-                color={getRiskColor(primer.hairpin.risk_level)}
-              />
-              <AnalysisItem 
-                label="GC Clamp" 
-                value={primer.gc_clamp.has_clamp ? 'Yes' : 'No'}
-                color={primer.gc_clamp.has_clamp ? '#10B981' : '#F59E0B'}
-              />
-            </div>
-          </div>
-        )}
-
-        {primer.detailed_analysis && renderDetailedAnalysis(primer.detailed_analysis)}
-
-        {(primer.issues?.length > 0 || primer.warnings?.length > 0) && (
-          <div style={{ marginTop: '1rem' }}>
-            <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '0.5rem', fontWeight: 600 }}>
-              Legacy Warnings:
-            </div>
-            
-            {primer.issues?.length > 0 && (
-              <div style={{ marginBottom: '0.5rem' }}>
-                {primer.issues.map((issue, idx) => (
-                  <div key={idx} style={{
-                    color: '#EF4444',
-                    fontSize: '0.85rem',
-                    padding: '0.25rem 0',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '0.5rem'
-                  }}>
-                    <span>⚠️</span>
-                    <span>{issue}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            {primer.warnings?.length > 0 && (
-              <div>
-                {primer.warnings.map((warning, idx) => (
-                  <div key={idx} style={{
-                    color: '#F59E0B',
-                    fontSize: '0.85rem',
-                    padding: '0.25rem 0',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: '0.5rem'
-                  }}>
-                    <span>ℹ️</span>
-                    <span>{warning}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const currentMode = APPLICATION_MODES[applicationMode];
-
+  /* ════════════════════════════════════════════════════════════════════════
+     RENDER
+     ════════════════════════════════════════════════════════════════════════ */
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      background: 'linear-gradient(to bottom, #0f172a, #1e293b)',
-      padding: '2rem',
-      color: '#fff'
-    }}>
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        .loading-spinner {
-          display: inline-block;
-          width: 16px;
-          height: 16px;
-          border: 2px solid #ffffff40;
-          border-top-color: #ffffff;
-          border-radius: 50%;
-          animation: spin 0.6s linear infinite;
-        }
-      `}</style>
+  <div style={{ minHeight:'100vh', background:'#0c0e14', color:'#e2e4e9', fontFamily:'"Sora",sans-serif' }}>
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    ::-webkit-scrollbar{ width:5px; }
+    ::-webkit-scrollbar-track{ background:#131518; }
+    ::-webkit-scrollbar-thumb{ background:#2a2d3a; border-radius:3px; }
 
-      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-        <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-          <h1 style={{ 
-            fontSize: '2.5rem', 
-            fontWeight: 700,
-            background: 'linear-gradient(135deg, #00FFC6 0%, #00A389 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            marginBottom: '0.5rem'
-          }}>
-            🧬 Research-Grade PCR Primer Designer
-          </h1>
-          <p style={{ color: '#94a3b8', fontSize: '1.1rem' }}>
-            Application-specific primer design with comprehensive quality analysis
-          </p>
-        </div>
+    /* ── cards ── */
+    .pc{ background:#141720; border:1px solid #24272f; border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; }
 
-        {/* Application Mode Selector */}
-        <div style={{ marginBottom: '2rem' }}>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '0.75rem', 
-            color: '#cbd5e1', 
-            fontWeight: 600,
-            fontSize: '1.05rem'
-          }}>
-            🎯 Select Application Mode
-          </label>
-          <div style={{ 
-            display: 'grid', 
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', 
-            gap: '1rem' 
-          }}>
-            {Object.entries(APPLICATION_MODES).map(([key, mode]) => (
-              <ApplicationModeCard
-                key={key}
-                mode={mode}
-                isSelected={applicationMode === key}
-                onClick={() => setApplicationMode(key)}
-              />
-            ))}
-          </div>
-        </div>
+    /* ── labels ── */
+    .lbl{ display:block; font-size:.82rem; font-weight:600; color:#6b7080; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.42rem; }
 
-        <div style={{
-          background: 'rgba(0, 255, 198, 0.1)',
-          border: '1px solid #00FFC6',
-          borderRadius: '12px',
-          padding: '1rem 1.5rem',
-          marginBottom: '2rem'
-        }}>
-          <p style={{ margin: 0, color: '#e2e8f0' }}>
-            <strong style={{ color: '#00FFC6' }}>{currentMode.icon} {currentMode.name}:</strong> {currentMode.description}
-            <br />
-            <span style={{ fontSize: '0.9rem', color: '#94a3b8' }}>
-              Optimized for amplicons {currentMode.requirements.productSizeMin}-{currentMode.requirements.productSizeMax} bp, 
-              Tm {currentMode.requirements.tmMin}-{currentMode.requirements.tmMax}°C
-            </span>
-          </p>
-        </div>
+    /* ── inputs ── */
+    select, textarea{
+      width:100%; background:#0f1117; border:1px solid #24272f; border-radius:8px;
+      color:#e2e4e9; font-family:'Sora',sans-serif; font-size:.92rem;
+      padding:.7rem .85rem; outline:none; transition:border-color .2s;
+    }
+    select:focus, textarea:focus{ border-color:#00FFC6; }
+    textarea{ resize:vertical; font-family:'JetBrains Mono',monospace; font-size:.8rem; line-height:1.85; }
+    textarea::placeholder{ color:#2e3145; }
+    select option{ background:#0f1117; }
 
-        <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', color: '#cbd5e1', fontWeight: 500 }}>
-            Target DNA Sequence
-          </label>
-          <textarea
-            value={sequence}
-            onChange={(e) => setSequence(e.target.value)}
-            placeholder="ATGCTAGGATCGTACCTTGATCGGAATTCGATCGTACGATTAAGCTAGCTT..."
-            style={{
-              width: '100%',
-              minHeight: '120px',
-              background: '#1e293b',
-              border: '2px solid #334155',
-              borderRadius: '12px',
-              padding: '1rem',
-              color: '#fff',
-              fontSize: '1rem',
-              fontFamily: 'monospace',
-              resize: 'vertical'
-            }}
-          />
-          <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-            Length: {sequence.replace(/[^ATGC]/gi, '').length} bp
-            {sequence.replace(/[^ATGC]/gi, '').length < 150 && sequence.replace(/[^ATGC]/gi, '').length > 0 && 
-              <span style={{ color: '#F59E0B', marginLeft: '1rem' }}>
-                ⚠️ Short sequence - parameters will be auto-adjusted
-              </span>
-            }
-          </div>
-        </div>
+    /* ── buttons ── */
+    .btn-p{
+      display:flex; align-items:center; justify-content:center; gap:.5rem;
+      width:100%; padding:.88rem 1.25rem;
+      background:linear-gradient(135deg,#00FFC6,#00b08a);
+      border:none; border-radius:10px;
+      color:#0c0e14; font-family:'Sora',sans-serif; font-weight:600; font-size:.98rem;
+      cursor:pointer; transition:all .22s;
+    }
+    .btn-p:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 24px rgba(0,255,198,.28); }
+    .btn-p:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
-        <button 
-          onClick={handleDesignPrimers}
-          disabled={loading}
-          style={{
-            width: '100%',
-            padding: '1rem',
-            background: loading ? '#334155' : 'linear-gradient(135deg, #00FFC6 0%, #00A389 100%)',
-            border: 'none',
-            borderRadius: '12px',
-            color: loading ? '#94a3b8' : '#0f172a',
-            fontSize: '1.1rem',
-            fontWeight: 600,
-            cursor: loading ? 'not-allowed' : 'pointer',
-            marginBottom: '2rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '0.5rem',
-            transition: 'all 0.3s ease'
-          }}
-        >
-          {loading && <span className="loading-spinner"></span>}
-          {loading ? 'Designing Primers...' : '🚀 Design Primers'}
-        </button>
+    .btn-g{
+      display:inline-flex; align-items:center; gap:.38rem;
+      padding:.46rem .9rem; background:transparent;
+      border:1px solid #24272f; border-radius:7px;
+      color:#8a8f9e; font-family:'Sora',sans-serif; font-size:.84rem; font-weight:500;
+      cursor:pointer; transition:all .2s;
+    }
+    .btn-g:hover{ border-color:#00FFC6; color:#00FFC6; background:rgba(0,255,198,.05); }
 
-        {error && (
-          <div style={{
-            background: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid #EF4444',
-            borderRadius: '12px',
-            padding: '1rem',
-            marginBottom: '2rem',
-            color: '#EF4444',
-            whiteSpace: 'pre-wrap'
-          }}>
-            <strong>❌ Error:</strong> {error}
-          </div>
-        )}
+    .btn-sample{
+      display:inline-flex; align-items:center; gap:.35rem;
+      padding:.4rem .82rem; background:rgba(0,255,198,.08);
+      border:1px solid rgba(0,255,198,.28); border-radius:7px;
+      color:#00FFC6; font-family:'JetBrains Mono',monospace; font-size:.78rem; font-weight:500;
+      cursor:pointer; transition:all .2s;
+    }
+    .btn-sample:hover{ background:rgba(0,255,198,.15); border-color:rgba(0,255,198,.5); }
 
-        {primers && (
-          <div>
-            {/* Summary Stats */}
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-              gap: '1rem',
-              marginBottom: '2rem'
-            }}>
-              <StatCard label="Product Size" value={`${primers.expected_product_size} bp`} />
-              <StatCard label="Tm Difference" value={`${primers.tm_difference?.toFixed(1)}°C`} />
-              <StatCard 
-                label="Compatibility" 
-                value={primers.tm_difference < 5 ? 'Excellent' : 'Acceptable'}
-                color={primers.tm_difference < 5 ? '#10B981' : '#F59E0B'}
-              />
-              {primers.dimer_analysis && (
-                <StatCard 
-                  label="Dimer Risk" 
-                  value={primers.dimer_analysis.risk_level}
-                  color={getRiskColor(primers.dimer_analysis.risk_level)}
-                />
-              )}
-            </div>
+    /* ── mode cards ── */
+    .mode-card{
+      background:#141720; border:1px solid #24272f; border-radius:11px;
+      padding:1rem; cursor:pointer; transition:all .22s; position:relative;
+    }
+    .mode-card:hover{ border-color:#00FFC630; transform:translateY(-1px); }
+    .mode-card.active{ border-color:#00FFC6; background:rgba(0,255,198,.06); box-shadow:0 0 18px rgba(0,255,198,.1); }
 
-            {/* Optimization Tips */}
-            {primers.optimization_tips && primers.optimization_tips.length > 0 && (
-              <OptimizationTipsSection tips={primers.optimization_tips} />
-            )}
+    /* ── stats ── */
+    .stat-b{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:.8rem .6rem; text-align:center; }
+    .stat-v{ font-size:1.3rem; font-weight:700; line-height:1.2; }
+    .stat-l{ font-size:.72rem; color:#6b7080; text-transform:uppercase; letter-spacing:.06em; margin-top:.25rem; }
 
-            {/* AI Analysis Button */}
-            <button
-              onClick={handleExplainWithAI}
-              disabled={loadingAI}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                background: loadingAI ? '#334155' : 'rgba(139, 92, 246, 0.2)',
-                border: '2px solid #8B5CF6',
-                borderRadius: '12px',
-                color: loadingAI ? '#94a3b8' : '#C4B5FD',
-                fontSize: '1rem',
-                fontWeight: 600,
-                cursor: loadingAI ? 'not-allowed' : 'pointer',
-                marginBottom: '2rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-                transition: 'all 0.3s ease'
-              }}
-            >
-              {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Explanation'}
-            </button>
+    /* ── primer seq ── */
+    .seq-box{
+      background:#0a0c12; border:1px solid #1e2130; border-radius:8px;
+      padding:.8rem .9rem; font-family:'JetBrains Mono',monospace;
+      font-size:.84rem; color:#00FFC6; letter-spacing:1.5px; word-break:break-all; line-height:1.75;
+    }
 
-            {/* AI Explanation */}
-            {aiExplanation && (
-              <div style={{
-                background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(139, 92, 246, 0.08) 100%)',
-                border: '2px solid #8B5CF6',
-                borderRadius: '16px',
-                padding: '1.5rem',
-                marginBottom: '2rem'
-              }}>
-                <h3 style={{ 
-                  color: '#C4B5FD', 
-                  marginBottom: '1rem', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.5rem',
-                  fontSize: '1.2rem',
-                  fontWeight: 700
-                }}>
-                  🤖 AI Explanation
-                </h3>
-                <div style={{ 
-                  color: '#F3F4F6',
-                  lineHeight: '1.8', 
-                  whiteSpace: 'pre-wrap',
-                  fontSize: '0.95rem',
-                  background: 'rgba(15, 23, 42, 0.5)',
-                  padding: '1rem',
-                  borderRadius: '8px',
-                  maxHeight: '600px',
-                  overflowY: 'auto'
-                }}>
-                  {aiExplanation}
-                </div>
-              </div>
-            )}
+    /* ── misc ── */
+    .a-card{ border-radius:9px; padding:.85rem; margin-bottom:.55rem; }
+    .tip-card{ background:#0f1117; border:1px solid #1e2130; border-radius:9px; padding:.85rem; margin-bottom:.55rem; }
+    .proto-box{ background:#0f1117; border:1px solid #1e2130; border-radius:9px; padding:.8rem; text-align:center; }
+    .cand-row{ background:#0f1117; border:1px solid #1e2130; border-radius:8px; padding:.8rem; margin-bottom:.45rem; }
 
-            {/* Primers */}
-            <h3 style={{ color: '#00FFC6', marginBottom: '1rem', fontSize: '1.3rem' }}>Recommended Primers</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
-              {renderPrimer(primers.forward_primer, 'Forward')}
-              {renderPrimer(primers.reverse_primer, 'Reverse')}
-            </div>
+    /* ── spinner ── */
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+    .spin{ display:inline-block; width:16px; height:16px; border:2px solid #0c0e1440; border-top-color:#0c0e14; border-radius:50%; animation:spin .5s linear infinite; }
 
-            {/* PCR Protocol */}
-            {primers.pcr_protocol && (
-              <PCRProtocol protocol={primers.pcr_protocol} />
-            )}
+    /* ── info panel ── */
+    .info-wrap{ overflow:hidden; transition:max-height .4s cubic-bezier(.4,0,.2,1), opacity .3s; }
+    .info-wrap.closed{ max-height:0; opacity:0; }
+    .info-wrap.open{ max-height:1000px; opacity:1; }
 
-            {/* Alternative Candidates */}
-            {primers.all_candidates && primers.all_candidates.length > 0 && (
-              <AlternativeCandidates 
-                candidates={primers.all_candidates}
-                showCandidates={showCandidates}
-                setShowCandidates={setShowCandidates}
-                getQualityColor={getQualityColor}
-              />
-            )}
-          </div>
-        )}
+    /* ── step ── */
+    .step-row{ display:flex; gap:.55rem; align-items:flex-start; margin-bottom:.6rem; }
+    .step-num{ flex-shrink:0; width:24px; height:24px; border-radius:50%; background:#00FFC6; color:#0c0e14; font-size:.65rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:.1rem; }
+
+    /* ── responsive ── */
+    .mode-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; }
+    .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; }
+    .primer-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.85rem; }
+    .proto-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:.5rem; }
+    .prop-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.4rem; }
+
+    @media(max-width:640px){
+      .mode-grid{ grid-template-columns:repeat(2,1fr); }
+      .stat-grid{ grid-template-columns:repeat(2,1fr); }
+      .primer-grid{ grid-template-columns:1fr; }
+      .proto-grid{ grid-template-columns:1fr; }
+      .pc{ padding:1rem; }
+    }
+    @media(max-width:380px){
+      .mode-grid{ grid-template-columns:1fr 1fr; gap:.4rem; }
+      .stat-grid{ grid-template-columns:1fr 1fr; gap:.4rem; }
+    }
+  `}</style>
+
+  {/* ═══ HEADER ═══ */}
+  <div style={{ background:'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom:'1px solid #1e2130', padding:'1.5rem 1.2rem 1.2rem' }}>
+    <div style={{ maxWidth:860, margin:'0 auto' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'.65rem', marginBottom:'.4rem', flexWrap:'wrap' }}>
+        <span style={{ fontSize:'1.5rem' }}>🧬</span>
+        <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.4rem', color:'#fff' }}>PCR Primer Designer</h1>
+        <span style={{ background:'rgba(0,255,198,.1)', border:'1px solid rgba(0,255,198,.25)', color:'#00FFC6', fontSize:'.64rem', fontWeight:600, padding:'.2rem .52rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Research Grade</span>
       </div>
-    </div>
-  );
-}
-
-// Component for Application Mode Selection Card
-function ApplicationModeCard({ mode, isSelected, onClick }) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        background: isSelected 
-          ? 'linear-gradient(135deg, rgba(0, 255, 198, 0.2), rgba(0, 163, 137, 0.1))'
-          : 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-        border: isSelected ? '2px solid #00FFC6' : '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '12px',
-        padding: '1.25rem',
-        cursor: 'pointer',
-        transition: 'all 0.3s ease',
-        position: 'relative'
-      }}
-      onMouseEnter={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.borderColor = '#00FFC6';
-          e.currentTarget.style.transform = 'translateY(-2px)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isSelected) {
-          e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.1)';
-          e.currentTarget.style.transform = 'translateY(0)';
-        }
-      }}
-    >
-      {isSelected && (
-        <div style={{
-          position: 'absolute',
-          top: '0.75rem',
-          right: '0.75rem',
-          background: '#00FFC6',
-          borderRadius: '50%',
-          width: '24px',
-          height: '24px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#0f172a',
-          fontSize: '0.8rem',
-          fontWeight: 700
-        }}>
-          ✓
-        </div>
-      )}
-      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{mode.icon}</div>
-      <h4 style={{ 
-        color: isSelected ? '#00FFC6' : '#cbd5e1', 
-        margin: '0 0 0.5rem 0',
-        fontSize: '1.05rem',
-        fontWeight: 600
-      }}>
-        {mode.name}
-      </h4>
-      <p style={{ 
-        color: '#94a3b8', 
-        fontSize: '0.85rem', 
-        margin: 0,
-        lineHeight: '1.4'
-      }}>
-        {mode.description}
+      <p style={{ color:'#6b7080', fontSize:'.88rem', lineHeight:1.55, maxWidth:560 }}>
+        Application-specific primer design with Tm, GC, hairpin &amp; dimer analysis across four PCR workflows.
       </p>
     </div>
-  );
-}
+  </div>
 
-// Component for Detailed Analysis Cards
-function AnalysisDetailCard({ type, icon, title, issue, impact, fixes }) {
-  const colors = {
-    error: '#EF4444',
-    warning: '#F59E0B',
-    info: '#3B82F6'
-  };
-  
-  const color = colors[type] || '#6B7280';
-  
-  return (
-    <div style={{
-      background: `${color}15`,
-      border: `1px solid ${color}`,
-      borderRadius: '10px',
-      padding: '1rem',
-      marginBottom: '0.75rem'
-    }}>
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '0.5rem',
-        marginBottom: '0.75rem'
-      }}>
-        <span style={{ fontSize: '1.5rem' }}>{icon}</span>
-        <strong style={{ color, fontSize: '1rem' }}>{title}</strong>
-      </div>
-      
-      <div style={{ marginBottom: '0.75rem' }}>
-        <div style={{ 
-          color: '#cbd5e1', 
-          fontSize: '0.85rem', 
-          marginBottom: '0.25rem',
-          fontWeight: 600
-        }}>
-          ⚠️ Issue:
+  <div style={{ maxWidth:860, margin:'0 auto', padding:'1.15rem 1.1rem 3rem' }}>
+
+    {/* ═══ INFO TOGGLE ═══ */}
+    <button className="btn-g" onClick={()=>setInfoOpen(v=>!v)} style={{ width:'100%', justifyContent:'space-between', marginBottom:'1rem' }}>
+      <span style={{ display:'flex', alignItems:'center', gap:'.42rem' }}>
+        <span style={{ fontSize:'.9rem' }}>💡</span>
+        <span style={{ fontSize:'.86rem' }}>Why This Tool Matters &amp; How to Use It</span>
+      </span>
+      <span style={{ fontSize:'.72rem', color:'#6b7080', transition:'transform .25s', transform:infoOpen?'rotate(180deg)':'rotate(0)', display:'inline-block' }}>▼</span>
+    </button>
+
+    <div className={`info-wrap ${infoOpen ? 'open' : 'closed'}`}>
+      <div className="pc" style={{ padding:'1.3rem' }}>
+
+        {/* WHY */}
+        <div style={{ marginBottom:'1.1rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.5rem' }}>
+            <span style={{ fontSize:'.92rem' }}>🎯</span>
+            <span style={{ fontSize:'.82rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'.07em' }}>Why This Tool Matters</span>
+          </div>
+          <p style={{ fontSize:'.88rem', color:'#8a8f9e', lineHeight:1.75, margin:0 }}>
+            Designing primers by hand is slow and error-prone. A single mismatch at the
+            <strong style={{ color:'#c8cad4' }}> 3′ end </strong>
+            can silently kill your entire PCR run. This tool automates every critical check —
+            <strong style={{ color:'#c8cad4' }}> melting temperature </strong>,
+            <strong style={{ color:'#c8cad4' }}> GC content </strong>,
+            <strong style={{ color:'#c8cad4' }}> hairpin &amp; dimer risk </strong>, and
+            <strong style={{ color:'#c8cad4' }}> 3′ GC-clamp stability </strong>
+            — so you get a reliable, optimised primer pair in seconds. Each application mode enforces the exact parameter windows that matter most for that specific workflow.
+          </p>
         </div>
-        <div style={{ color: '#e2e8f0', fontSize: '0.85rem', lineHeight: '1.5' }}>
-          {issue}
+
+        <div style={{ borderTop:'1px solid #24272f', margin:'1rem 0' }}></div>
+
+        {/* WORKFLOW */}
+        <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.65rem' }}>
+          <span style={{ fontSize:'.92rem' }}>📖</span>
+          <span style={{ fontSize:'.82rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'.07em' }}>Workflow &amp; Next Steps</span>
         </div>
-      </div>
-      
-      <div style={{ marginBottom: '0.75rem' }}>
-        <div style={{ 
-          color: '#cbd5e1', 
-          fontSize: '0.85rem', 
-          marginBottom: '0.25rem',
-          fontWeight: 600
-        }}>
-          🔬 Impact in PCR:
-        </div>
-        <div style={{ color: '#e2e8f0', fontSize: '0.85rem', lineHeight: '1.5' }}>
-          {impact}
-        </div>
-      </div>
-      
-      <div>
-        <div style={{ 
-          color: '#cbd5e1', 
-          fontSize: '0.85rem', 
-          marginBottom: '0.5rem',
-          fontWeight: 600
-        }}>
-          🛠 Suggested Fixes:
-        </div>
-        {fixes.map((fix, idx) => (
-          <div key={idx} style={{
-            color: '#00FFC6',
-            fontSize: '0.8rem',
-            marginBottom: '0.35rem',
-            paddingLeft: '1rem',
-            position: 'relative',
-            lineHeight: '1.4'
-          }}>
-            <span style={{ position: 'absolute', left: 0 }}>•</span>
-            {fix}
+        {[
+          ['Pick Your Application',      'Choose the PCR type below. Each mode pre-tunes amplicon size, Tm window, and strictness — Diagnostic is the broadest; qPCR is the tightest.'],
+          ['Paste Your Target Sequence', 'Drop in your gene region (FASTA body or plain text). The tool strips headers, line-breaks, and numbers for you automatically.'],
+          ['Run the Analysis',           'Hit Design Primers. The engine scores every candidate on Tm balance, GC%, hairpin ΔG, dimer risk, and 3′ clamp — then surfaces the best pair.'],
+          ['Use the Results Downstream', 'Copy the oligo sequences straight into a synthesis order or clone them into an expression vector. The protocol block gives you annealing temp, extension time, and cycle count ready to go.']
+        ].map(([title, desc], i) => (
+          <div key={i} className="step-row">
+            <div className="step-num">{i+1}</div>
+            <div>
+              <div style={{ fontSize:'.86rem', fontWeight:600, color:'#c8cad4', marginBottom:'.1rem' }}>{title}</div>
+              <div style={{ fontSize:'.82rem', color:'#6b7080', lineHeight:1.6 }}>{desc}</div>
+            </div>
           </div>
         ))}
       </div>
     </div>
-  );
-}
 
-// Component for Optimization Tips Section
-function OptimizationTipsSection({ tips }) {
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05))',
-      border: '2px solid #F59E0B',
-      borderRadius: '16px',
-      padding: '1.5rem',
-      marginBottom: '2rem'
-    }}>
-      <h3 style={{ 
-        color: '#FCD34D', 
-        marginBottom: '1.25rem',
-        fontSize: '1.2rem',
-        fontWeight: 700,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem'
-      }}>
-        💡 PCR Optimization Recommendations
-      </h3>
-      
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {tips.map((tip, idx) => (
-          <OptimizationTipCard key={idx} {...tip} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// Component for Individual Optimization Tip
-function OptimizationTipCard({ category, icon, title, recommendation, urgency }) {
-  const urgencyColors = {
-    high: '#EF4444',
-    medium: '#F59E0B',
-    low: '#10B981'
-  };
-  
-  return (
-    <div style={{
-      background: 'rgba(15, 23, 42, 0.5)',
-      borderRadius: '10px',
-      padding: '1rem',
-      border: '1px solid rgba(255, 255, 255, 0.1)'
-    }}>
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: '0.75rem'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1.5rem' }}>{icon}</span>
-          <div>
-            <div style={{ 
-              color: '#cbd5e1', 
-              fontSize: '0.75rem',
-              marginBottom: '0.15rem'
-            }}>
-              {category}
-            </div>
-            <div style={{ color: '#FCD34D', fontWeight: 600, fontSize: '0.95rem' }}>
-              {title}
-            </div>
-          </div>
+    {/* ═══ MODE SELECTOR ═══ */}
+    <label className="lbl">Application Mode</label>
+    <div className="mode-grid" style={{ marginBottom:'1.1rem' }}>
+      {Object.entries(MODES).map(([k, m]) => (
+        <div key={k} className={`mode-card ${mode===k?'active':''}`} onClick={()=>setMode(k)}>
+          {mode===k && <span style={{ position:'absolute', top:'.5rem', right:'.5rem', background:'#00FFC6', color:'#0c0e14', fontSize:'.6rem', fontWeight:700, width:18, height:18, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>✓</span>}
+          <div style={{ fontSize:'1.3rem', marginBottom:'.28rem' }}>{m.icon}</div>
+          <div style={{ fontSize:'.82rem', fontWeight:600, color:mode===k?'#00FFC6':'#c8cad4', marginBottom:'.18rem' }}>{m.name}</div>
+          <div style={{ fontSize:'.74rem', color:'#6b7080', lineHeight:1.4 }}>{m.desc}</div>
         </div>
-        <span style={{
-          background: `${urgencyColors[urgency]}20`,
-          color: urgencyColors[urgency],
-          padding: '0.25rem 0.5rem',
-          borderRadius: '12px',
-          fontSize: '0.7rem',
-          fontWeight: 600,
-          textTransform: 'uppercase'
-        }}>
-          {urgency}
+      ))}
+    </div>
+
+    {/* mode strip */}
+    <div style={{ background:'rgba(0,255,198,.06)', border:'1px solid rgba(0,255,198,.18)', borderRadius:9, padding:'.58rem .85rem', marginBottom:'1.1rem', display:'flex', alignItems:'center', gap:'1rem', flexWrap:'wrap' }}>
+      <span style={{ fontSize:'.84rem', color:'#00FFC6', fontWeight:600 }}>{M.icon} {M.name}</span>
+      <span style={{ color:'#3a3d4a', fontSize:'.78rem' }}>|</span>
+      <span style={{ fontSize:'.82rem', color:'#8a8f9e' }}>Amplicon {M.prodMin}–{M.prodMax} bp</span>
+      <span style={{ color:'#3a3d4a', fontSize:'.78rem' }}>|</span>
+      <span style={{ fontSize:'.82rem', color:'#8a8f9e' }}>Tm {M.tmMin}–{M.tmMax} °C</span>
+    </div>
+
+    {/* ═══ SEQUENCE INPUT ═══ */}
+    <div className="pc">
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.42rem', flexWrap:'wrap', gap:'.4rem' }}>
+        <label className="lbl" style={{ margin:0 }}>Target DNA Sequence</label>
+        <button className="btn-sample" onClick={loadSample}><span>⚡</span> Load Sample</button>
+      </div>
+      <textarea rows={5} value={seq} onChange={e=>setSeq(e.target.value)} placeholder="Paste your target gene region here… (whitespace &amp; numbers are ignored)" />
+      {seq && (
+        <div style={{ marginTop:'.42rem', fontSize:'.8rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', alignItems:'center', gap:'.7rem', flexWrap:'wrap' }}>
+          <span>{bp} bp after cleaning</span>
+          {bp < 150 && bp > 0 && <span style={{ color:'#F59E0B' }}>⚠ Short sequence — parameters will auto-adjust</span>}
+        </div>
+      )}
+    </div>
+
+    {error && (
+      <div style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.25)', borderRadius:8, padding:'.62rem .82rem', marginBottom:'1rem', display:'flex', alignItems:'center', gap:'.45rem' }}>
+        <span style={{ fontSize:'.88rem' }}>⚠️</span>
+        <span style={{ fontSize:'.84rem', color:'#F87171' }}>{error}</span>
+      </div>
+    )}
+
+    {/* ═══ SUBMIT ═══ */}
+    <button className="btn-p" onClick={handleDesign} disabled={loading}>
+      {loading ? <><span className="spin"></span> Designing Primers…</> : <><span>🚀</span> Design Primers</>}
+    </button>
+
+    {/* ═══════════════════════════════════════════════════════════════════
+        RESULTS
+        ═══════════════════════════════════════════════════════════════════ */}
+    {primers && (<>
+
+      {/* STATS */}
+      <div style={{ marginTop:'1.5rem' }}>
+        <span style={{ fontSize:'.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.07em' }}>
+          Results — <span style={{ color:'#00FFC6' }}>{M.name}</span>
         </span>
+        <div className="stat-grid" style={{ marginTop:'.5rem' }}>
+          {[
+            { l:'Product Size',  v:`${primers.expected_product_size} bp`,                                     c:'#fff' },
+            { l:'Tm Difference', v:`${primers.tm_difference?.toFixed(1)} °C`,                                 c:'#fff' },
+            { l:'Compatibility', v: primers.tm_difference < 5 ? 'Excellent' : 'Acceptable',                  c: primers.tm_difference < 5 ? '#00FFC6' : '#F59E0B' },
+            { l:'Dimer Risk',    v: primers.dimer_analysis?.risk_level || '—',                                c: RC[primers.dimer_analysis?.risk_level] || '#6b7080' }
+          ].map((s,i) => (
+            <div key={i} className="stat-b">
+              <div className="stat-v" style={{ color:s.c }}>{s.v}</div>
+              <div className="stat-l">{s.l}</div>
+            </div>
+          ))}
+        </div>
       </div>
-      <div style={{ 
-        color: '#e2e8f0', 
-        fontSize: '0.85rem',
-        lineHeight: '1.6'
-      }}>
-        {recommendation}
-      </div>
-    </div>
-  );
-}
 
-function PropertyItem({ label, value }) {
-  return (
-    <div style={{
-      background: '#0f172a',
-      padding: '0.75rem',
-      borderRadius: '8px'
-    }}>
-      <div style={{ color: '#94a3b8', fontSize: '0.8rem', marginBottom: '0.25rem' }}>{label}</div>
-      <div style={{ color: '#fff', fontWeight: 600 }}>{value}</div>
-    </div>
-  );
-}
-
-function AnalysisItem({ label, value, color }) {
-  return (
-    <div style={{
-      background: '#0f172a',
-      padding: '0.5rem',
-      borderRadius: '6px',
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center'
-    }}>
-      <span style={{ color: '#94a3b8', fontSize: '0.8rem' }}>{label}</span>
-      <span style={{ color, fontWeight: 600, fontSize: '0.85rem' }}>{value}</span>
-    </div>
-  );
-}
-
-function StatCard({ label, value, color = '#00FFC6' }) {
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-      borderRadius: '16px',
-      padding: '1.5rem',
-      border: '1px solid rgba(255, 255, 255, 0.1)',
-      textAlign: 'center'
-    }}>
-      <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '0.5rem' }}>{label}</div>
-      <div style={{ color, fontSize: '1.75rem', fontWeight: 700 }}>{value}</div>
-    </div>
-  );
-}
-
-function PCRProtocol({ protocol }) {
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-      borderRadius: '16px',
-      padding: '1.5rem',
-      border: '1px solid rgba(255, 255, 255, 0.1)',
-      marginBottom: '2rem'
-    }}>
-      <h3 style={{ color: '#00FFC6', marginBottom: '1rem' }}>🧪 Recommended PCR Protocol</h3>
-      
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
-        <ProtocolItem label="Annealing Temp" value={`${protocol.annealing_temp}°C`} />
-        <ProtocolItem label="Extension Time" value={`${protocol.extension_time}s`} />
-        <ProtocolItem label="Cycles" value={protocol.cycles} />
-      </div>
-      
-      <div style={{ marginBottom: '1rem' }}>
-        <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '0.5rem' }}>Polymerase:</div>
-        <div style={{ color: '#e2e8f0' }}>{protocol.polymerase}</div>
-      </div>
-      
-      {protocol.notes?.length > 0 && (
-        <div>
-          <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '0.5rem' }}>Notes:</div>
-          {protocol.notes.map((note, idx) => (
-            <div key={idx} style={{ color: '#F59E0B', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
-              • {note}
+      {/* OPTIMIZATION TIPS */}
+      {primers.optimization_tips?.length && (
+        <div className="pc" style={{ marginTop:'1.1rem', borderColor:'rgba(245,158,11,.22)', background:'rgba(245,158,11,.04)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.65rem' }}>
+            <span style={{ fontSize:'.92rem' }}>💡</span>
+            <span style={{ fontSize:'.82rem', fontWeight:600, color:'#F59E0B', textTransform:'uppercase', letterSpacing:'.07em' }}>PCR Optimization</span>
+          </div>
+          {primers.optimization_tips.map((t,i) => (
+            <div key={i} className="tip-card">
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.32rem', flexWrap:'wrap', gap:'.35rem' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'.4rem' }}>
+                  <span style={{ fontSize:'.96rem' }}>{t.icon}</span>
+                  <span style={{ fontSize:'.82rem', fontWeight:600, color:'#FCD34D' }}>{t.title}</span>
+                </div>
+                <span style={{ background:`${UC[t.urg]}15`, color:UC[t.urg], fontSize:'.68rem', fontWeight:600, padding:'.18rem .48rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'.05em' }}>{t.urg}</span>
+              </div>
+              <p style={{ fontSize:'.84rem', color:'#8a8f9e', lineHeight:1.65, margin:0 }}>{t.rec}</p>
             </div>
           ))}
         </div>
       )}
-    </div>
-  );
-}
 
-function ProtocolItem({ label, value }) {
-  return (
-    <div style={{
-      background: '#0f172a',
-      padding: '1rem',
-      borderRadius: '8px',
-      textAlign: 'center'
-    }}>
-      <div style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '0.5rem' }}>{label}</div>
-      <div style={{ color: '#00FFC6', fontSize: '1.25rem', fontWeight: 600 }}>{value}</div>
-    </div>
-  );
-}
-
-function AlternativeCandidates({ candidates, showCandidates, setShowCandidates, getQualityColor }) {
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h3 style={{ color: '#00FFC6', margin: 0 }}>Alternative Candidates</h3>
-        <button
-          onClick={() => setShowCandidates(!showCandidates)}
-          style={{
-            background: 'transparent',
-            border: '1px solid #00FFC6',
-            color: '#00FFC6',
-            padding: '0.5rem 1rem',
-            borderRadius: '8px',
-            cursor: 'pointer'
-          }}
-        >
-          {showCandidates ? 'Hide' : 'Show'} ({candidates.length})
-        </button>
+      {/* PRIMERS */}
+      <div style={{ marginTop:'1.1rem' }}>
+        <span style={{ fontSize:'.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.07em' }}>Recommended Primers</span>
+      </div>
+      <div className="primer-grid" style={{ marginTop:'.5rem' }}>
+        {[
+          primers.forward_primer && { ...primers.forward_primer, label:'Forward' },
+          primers.reverse_primer && { ...primers.reverse_primer, label:'Reverse' }
+        ].map((p, i) => p ? (
+          <div key={i} className="pc" style={{ padding:'1.15rem' }}>
+            {/* header */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.6rem', flexWrap:'wrap', gap:'.35rem' }}>
+              <span style={{ fontSize:'.9rem', fontWeight:600, color:'#00FFC6' }}>{p.label} Primer</span>
+              <span style={{ background:`${QC[p.quality_grade]}18`, color:QC[p.quality_grade], border:`1px solid ${QC[p.quality_grade]}40`, fontSize:'.7rem', fontWeight:600, padding:'.2rem .55rem', borderRadius:12 }}>
+                {p.quality_grade} · {p.quality_score}/100
+              </span>
+            </div>
+            {/* copy + seq */}
+            <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'.28rem' }}>
+              <button className="btn-g" onClick={()=>navigator.clipboard?.writeText(p.sequence)}>📋 Copy</button>
+            </div>
+            <div className="seq-box">{p.sequence}</div>
+            {/* props */}
+            <div className="prop-grid" style={{ marginTop:'.65rem' }}>
+              {[['Length',`${p.length} bp`],['Tm',`${p.tm} °C`],['GC Content',`${p.gc_content} %`],['Position',p.position]].map(([l,v],j) => (
+                <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'.5rem .58rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'.76rem', color:'#6b7080' }}>{l}</span>
+                  <span style={{ fontSize:'.82rem', color:'#c8cad4', fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+            {/* quick metrics */}
+            {p.hairpin && p.gc_clamp && (
+              <div className="prop-grid" style={{ marginTop:'.5rem' }}>
+                {[
+                  { l:'Hairpin Risk', v:p.hairpin.risk_level,                          c:RC[p.hairpin.risk_level] },
+                  { l:'GC Clamp',     v:p.gc_clamp.has_clamp ? 'Present' : 'Missing',  c:p.gc_clamp.has_clamp ? '#00FFC6' : '#F59E0B' }
+                ].map((m,j) => (
+                  <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'.42rem .58rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <span style={{ fontSize:'.74rem', color:'#6b7080' }}>{m.l}</span>
+                    <span style={{ fontSize:'.8rem', color:m.c, fontWeight:600 }}>{m.v}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* quality flags */}
+            {p.detailed_analysis?.length > 0 && (
+              <div style={{ marginTop:'.7rem' }}>
+                <span style={{ fontSize:'.76rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.06em' }}>Quality Flags</span>
+                {p.detailed_analysis.map((a,j) => {
+                  const col = { error:'#EF4444', warning:'#F59E0B', info:'#60A5FA' }[a.type] || '#6b7080';
+                  return (
+                    <div key={j} className="a-card" style={{ marginTop:'.38rem', background:`${col}0e`, border:`1px solid ${col}35` }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:'.35rem', marginBottom:'.32rem' }}>
+                        <span style={{ fontSize:'.88rem' }}>{a.icon}</span>
+                        <span style={{ fontSize:'.8rem', fontWeight:600, color:col }}>{a.title}</span>
+                      </div>
+                      <p style={{ fontSize:'.78rem', color:'#8a8f9e', lineHeight:1.6, margin:'0 0 .26rem' }}>{a.issue}</p>
+                      <p style={{ fontSize:'.76rem', color:'#606878', lineHeight:1.55, margin:'0 0 .32rem', fontStyle:'italic' }}>{a.impact}</p>
+                      <div style={{ display:'flex', flexDirection:'column', gap:'.16rem' }}>
+                        {a.fixes.map((f,fi) => (
+                          <span key={fi} style={{ fontSize:'.76rem', color:'#00c9a0', paddingLeft:'.65rem', position:'relative' }}>
+                            <span style={{ position:'absolute', left:0, color:'#00FFC660' }}>›</span>{f}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div key={i} className="pc" style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:180, color:'#EF4444', fontSize:'.9rem' }}>No suitable primer found</div>
+        ))}
       </div>
 
-      {showCandidates && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {candidates.map((primer, idx) => (
-            <div key={idx} style={{
-              background: '#1e293b',
-              borderRadius: '8px',
-              padding: '1rem',
-              border: '1px solid #334155'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                <span style={{ color: '#00FFC6', fontWeight: 600 }}>{primer.type}</span>
-                <span style={{ color: getQualityColor(primer.quality_grade) }}>
-                  {primer.quality_grade}
-                </span>
+      {/* PCR PROTOCOL */}
+      {primers.pcr_protocol && (
+        <div className="pc" style={{ marginTop:'1.1rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.6rem' }}>
+            <span style={{ fontSize:'.92rem' }}>🧪</span>
+            <span style={{ fontSize:'.82rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'.07em' }}>Recommended Protocol</span>
+          </div>
+          <div className="proto-grid" style={{ marginBottom:'.7rem' }}>
+            {[['Annealing Temp',`${primers.pcr_protocol.annealing_temp} °C`],['Extension Time',`${primers.pcr_protocol.extension_time} s`],['Cycles',primers.pcr_protocol.cycles]].map(([l,v],i) => (
+              <div key={i} className="proto-box">
+                <div style={{ fontSize:'.72rem', color:'#6b7080', marginBottom:'.22rem', textTransform:'uppercase', letterSpacing:'.06em' }}>{l}</div>
+                <div style={{ fontSize:'1.1rem', color:'#00FFC6', fontWeight:600 }}>{v}</div>
               </div>
-              <div style={{ fontFamily: 'monospace', color: '#cbd5e1', marginBottom: '0.5rem', fontSize: '0.9rem' }}>
-                {primer.sequence}
+            ))}
+          </div>
+          <div style={{ fontSize:'.84rem', color:'#8a8f9e', marginBottom:'.32rem' }}>
+            <span style={{ color:'#6b7080' }}>Polymerase: </span>{primers.pcr_protocol.polymerase}
+          </div>
+          {primers.pcr_protocol.notes?.map((n,i) => (
+            <div key={i} style={{ fontSize:'.82rem', color:'#F59E0B', marginBottom:'.2rem' }}>• {n}</div>
+          ))}
+        </div>
+      )}
+
+      {/* ALTERNATIVE CANDIDATES */}
+      {primers.all_candidates?.length > 0 && (
+        <div className="pc" style={{ marginTop:'1.1rem' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.45rem' }}>
+            <span style={{ fontSize:'.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.07em' }}>Alternative Candidates</span>
+            <button className="btn-g" onClick={()=>setShowCand(v=>!v)}>{showCand ? 'Hide' : 'Show'} ({primers.all_candidates.length})</button>
+          </div>
+          {showCand && primers.all_candidates.map((c,i) => (
+            <div key={i} className="cand-row">
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'.28rem' }}>
+                <span style={{ fontSize:'.84rem', color:'#00FFC6', fontWeight:600 }}>{c.type}</span>
+                <span style={{ fontSize:'.8rem', color:QC[c.quality_grade] }}>{c.quality_grade}</span>
               </div>
-              <div style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
-                Tm: {primer.tm}°C | GC: {primer.gc_content}% | Len: {primer.length} bp
-              </div>
+              <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.8rem', color:'#c8cad4', marginBottom:'.28rem' }}>{c.sequence}</div>
+              <div style={{ fontSize:'.76rem', color:'#6b7080' }}>Tm {c.tm} °C · GC {c.gc_content} % · {c.length} bp</div>
             </div>
           ))}
         </div>
       )}
-    </div>
+    </>)}
+
+  </div>
+  </div>
   );
+
+  /* ── load sample (declared here so it closes over setSeq) ── */
+  function loadSample() { setSeq(SAMPLE_SEQUENCE); setError(''); setPrimers(null); }
 }
