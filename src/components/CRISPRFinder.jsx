@@ -1,1229 +1,519 @@
 import { useState } from 'react';
-import { getAIExplanation, validateSequence } from "../utils/apiUtils";
 
-// Cas enzyme configurations
+// ─── SAMPLE SEQUENCE ────────────────────────────────────────────────────────
+const SAMPLE_SEQUENCE = [
+  'ATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGC',
+  'TAGCTGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATG',
+  'CGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCAAGGTCGATCGTAGCTAGCTAGCT',
+  'AGCTGATCGTAGCTAGCATGCAGGCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGC',
+  'GATCGTAGCTAGCTAGCTAGCTGATCGTGGCTAGCATGCGATCGTAGCTAGCTAGCTAGC',
+  'TGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGAT',
+  'CGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGA',
+  'TCGTAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGT',
+  'AGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGATCG',
+  'TAGCTAGCATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGTAGC'
+].join('');
+
+// ─── CAS ENZYME CONFIGS ─────────────────────────────────────────────────────
 const CAS_ENZYMES = {
-  spCas9: {
-    name: 'SpCas9 (Streptococcus pyogenes)',
-    pam: 'NGG',
-    pamLength: 3,
-    guideLength: 20,
-    pamPosition: 'downstream', // PAM is downstream of target
-    color: '#10B981'
-  },
-  saCas9: {
-    name: 'SaCas9 (Staphylococcus aureus)',
-    pam: 'NNGRRT',
-    pamLength: 6,
-    guideLength: 21,
-    pamPosition: 'downstream',
-    color: '#3B82F6'
-  },
-  cas12a: {
-    name: 'Cas12a/Cpf1 (Lachnospiraceae)',
-    pam: 'TTTV',
-    pamLength: 4,
-    guideLength: 20,
-    pamPosition: 'upstream', // PAM is upstream of target
-    color: '#F59E0B'
-  },
-  custom: {
-    name: 'Custom PAM',
-    pam: '',
-    pamLength: 0,
-    guideLength: 20,
-    pamPosition: 'downstream',
-    color: '#8B5CF6'
-  }
+  spCas9:  { name:'SpCas9 (S. pyogenes)',     pam:'NGG',    pamLength:3, guideLength:20, pamPosition:'downstream', color:'#34D399' },
+  saCas9:  { name:'SaCas9 (S. aureus)',       pam:'NNGRRT', pamLength:6, guideLength:21, pamPosition:'downstream', color:'#60A5FA' },
+  cas12a:  { name:'Cas12a / Cpf1',            pam:'TTTV',   pamLength:4, guideLength:20, pamPosition:'upstream',   color:'#FBBF24' },
+  custom:  { name:'Custom PAM',               pam:'',       pamLength:0, guideLength:20, pamPosition:'downstream', color:'#A78BFA' }
 };
 
+// ─── IUPAC → REGEX ──────────────────────────────────────────────────────────
+const IUPAC = { N:'[ATGC]',R:'[AG]',Y:'[CT]',M:'[AC]',K:'[GT]',S:'[GC]',W:'[AT]',H:'[ACT]',B:'[CGT]',V:'[ACG]',D:'[AGT]',A:'A',T:'T',G:'G',C:'C' };
+const pamToRegex = p => new RegExp('^' + [...p.toUpperCase()].map(c => IUPAC[c]||'[ATGC]').join('') + '$');
+
+// ─── HELPERS ────────────────────────────────────────────────────────────────
+const revComp = seq => { const m={A:'T',T:'A',G:'C',C:'G'}; return seq.split('').reverse().map(b=>m[b]||b).join(''); };
+const gcContent = seq => ((seq.match(/[GC]/g)||[]).length / seq.length)*100;
+const efficiency = (guide, gc) => { if(gc<30||gc>80) return 'Low'; if(gc>=40&&gc<=60&&guide.length>=20) return 'High'; return 'Medium'; };
+
+// ─── MAIN COMPONENT ─────────────────────────────────────────────────────────
 export default function CRISPRFinder() {
-  const [sequence, setSequence] = useState('');
-  const [selectedCas, setSelectedCas] = useState('spCas9');
-  const [customPAM, setCustomPAM] = useState('');
-  const [customGuideLength, setCustomGuideLength] = useState(20);
-  const [customPAMPosition, setCustomPAMPosition] = useState('downstream');
-  const [pamSites, setPamSites] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [selectedSite, setSelectedSite] = useState(null);
-  const [aiExplanation, setAiExplanation] = useState('');
-  const [loadingAI, setLoadingAI] = useState(false);
-  const [showLegend, setShowLegend] = useState(true);
+  const [sequence, setSequence]           = useState('');
+  const [selectedCas, setSelectedCas]     = useState('spCas9');
+  const [customPAM, setCustomPAM]         = useState('');
+  const [customGuideLen, setCustomGuideLen]= useState(20);
+  const [customPAMPos, setCustomPAMPos]   = useState('downstream');
+  const [pamSites, setPamSites]           = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState('');
+  const [showInfo, setShowInfo]           = useState(false);
 
-  // Get current Cas configuration
-  const getCurrentCasConfig = () => {
-    if (selectedCas === 'custom') {
-      return {
-        ...CAS_ENZYMES.custom,
-        pam: customPAM.toUpperCase(),
-        pamLength: customPAM.length,
-        guideLength: customGuideLength,
-        pamPosition: customPAMPosition
-      };
-    }
-    return CAS_ENZYMES[selectedCas];
-  };
+  // ── config ──
+  const casConfig = selectedCas === 'custom'
+    ? { ...CAS_ENZYMES.custom, pam: customPAM.toUpperCase(), pamLength: customPAM.length, guideLength: customGuideLen, pamPosition: customPAMPos }
+    : CAS_ENZYMES[selectedCas];
 
-  // Find PAM sites in sequence
-  const findPAMSites = (seq, casConfig) => {
+  // ── find sites ──
+  const findPAMSites = (seq, cfg) => {
     const sites = [];
-    const cleanSeq = seq.toUpperCase().replace(/[^ATGC]/g, '');
-    
-    // Convert PAM pattern to regex
-    const pamRegex = pamPatternToRegex(casConfig.pam);
-    
-    // Search forward strand
-    for (let i = 0; i <= cleanSeq.length - casConfig.pamLength; i++) {
-      const pamSeq = cleanSeq.substring(i, i + casConfig.pamLength);
-      
-      if (pamRegex.test(pamSeq)) {
-        const site = extractSiteInfo(cleanSeq, i, 'forward', casConfig, pamSeq);
-        if (site) sites.push(site);
+    const rx   = pamToRegex(cfg.pam);
+
+    const addSites = (strand, src, toForward) => {
+      for (let i = 0; i <= src.length - cfg.pamLength; i++) {
+        const pamSeq = src.substring(i, i + cfg.pamLength);
+        if (!rx.test(pamSeq)) continue;
+        const fPos = strand === 'forward' ? i : toForward(i);
+        const pamEnd = fPos + cfg.pamLength;
+        let gS, gE;
+        if (cfg.pamPosition === 'downstream') { gE = fPos; gS = Math.max(0, gE - cfg.guideLength); }
+        else { gS = pamEnd; gE = Math.min(seq.length, gS + cfg.guideLength); }
+        const guide = seq.substring(gS, gE);
+        const gc    = gcContent(guide);
+        const ctxS  = Math.max(0, Math.min(gS, fPos) - 10);
+        const ctxE  = Math.min(seq.length, Math.max(gE, pamEnd) + 10);
+        sites.push({
+          position: fPos+1, positionEnd: pamEnd, strand, pamSequence: pamSeq,
+          guideRNA: guide, guideLength: guide.length, guideStart: gS+1, guideEnd: gE,
+          context: seq.substring(ctxS, ctxE), contextStart: ctxS+1,
+          gcContent: gc.toFixed(1), efficiency: efficiency(guide, gc)
+        });
       }
-    }
-    
-    // Search reverse strand
-    const reverseComp = getReverseComplement(cleanSeq);
-    for (let i = 0; i <= reverseComp.length - casConfig.pamLength; i++) {
-      const pamSeq = reverseComp.substring(i, i + casConfig.pamLength);
-      
-      if (pamRegex.test(pamSeq)) {
-        // Convert position back to forward strand coordinates
-        const forwardPos = cleanSeq.length - i - casConfig.pamLength;
-        const site = extractSiteInfo(cleanSeq, forwardPos, 'reverse', casConfig, pamSeq);
-        if (site) sites.push(site);
-      }
-    }
-    
-    // Sort by position
-    sites.sort((a, b) => a.position - b.position);
-    
+    };
+    addSites('forward', seq, i => i);
+    const rc = revComp(seq);
+    addSites('reverse', rc, i => seq.length - i - cfg.pamLength);
+    sites.sort((a,b) => a.position - b.position);
     return sites;
   };
 
-  // Convert PAM pattern to regex (N=any, R=A/G, Y=C/T, etc.)
-  const pamPatternToRegex = (pattern) => {
-    const iupac = {
-      'N': '[ATGC]',
-      'R': '[AG]',
-      'Y': '[CT]',
-      'M': '[AC]',
-      'K': '[GT]',
-      'S': '[GC]',
-      'W': '[AT]',
-      'H': '[ACT]',
-      'B': '[CGT]',
-      'V': '[ACG]',
-      'D': '[AGT]',
-      'A': 'A',
-      'T': 'T',
-      'G': 'G',
-      'C': 'C'
-    };
-    
-    let regex = '^';
-    for (let char of pattern.toUpperCase()) {
-      regex += iupac[char] || '[ATGC]';
-    }
-    regex += '$';
-    
-    return new RegExp(regex);
-  };
-
-  // Extract site information
-  const extractSiteInfo = (seq, pamStart, strand, casConfig, pamSeq) => {
-    let guideStart, guideEnd, pamEnd;
-    
-    pamEnd = pamStart + casConfig.pamLength;
-    
-    if (casConfig.pamPosition === 'downstream') {
-      // PAM is after the target (SpCas9, SaCas9)
-      guideEnd = pamStart;
-      guideStart = Math.max(0, guideEnd - casConfig.guideLength);
-    } else {
-      // PAM is before the target (Cas12a)
-      guideStart = pamEnd;
-      guideEnd = Math.min(seq.length, guideStart + casConfig.guideLength);
-    }
-    
-    // Extract sequences
-    const guideRNA = seq.substring(guideStart, guideEnd);
-    
-    // Context (±10 bp around PAM + guide)
-    const contextStart = Math.max(0, Math.min(guideStart, pamStart) - 10);
-    const contextEnd = Math.min(seq.length, Math.max(guideEnd, pamEnd) + 10);
-    const context = seq.substring(contextStart, contextEnd);
-    
-    // Calculate GC content and efficiency
-    const gcContent = calculateGCContent(guideRNA);
-    const efficiency = estimateEfficiency(guideRNA, gcContent);
-    
-    return {
-      position: pamStart + 1, // 1-indexed
-      positionEnd: pamEnd,
-      strand: strand,
-      pamSequence: pamSeq,
-      guideRNA: guideRNA,
-      guideLength: guideRNA.length,
-      guideStart: guideStart + 1,
-      guideEnd: guideEnd,
-      context: context,
-      contextStart: contextStart + 1,
-      gcContent: gcContent.toFixed(1),
-      efficiency: efficiency
-    };
-  };
-
-  // Get reverse complement
-  const getReverseComplement = (seq) => {
-    const complement = { 'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G' };
-    return seq.split('').reverse().map(base => complement[base] || base).join('');
-  };
-
-  // Calculate GC content
-  const calculateGCContent = (seq) => {
-    const gc = (seq.match(/[GC]/g) || []).length;
-    return (gc / seq.length) * 100;
-  };
-
-  // Estimate targeting efficiency
-  const estimateEfficiency = (guide, gcContent) => {
-    // Simple heuristic based on GC content and guide length
-    if (gcContent < 30 || gcContent > 80) return 'Low';
-    if (gcContent >= 40 && gcContent <= 60 && guide.length >= 20) return 'High';
-    return 'Medium';
-  };
-
-  const handleFindPAMSites = async () => {
-    if (!sequence.trim()) {
-      setError('Please enter a DNA sequence');
-      return;
-    }
-
-    const casConfig = getCurrentCasConfig();
-    
-    if (selectedCas === 'custom' && !customPAM.trim()) {
-      setError('Please enter a custom PAM sequence');
-      return;
-    }
-
-    // Validate sequence
-    const validation = validateSequence(sequence);
-    if (!validation.valid) {
-      setError(validation.error);
-      return;
-    }
-
-    setLoading(true);
+  // ── submit ──
+  const handleFind = () => {
     setError('');
-    setAiExplanation('');
+    if (!sequence.trim()) { setError('Please enter a DNA sequence.'); return; }
+    if (selectedCas === 'custom' && !customPAM.trim()) { setError('Enter a custom PAM pattern.'); return; }
+    const clean = sequence.toUpperCase().replace(/[^ATGC]/g,'');
+    if (clean.length < 20) { setError('Sequence must be at least 20 bp.'); return; }
+    setLoading(true);
     setPamSites(null);
-
-    // Simulate async operation
     setTimeout(() => {
-      try {
-        const sites = findPAMSites(validation.cleaned, casConfig);
-        
-        const forwardSites = sites.filter(s => s.strand === 'forward').length;
-        const reverseSites = sites.filter(s => s.strand === 'reverse').length;
-        
-        setPamSites({
-          sites: sites,
-          total_sites: sites.length,
-          forward_strand_sites: forwardSites,
-          reverse_strand_sites: reverseSites,
-          cas_enzyme: casConfig.name,
-          pam_pattern: casConfig.pam,
-          sequence_length: validation.cleaned.length
-        });
-        setSelectedSite(null);
-      } catch (err) {
-        setError('Error analyzing sequence: ' + err.message);
-      }
+      const sites = findPAMSites(clean, casConfig);
+      setPamSites({
+        sites,
+        total: sites.length,
+        forward: sites.filter(s=>s.strand==='forward').length,
+        reverse: sites.filter(s=>s.strand==='reverse').length,
+        seqLen: clean.length
+      });
       setLoading(false);
-    }, 500);
+    }, 420);
   };
 
-  const handleExplainWithAI = async () => {
-    if (!pamSites) return;
-    
-    setLoadingAI(true);
-    
-    const casConfig = getCurrentCasConfig();
-    const analysisData = {
-      cas_enzyme: casConfig.name,
-      pam_pattern: casConfig.pam,
-      total_sites: pamSites.total_sites,
-      forward_sites: pamSites.forward_strand_sites,
-      reverse_sites: pamSites.reverse_strand_sites,
-      sequence_length: pamSites.sequence_length,
-      high_efficiency: pamSites.sites.filter(s => s.efficiency === 'High').length,
-      medium_efficiency: pamSites.sites.filter(s => s.efficiency === 'Medium').length,
-      low_efficiency: pamSites.sites.filter(s => s.efficiency === 'Low').length,
-      avg_gc_content: pamSites.sites.length > 0 
-        ? (pamSites.sites.reduce((sum, s) => sum + parseFloat(s.gcContent), 0) / pamSites.sites.length).toFixed(1)
-        : 0
-    };
-    
-    const response = await getAIExplanation('CRISPR PAM Finder', analysisData);
-    
-    setLoadingAI(false);
-    
-    if (response.success) {
-      setAiExplanation(response.data.explanation);
-    } else {
-      setError(response.error);
-    }
-  };
+  // ── load sample ──
+  const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPamSites(null); };
 
-  const downloadReport = (format = 'txt') => {
-    if (!pamSites) return;
+  // ── efficiency colour ──
+  const effColor = e => ({ High:'#34D399', Medium:'#FBBF24', Low:'#F87171' }[e]);
+  const effBg    = e => ({ High:'rgba(52,211,153,0.12)', Medium:'rgba(251,191,36,0.12)', Low:'rgba(248,113,113,0.12)' }[e]);
 
-    const reportContent = generateReportContent();
-    
-    if (format === 'pdf') {
-      const printWindow = window.open('', '_blank');
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>CRISPR PAM Site Analysis Report</title>
-            <style>
-              body { 
-                font-family: 'Inter', -apple-system, sans-serif; 
-                padding: 40px;
-                line-height: 1.6;
-                max-width: 900px;
-                margin: 0 auto;
-              }
-              h1 { 
-                color: #10B981; 
-                font-size: 24px;
-                border-bottom: 3px solid #10B981;
-                padding-bottom: 10px;
-              }
-              h2 { 
-                color: #1F2937;
-                font-size: 18px;
-                margin-top: 30px;
-                border-bottom: 1px solid #E5E7EB;
-                padding-bottom: 5px;
-              }
-              .disclaimer {
-                background: #FEF3C7;
-                border-left: 4px solid #F59E0B;
-                padding: 15px;
-                margin: 20px 0;
-                font-size: 12px;
-              }
-              table {
-                width: 100%;
-                border-collapse: collapse;
-                margin: 20px 0;
-                font-size: 11px;
-              }
-              th, td {
-                border: 1px solid #E5E7EB;
-                padding: 8px;
-                text-align: left;
-              }
-              th {
-                background: #F3F4F6;
-                font-weight: 600;
-              }
-              pre { 
-                white-space: pre-wrap; 
-                word-wrap: break-word;
-                font-family: 'Courier New', monospace;
-                font-size: 10px;
-                background: #F9FAFB;
-                padding: 10px;
-                border-radius: 4px;
-              }
-            </style>
-          </head>
-          <body>
-            <pre>${reportContent}</pre>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    } else {
-      const blob = new Blob([reportContent], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `CRISPR_PAM_Report_${new Date().toISOString().split('T')[0]}.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }
-  };
-
-  const generateReportContent = () => {
-    const casConfig = getCurrentCasConfig();
-    
-    let report = '='.repeat(90) + '\n';
-    report += 'CRISPR PAM SITE ANALYSIS REPORT - RESEARCH GRADE\n';
-    report += '='.repeat(90) + '\n\n';
-    report += `Generated: ${new Date().toLocaleString()}\n`;
-    report += `Analysis Tool: BioTools Suite - CRISPR PAM Finder\n\n`;
-    
-    report += 'DISCLAIMER\n';
-    report += '-'.repeat(90) + '\n';
-    report += 'This report is for research and educational purposes only. It is not intended for\n';
-    report += 'clinical diagnostics or therapeutic applications. All CRISPR designs should be\n';
-    report += 'experimentally validated before use. Consult relevant biosafety guidelines and\n';
-    report += 'obtain necessary approvals before conducting gene editing experiments.\n\n';
-    
-    report += 'ANALYSIS PARAMETERS\n';
-    report += '-'.repeat(90) + '\n';
-    report += `Cas Enzyme: ${casConfig.name}\n`;
-    report += `PAM Pattern: ${casConfig.pam}\n`;
-    report += `PAM Position: ${casConfig.pamPosition === 'downstream' ? 'Downstream of target' : 'Upstream of target'}\n`;
-    report += `Guide RNA Length: ${casConfig.guideLength} bp\n`;
-    report += `Sequence Length: ${pamSites.sequence_length} bp\n`;
-    report += `Analysis Date: ${new Date().toLocaleDateString()}\n\n`;
-    
-    report += 'SUMMARY\n';
-    report += '-'.repeat(90) + '\n';
-    report += `Total PAM Sites Found: ${pamSites.total_sites}\n`;
-    report += `Forward Strand (+): ${pamSites.forward_strand_sites}\n`;
-    report += `Reverse Strand (-): ${pamSites.reverse_strand_sites}\n`;
-    
-    if (pamSites.sites.length > 0) {
-      const highEff = pamSites.sites.filter(s => s.efficiency === 'High').length;
-      const medEff = pamSites.sites.filter(s => s.efficiency === 'Medium').length;
-      const lowEff = pamSites.sites.filter(s => s.efficiency === 'Low').length;
-      
-      report += `\nEfficiency Distribution:\n`;
-      report += `  High Efficiency: ${highEff} (${((highEff/pamSites.total_sites)*100).toFixed(1)}%)\n`;
-      report += `  Medium Efficiency: ${medEff} (${((medEff/pamSites.total_sites)*100).toFixed(1)}%)\n`;
-      report += `  Low Efficiency: ${lowEff} (${((lowEff/pamSites.total_sites)*100).toFixed(1)}%)\n`;
-    }
-    report += '\n';
-    
-    if (pamSites.sites.length > 0) {
-      report += 'DETAILED PAM SITES\n';
-      report += '-'.repeat(90) + '\n\n';
-      
-      // Table header
-      report += String.prototype.padEnd.call('Site', 6);
-      report += String.prototype.padEnd.call('Position', 12);
-      report += String.prototype.padEnd.call('Strand', 8);
-      report += String.prototype.padEnd.call('PAM', 10);
-      report += String.prototype.padEnd.call('GC%', 6);
-      report += String.prototype.padEnd.call('Efficiency', 12);
-      report += 'sgRNA\n';
-      report += '-'.repeat(90) + '\n';
-      
-      pamSites.sites.forEach((site, idx) => {
-        report += String.prototype.padEnd.call(`${idx + 1}`, 6);
-        report += String.prototype.padEnd.call(`${site.position}-${site.positionEnd}`, 12);
-        report += String.prototype.padEnd.call(site.strand === 'forward' ? '(+)' : '(-)', 8);
-        report += String.prototype.padEnd.call(site.pamSequence, 10);
-        report += String.prototype.padEnd.call(site.gcContent, 6);
-        report += String.prototype.padEnd.call(site.efficiency, 12);
-        report += site.guideRNA + '\n';
-      });
-      report += '\n';
-      
-      report += 'COMPLETE SITE DETAILS\n';
-      report += '-'.repeat(90) + '\n\n';
-      
-      pamSites.sites.forEach((site, idx) => {
-        report += `Site ${idx + 1}:\n`;
-        report += `  PAM Position: ${site.position}-${site.positionEnd} (${site.strand === 'forward' ? 'forward strand +' : 'reverse strand -'})\n`;
-        report += `  PAM Sequence: ${site.pamSequence}\n`;
-        report += `  Guide RNA (sgRNA): ${site.guideRNA}\n`;
-        report += `  Guide Position: ${site.guideStart}-${site.guideEnd}\n`;
-        report += `  Guide Length: ${site.guideLength} bp\n`;
-        report += `  GC Content: ${site.gcContent}%\n`;
-        report += `  Target Efficiency: ${site.efficiency}\n`;
-        report += `  Context (±10bp): ${site.context}\n`;
-        report += `  Context Position: ${site.contextStart}-${site.contextStart + site.context.length - 1}\n\n`;
-      });
-    }
-    
-    if (aiExplanation && !aiExplanation.startsWith('❌')) {
-      report += 'AI GUIDANCE & RECOMMENDATIONS\n';
-      report += '-'.repeat(90) + '\n';
-      report += aiExplanation + '\n\n';
-    }
-    
-    report += '='.repeat(90) + '\n';
-    report += 'END OF REPORT\n';
-    report += 'Generated by BioTools Suite - For Research Use Only\n';
-    report += '='.repeat(90) + '\n';
-    
-    return report;
-  };
-
-  const highlightPAMInSequence = () => {
-    if (!pamSites || !sequence) return null;
-
-    const seq = sequence.toUpperCase().replace(/[^ATGC]/g, '');
-    const elements = [];
-    let lastIndex = 0;
-
-    pamSites.sites.forEach((site, siteIdx) => {
-      const pamStart = site.position - 1; // Convert to 0-indexed
-      const pamEnd = site.positionEnd;
-      const guideStart = site.guideStart - 1;
-      const guideEnd = site.guideEnd;
-
-      // Add any sequence before this site
-      if (lastIndex < Math.min(pamStart, guideStart)) {
-        elements.push({
-          text: seq.substring(lastIndex, Math.min(pamStart, guideStart)),
-          type: 'normal'
-        });
-      }
-
-      // Determine order based on PAM position
-      const casConfig = getCurrentCasConfig();
-      if (casConfig.pamPosition === 'downstream') {
-        // Guide first, then PAM
-        if (lastIndex < guideEnd) {
-          elements.push({
-            text: seq.substring(Math.max(lastIndex, guideStart), guideEnd),
-            type: 'guide',
-            strand: site.strand
-          });
-        }
-        elements.push({
-          text: seq.substring(pamStart, pamEnd),
-          type: 'pam',
-          strand: site.strand
-        });
-        lastIndex = pamEnd;
-      } else {
-        // PAM first, then guide
-        elements.push({
-          text: seq.substring(pamStart, pamEnd),
-          type: 'pam',
-          strand: site.strand
-        });
-        elements.push({
-          text: seq.substring(guideStart, guideEnd),
-          type: 'guide',
-          strand: site.strand
-        });
-        lastIndex = guideEnd;
-      }
-    });
-
-    // Add remaining sequence
-    if (lastIndex < seq.length) {
-      elements.push({
-        text: seq.substring(lastIndex),
-        type: 'normal'
-      });
-    }
-
-    return (
-      <div className="sequence-box">
-        {elements.map((segment, idx) => (
-          <span
-            key={idx}
-            style={{
-              backgroundColor: 
-                segment.type === 'pam' 
-                  ? (segment.strand === 'forward' ? '#10B98130' : '#3B82F630')
-                  : 'transparent',
-              textDecoration: segment.type === 'guide' ? 'underline' : 'none',
-              textDecorationColor: segment.strand === 'forward' ? '#10B981' : '#3B82F6',
-              textDecorationThickness: '2px',
-              textUnderlineOffset: '3px',
-              padding: segment.type !== 'normal' ? '2px 4px' : '0',
-              borderRadius: '3px',
-              fontWeight: segment.type === 'pam' ? '700' : '400',
-              fontFamily: 'monospace'
-            }}
-          >
-            {segment.text}
-          </span>
-        ))}
-      </div>
-    );
-  };
-
-  const renderChart = () => {
-    if (!pamSites || pamSites.sites.length === 0) return null;
-
-    const forwardCount = pamSites.forward_strand_sites;
-    const reverseCount = pamSites.reverse_strand_sites;
-    const total = pamSites.total_sites;
-
-    const forwardPercent = total > 0 ? (forwardCount / total) * 100 : 0;
-    const reversePercent = total > 0 ? (reverseCount / total) * 100 : 0;
-
-    const highEfficiency = pamSites.sites.filter(s => s.efficiency === 'High').length;
-    const mediumEfficiency = pamSites.sites.filter(s => s.efficiency === 'Medium').length;
-    const lowEfficiency = pamSites.sites.filter(s => s.efficiency === 'Low').length;
-
-    return (
-      <div className="charts-container">
-        <div className="chart-card">
-          <h4 className="chart-title">Strand Distribution</h4>
-          <div className="bar-chart">
-            <div className="bar-item">
-              <div className="bar-label">
-                <span>Forward Strand (+)</span>
-                <span className="bar-value">{forwardCount}</span>
-              </div>
-              <div className="bar-track">
-                <div 
-                  className="bar-fill"
-                  style={{ 
-                    width: `${forwardPercent}%`,
-                    background: 'linear-gradient(90deg, #10B981, #34D399)'
-                  }}
-                />
-              </div>
-              <span className="bar-percent">{forwardPercent.toFixed(1)}%</span>
-            </div>
-            <div className="bar-item">
-              <div className="bar-label">
-                <span>Reverse Strand (-)</span>
-                <span className="bar-value">{reverseCount}</span>
-              </div>
-              <div className="bar-track">
-                <div 
-                  className="bar-fill"
-                  style={{ 
-                    width: `${reversePercent}%`,
-                    background: 'linear-gradient(90deg, #3B82F6, #60A5FA)'
-                  }}
-                />
-              </div>
-              <span className="bar-percent">{reversePercent.toFixed(1)}%</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="chart-card">
-          <h4 className="chart-title">Target Efficiency Distribution</h4>
-          <div className="bar-chart">
-            <div className="bar-item">
-              <div className="bar-label">
-                <span>High Efficiency</span>
-                <span className="bar-value">{highEfficiency}</span>
-              </div>
-              <div className="bar-track">
-                <div 
-                  className="bar-fill"
-                  style={{ 
-                    width: `${(highEfficiency / total) * 100}%`,
-                    background: 'linear-gradient(90deg, #10B981, #34D399)'
-                  }}
-                />
-              </div>
-              <span className="bar-percent">{((highEfficiency / total) * 100).toFixed(1)}%</span>
-            </div>
-            <div className="bar-item">
-              <div className="bar-label">
-                <span>Medium Efficiency</span>
-                <span className="bar-value">{mediumEfficiency}</span>
-              </div>
-              <div className="bar-track">
-                <div 
-                  className="bar-fill"
-                  style={{ 
-                    width: `${(mediumEfficiency / total) * 100}%`,
-                    background: 'linear-gradient(90deg, #F59E0B, #FBBF24)'
-                  }}
-                />
-              </div>
-              <span className="bar-percent">{((mediumEfficiency / total) * 100).toFixed(1)}%</span>
-            </div>
-            <div className="bar-item">
-              <div className="bar-label">
-                <span>Low Efficiency</span>
-                <span className="bar-value">{lowEfficiency}</span>
-              </div>
-              <div className="bar-track">
-                <div 
-                  className="bar-fill"
-                  style={{ 
-                    width: `${(lowEfficiency / total) * 100}%`,
-                    background: 'linear-gradient(90deg, #EF4444, #F87171)'
-                  }}
-                />
-              </div>
-              <span className="bar-percent">{((lowEfficiency / total) * 100).toFixed(1)}%</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const getEfficiencyColor = (efficiency) => {
-    if (efficiency === 'High') return '#10B981';
-    if (efficiency === 'Medium') return '#F59E0B';
-    return '#EF4444';
-  };
-
-  const casConfig = getCurrentCasConfig();
-
+  // ─── RENDER ───────────────────────────────────────────────────────────────
   return (
-    <div style={{ fontFamily: 'Inter, sans-serif' }} className="analysis-section">
+    <div style={{ minHeight:'100vh', background:'#0f1117', color:'#e2e4e9', fontFamily:'"Sora", sans-serif' }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap');
-        
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        
-        .loading-spinner {
-          display: inline-block;
-          width: 16px;
-          height: 16px;
-          border: 2px solid #ffffff40;
-          border-top-color: #ffffff;
-          border-radius: 50%;
-          animation: spin 0.6s linear infinite;
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        *{ box-sizing:border-box; margin:0; padding:0; }
+        ::-webkit-scrollbar { width:6px; }
+        ::-webkit-scrollbar-track { background:#1a1d27; }
+        ::-webkit-scrollbar-thumb { background:#2e3240; border-radius:3px; }
 
-        .legend-box {
-          background: #FFFFFF;
-          border: 2px solid #10B981;
-          border-radius: 8px;
-          padding: 1.25rem;
-          margin-bottom: 1rem;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        .card {
+          background:#161821;
+          border:1px solid #2a2d3a;
+          border-radius:12px;
+          padding:1.5rem;
+          margin-bottom:1.25rem;
         }
+        .card-sm { padding:1rem; }
 
-        .legend-items {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 1.5rem;
-          font-size: 0.9rem;
+        .btn-primary {
+          display:flex; align-items:center; justify-content:center; gap:0.5rem;
+          width:100%; padding:0.85rem 1.5rem;
+          background:linear-gradient(135deg,#34D399,#059669);
+          border:none; border-radius:10px;
+          color:#0f1117; font-family:'Sora',sans-serif; font-weight:600; font-size:0.95rem;
+          cursor:pointer; transition:all .25s;
+          letter-spacing:0.02em;
         }
+        .btn-primary:hover { filter:brightness(1.15); transform:translateY(-1px); box-shadow:0 4px 20px rgba(52,211,153,.35); }
+        .btn-primary:disabled { filter:brightness(.6); cursor:not-allowed; transform:none; box-shadow:none; }
 
-        .legend-item {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
+        .btn-ghost {
+          display:inline-flex; align-items:center; gap:0.4rem;
+          padding:0.5rem 1rem;
+          background:transparent; border:1px solid #2e3240; border-radius:8px;
+          color:#a0a3b1; font-family:'Sora',sans-serif; font-size:0.82rem; font-weight:500;
+          cursor:pointer; transition:all .2s;
         }
+        .btn-ghost:hover { border-color:#34D399; color:#34D399; background:rgba(52,211,153,.06); }
 
-        .legend-sample {
-          padding: 2px 8px;
-          border-radius: 4px;
-          font-family: monospace;
-          font-weight: 600;
-          font-size: 0.8rem;
+        .btn-sample {
+          display:inline-flex; align-items:center; gap:0.35rem;
+          padding:0.42rem 0.85rem;
+          background:rgba(52,211,153,.1); border:1px solid rgba(52,211,153,.3); border-radius:7px;
+          color:#34D399; font-family:'JetBrains Mono',monospace; font-size:0.75rem; font-weight:500;
+          cursor:pointer; transition:all .2s;
         }
+        .btn-sample:hover { background:rgba(52,211,153,.18); border-color:rgba(52,211,153,.55); }
 
-        .results-table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 1.5rem 0;
-          font-size: 0.85rem;
-          background: white;
-          border-radius: 8px;
-          overflow: hidden;
-          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        label.lbl {
+          display:block; font-size:0.78rem; font-weight:600;
+          color:#6b7280; text-transform:uppercase; letter-spacing:0.08em;
+          margin-bottom:0.45rem;
         }
+        select, textarea {
+          width:100%; background:#1a1d27; border:1px solid #2e3240; border-radius:8px;
+          color:#e2e4e9; font-family:'Sora',sans-serif; font-size:0.88rem;
+          padding:0.7rem 0.85rem; outline:none; transition:border .2s;
+        }
+        select:focus, textarea:focus { border-color:#34D399; }
+        textarea { resize:vertical; font-family:'JetBrains Mono',monospace; font-size:0.78rem; line-height:1.7; }
+        textarea::placeholder { color:#3d4050; }
+        select option { background:#1a1d27; }
 
+        .stat-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:0.75rem; }
+        .stat-box {
+          background:#1a1d27; border:1px solid #2a2d3a; border-radius:10px;
+          padding:0.85rem 0.75rem; text-align:center;
+        }
+        .stat-val { font-size:1.55rem; font-weight:700; line-height:1.2; }
+        .stat-lbl { font-size:0.7rem; color:#6b7280; text-transform:uppercase; letter-spacing:0.06em; margin-top:0.3rem; }
+
+        .results-table { width:100%; border-collapse:collapse; font-size:0.8rem; }
         .results-table th {
-          background: linear-gradient(135deg, #10B981, #059669);
-          color: white;
-          padding: 0.75rem;
-          text-align: left;
-          font-weight: 600;
-          font-size: 0.8rem;
+          background:#1a1d27; color:#6b7280; font-weight:600; font-size:0.68rem;
+          text-transform:uppercase; letter-spacing:0.07em; padding:0.6rem 0.7rem;
+          text-align:left; border-bottom:1px solid #2a2d3a; position:sticky; top:0;
         }
-
         .results-table td {
-          padding: 0.75rem;
-          border-bottom: 1px solid #E5E7EB;
+          padding:0.55rem 0.7rem; border-bottom:1px solid #1e2130;
+          font-family:'JetBrains Mono',monospace;
+        }
+        .results-table tr:hover td { background:#1c1f2a; }
+
+        .eff-badge {
+          display:inline-block; padding:0.2rem 0.55rem; border-radius:5px;
+          font-size:0.7rem; font-weight:600; letter-spacing:0.03em;
+        }
+        .strand-badge {
+          display:inline-block; padding:0.18rem 0.5rem; border-radius:5px;
+          font-size:0.72rem; font-weight:600;
         }
 
-        .results-table tr:last-child td {
-          border-bottom: none;
+        .seq-display {
+          background:#12141c; border:1px solid #2a2d3a; border-radius:8px;
+          padding:0.9rem 1rem; font-family:'JetBrains Mono',monospace;
+          font-size:0.72rem; line-height:1.9; word-break:break-all; color:#a0a3b1;
         }
+        .pam-fwd { background:rgba(52,211,153,.22); color:#34D399; font-weight:700; padding:1px 3px; border-radius:3px; }
+        .pam-rev { background:rgba(96,165,250,.22); color:#60A5FA; font-weight:700; padding:1px 3px; border-radius:3px; }
+        .guide-fwd { border-bottom:2px solid #34D399; padding-bottom:1px; }
+        .guide-rev { border-bottom:2px solid #60A5FA; padding-bottom:1px; }
 
-        .results-table tr:hover {
-          background: #F9FAFB;
-        }
+        .info-panel { overflow:hidden; transition:max-height .4s cubic-bezier(.4,0,.2,1), opacity .3s; }
+        .info-panel.closed { max-height:0; opacity:0; }
+        .info-panel.open { max-height:800px; opacity:1; }
 
-        .strand-indicator {
-          display: inline-block;
-          padding: 0.25rem 0.5rem;
-          border-radius: 4px;
-          font-size: 0.75rem;
-          font-weight: 600;
-        }
+        .bar-track { height:5px; background:#1a1d27; border-radius:3px; overflow:hidden; margin-top:0.35rem; }
+        .bar-fill { height:100%; border-radius:3px; transition:width .6s cubic-bezier(.4,0,.2,1); }
 
-        .pam-seq-cell {
-          font-family: monospace;
-          font-weight: 600;
-          color: #10B981;
-        }
-
-        .guide-seq-cell {
-          font-family: monospace;
-          font-size: 0.75rem;
-          max-width: 200px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .context-seq-cell {
-          font-family: monospace;
-          font-size: 0.7rem;
-          color: #6B7280;
-          max-width: 250px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        @media (max-width: 768px) {
-          .results-table {
-            font-size: 0.75rem;
-          }
-          
-          .results-table th,
-          .results-table td {
-            padding: 0.5rem;
-          }
+        @media(max-width:600px){
+          .stat-grid { grid-template-columns:repeat(2,1fr); }
+          .card { padding:1rem; }
         }
       `}</style>
-      
-      <h2 style={{ fontFamily: 'Montserrat, sans-serif' }} className="section-title">
-        🧬 CRISPR PAM Site Finder - Research Grade
-      </h2>
-      
-      <div className="info-box">
-        <p style={{ marginBottom: '0.5rem' }}>
-          <strong>Research-Grade CRISPR Analysis:</strong> Identify PAM (Protospacer Adjacent Motif) 
-          sites for CRISPR-Cas gene editing with support for multiple Cas enzymes.
-        </p>
-        <p style={{ margin: 0, fontSize: '0.85rem', color: '#6B7280' }}>
-          ⚠️ For research and educational purposes only. Not for clinical diagnostics.
-        </p>
-      </div>
 
-      {/* Cas Enzyme Selection */}
-      <div className="sequence-input-group">
-        <label className="input-label">Cas Enzyme Selection</label>
-        <select
-          value={selectedCas}
-          onChange={(e) => setSelectedCas(e.target.value)}
-          style={{
-            width: '100%',
-            padding: '0.75rem',
-            border: '1px solid #E5E7EB',
-            borderRadius: '8px',
-            fontSize: '0.95rem',
-            fontFamily: 'Inter, sans-serif',
-            background: 'white',
-            cursor: 'pointer'
-          }}
-        >
-          <option value="spCas9">SpCas9 - NGG (Standard, S. pyogenes)</option>
-          <option value="saCas9">SaCas9 - NNGRRT (Compact, S. aureus)</option>
-          <option value="cas12a">Cas12a/Cpf1 - TTTV (T-rich PAM)</option>
-          <option value="custom">Custom PAM Pattern</option>
-        </select>
-      </div>
-
-      {/* Custom PAM Input */}
-      {selectedCas === 'custom' && (
-        <div style={{ 
-          background: '#F9FAFB', 
-          padding: '1rem', 
-          borderRadius: '8px', 
-          marginBottom: '1rem',
-          border: '1px solid #E5E7EB'
-        }}>
-          <div className="sequence-input-group" style={{ marginBottom: '0.75rem' }}>
-            <label className="input-label">
-              Custom PAM Pattern (IUPAC codes: N=any, R=A/G, Y=C/T, etc.)
-            </label>
-            <input
-              type="text"
-              value={customPAM}
-              onChange={(e) => setCustomPAM(e.target.value.toUpperCase())}
-              placeholder="e.g., NGG, NNNNGATT, TTTN"
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #E5E7EB',
-                borderRadius: '8px',
-                fontSize: '0.95rem',
-                fontFamily: 'monospace'
-              }}
-            />
+      {/* ── HEADER ── */}
+      <div style={{ background:'linear-gradient(180deg,#151821 0%,#0f1117 100%)', borderBottom:'1px solid #2a2d3a', padding:'1.8rem 1.5rem 1.4rem' }}>
+        <div style={{ maxWidth:860, margin:'0 auto' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', marginBottom:'0.55rem' }}>
+            <span style={{ fontSize:'1.55rem' }}>🧬</span>
+            <h1 style={{ fontFamily:'Sora',fontWeight:700, fontSize:'1.45rem', color:'#fff', letterSpacing:'-0.01em' }}>
+              CRISPR PAM Site Finder
+            </h1>
+            <span style={{ background:'rgba(52,211,153,.12)', border:'1px solid rgba(52,211,153,.3)', color:'#34D399', fontSize:'0.62rem', fontWeight:600, padding:'0.22rem 0.55rem', borderRadius:20, letterSpacing:'0.08em', textTransform:'uppercase' }}>
+              Research Grade
+            </span>
           </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-            <div className="sequence-input-group">
-              <label className="input-label">Guide RNA Length (bp)</label>
-              <input
-                type="number"
-                value={customGuideLength}
-                onChange={(e) => setCustomGuideLength(parseInt(e.target.value) || 20)}
-                min="15"
-                max="25"
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #E5E7EB',
-                  borderRadius: '8px',
-                  fontSize: '0.95rem'
-                }}
-              />
+          <p style={{ color:'#6b7280', fontSize:'0.82rem', lineHeight:1.5, maxWidth:600 }}>
+            Identify Protospacer Adjacent Motif sites across both strands for CRISPR-Cas gene editing. Supports SpCas9, SaCas9, Cas12a, and custom PAM patterns.
+          </p>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:860, margin:'0 auto', padding:'1.25rem 1.25rem 3rem' }}>
+
+        {/* ── INFO TOGGLE ── */}
+        <button className="btn-ghost" onClick={()=>setShowInfo(v=>!v)} style={{ marginBottom:'1rem', width:'100%', justifyContent:'space-between' }}>
+          <span style={{ display:'flex', alignItems:'center', gap:'.4rem' }}>
+            <span style={{ fontSize:'.85rem' }}>💡</span> Why This Tool Matters & How to Use It
+          </span>
+          <span style={{ fontSize:'0.7rem', color:'#6b7280', transition:'transform .25s', transform: showInfo?'rotate(180deg)':'rotate(0deg)', display:'inline-block' }}>▼</span>
+        </button>
+
+        <div className={`info-panel ${showInfo?'open':'closed'}`}>
+          <div className="card card-sm" style={{ marginBottom:'1.25rem', borderColor:'#2e3240' }}>
+            {/* Why matters */}
+            <div style={{ display:'flex', gap:'1rem', marginBottom:'1rem' }}>
+              <div style={{ flex:1 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'.35rem', marginBottom:'.4rem' }}>
+                  <span style={{ fontSize:'.88rem' }}>🎯</span>
+                  <span style={{ fontSize:'.78rem', fontWeight:600, color:'#34D399', textTransform:'uppercase', letterSpacing:'.06em' }}>Why It Matters</span>
+                </div>
+                <p style={{ fontSize:'.78rem', color:'#8a8d9a', lineHeight:1.65 }}>
+                  CRISPR-Cas systems require a specific <strong style={{color:'#a0a3b1'}}>PAM sequence</strong> adjacent to the target site to initiate DNA cleavage. Without a valid PAM, the Cas protein cannot bind or cut. This tool scans your entire sequence on <em style={{color:'#a0a3b1'}}>both strands</em>, extracts every viable target, and scores them by predicted GC-based efficiency — saving hours of manual work.
+                </p>
+              </div>
             </div>
-            
-            <div className="sequence-input-group">
-              <label className="input-label">PAM Position</label>
-              <select
-                value={customPAMPosition}
-                onChange={(e) => setCustomPAMPosition(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '1px solid #E5E7EB',
-                  borderRadius: '8px',
-                  fontSize: '0.95rem'
-                }}
-              >
-                <option value="downstream">Downstream (3' of target)</option>
-                <option value="upstream">Upstream (5' of target)</option>
-              </select>
+            {/* How to use */}
+            <div style={{ borderTop:'1px solid #2a2d3a', paddingTop:'.85rem' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'.35rem', marginBottom:'.5rem' }}>
+                <span style={{ fontSize:'.88rem' }}>📖</span>
+                <span style={{ fontSize:'.78rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'.06em' }}>Workflow & Next Steps</span>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px,1fr))', gap:'.6rem' }}>
+                {[
+                  ['1','Select Enzyme','Choose SpCas9 (NGG) for broad targeting, SaCas9 for smaller delivery vectors, or Cas12a for T-rich regions.'],
+                  ['2','Paste Sequence','Input your target gene region. The tool strips whitespace and numbers automatically.'],
+                  ['3','Scan & Score','Hit Find PAM Sites. Each hit is scored by GC content — aim for 40–60 % (High efficiency).'],
+                  ['4','Downstream Use','Export the sgRNA sequences directly into primer design tools, order as oligos, or clone into a guide-RNA expression vector.']
+                ].map(([n,title,desc])=>(
+                  <div key={n} style={{ background:'#12141c', border:'1px solid #2a2d3a', borderRadius:8, padding:'.65rem' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.3rem' }}>
+                      <span style={{ background:'#34D399', color:'#0f1117', fontSize:'.62rem', fontWeight:700, width:18, height:18, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>{n}</span>
+                      <span style={{ fontSize:'.74rem', fontWeight:600, color:'#e2e4e9' }}>{title}</span>
+                    </div>
+                    <p style={{ fontSize:'.7rem', color:'#6b7280', lineHeight:1.55, paddingLeft:'.05rem' }}>{desc}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
-      )}
 
-      <div className="sequence-input-group">
-        <label className="input-label">DNA Sequence</label>
-        <textarea
-          value={sequence}
-          onChange={(e) => setSequence(e.target.value)}
-          placeholder="Enter DNA sequence to scan for PAM sites...&#10;&#10;Example: ATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGC"
-          className="dna-input"
-          rows={6}
-        />
-      </div>
+        {/* ── CAS SELECTION ── */}
+        <div className="card">
+          <label className="lbl">Cas Enzyme</label>
+          <select value={selectedCas} onChange={e=>setSelectedCas(e.target.value)}>
+            <option value="spCas9">SpCas9 — NGG  ·  Standard, broadest target range</option>
+            <option value="saCas9">SaCas9 — NNGRRT  ·  Compact, ideal for AAV delivery</option>
+            <option value="cas12a">Cas12a / Cpf1 — TTTV  ·  T-rich PAM, staggered cut</option>
+            <option value="custom">Custom PAM Pattern</option>
+          </select>
 
-      <button 
-        onClick={handleFindPAMSites} 
-        className="analyze-btn"
-        disabled={loading}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.5rem'
-        }}
-      >
-        {loading && <span className="loading-spinner"></span>}
-        {loading ? 'Scanning Sequence...' : '🔍 Find PAM Sites'}
-      </button>
-
-      {error && (
-        <div className="error-alert">
-          <span className="error-icon">⚠️</span>
-          <div>
-            <div>{error}</div>
-          </div>
+          {selectedCas === 'custom' && (
+            <div style={{ marginTop:'1rem', display:'grid', gridTemplateColumns:'1fr 140px 180px', gap:'.75rem' }}>
+              <div>
+                <label className="lbl">PAM Pattern <span style={{ textTransform:'none', color:'#4a4d5a', fontWeight:400 }}>(IUPAC: N R Y …)</span></label>
+                <input type="text" value={customPAM} onChange={e=>setCustomPAM(e.target.value.toUpperCase())} placeholder="e.g. NGG"
+                  style={{ width:'100%', background:'#1a1d27', border:'1px solid #2e3240', borderRadius:8, color:'#e2e4e9', fontFamily:'"JetBrains Mono",monospace', fontSize:'.85rem', padding:'.7rem .85rem', outline:'none' }}
+                  onFocus={e=>e.target.style.borderColor='#34D399'} onBlur={e=>e.target.style.borderColor='#2e3240'}
+                />
+              </div>
+              <div>
+                <label className="lbl">Guide Length</label>
+                <input type="number" value={customGuideLen} onChange={e=>setCustomGuideLen(parseInt(e.target.value)||20)} min={15} max={25}
+                  style={{ width:'100%', background:'#1a1d27', border:'1px solid #2e3240', borderRadius:8, color:'#e2e4e9', fontFamily:'Sora', fontSize:'.85rem', padding:'.7rem .85rem', outline:'none' }}
+                  onFocus={e=>e.target.style.borderColor='#34D399'} onBlur={e=>e.target.style.borderColor='#2e3240'}
+                />
+              </div>
+              <div>
+                <label className="lbl">PAM Position</label>
+                <select value={customPAMPos} onChange={e=>setCustomPAMPos(e.target.value)}>
+                  <option value="downstream">Downstream (3′)</option>
+                  <option value="upstream">Upstream (5′)</option>
+                </select>
+              </div>
+            </div>
+          )}
         </div>
-      )}
 
-      {pamSites && (
-        <div className="results-container">
-          {/* Action Buttons */}
-          <div className="action-buttons" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <button onClick={() => downloadReport('txt')} className="export-btn">
-              📄 Download TXT Report
-            </button>
-            <button onClick={() => downloadReport('pdf')} className="export-btn">
-              🖨️ Print/PDF Report
-            </button>
-            <button 
-              onClick={() => setShowLegend(!showLegend)} 
-              className="export-btn"
-              style={{ marginLeft: 'auto' }}
-            >
-              {showLegend ? '🔽 Hide Legend' : '🔼 Show Legend'}
+        {/* ── SEQUENCE INPUT ── */}
+        <div className="card">
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.45rem' }}>
+            <label className="lbl" style={{ margin:0 }}>DNA Sequence</label>
+            <button className="btn-sample" onClick={loadSample}>
+              <span>⚡</span> Load Sample Sequence
             </button>
           </div>
-
-          {/* Summary Cards */}
-          <div className="pam-summary">
-            <h3 style={{ fontFamily: 'Montserrat, sans-serif' }} className="subsection-title">
-              Analysis Summary
-            </h3>
-            <div style={{ 
-              background: '#F0FDF4', 
-              border: '1px solid #BBF7D0',
-              borderRadius: '8px',
-              padding: '0.75rem',
-              marginBottom: '1rem',
-              fontSize: '0.9rem',
-              color: '#166534'
-            }}>
-              <strong>Cas Enzyme:</strong> {casConfig.name} | <strong>PAM:</strong> {casConfig.pam} | 
-              <strong> Position:</strong> {casConfig.pamPosition === 'downstream' ? 'Downstream (3\')' : 'Upstream (5\')'} | 
-              <strong> Guide Length:</strong> {casConfig.guideLength} bp
-            </div>
-            
-            <div className="stats-grid">
-              <div className="stat-card">
-                <div className="stat-label">Total PAM Sites</div>
-                <div className="stat-value">{pamSites.total_sites}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Forward Strand (+)</div>
-                <div className="stat-value" style={{ color: '#10B981' }}>
-                  {pamSites.forward_strand_sites}
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Reverse Strand (-)</div>
-                <div className="stat-value" style={{ color: '#3B82F6' }}>
-                  {pamSites.reverse_strand_sites}
-                </div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-label">Sequence Length</div>
-                <div className="stat-value" style={{ color: '#6B7280' }}>
-                  {pamSites.sequence_length} bp
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* AI Guidance Button */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <button 
-              onClick={handleExplainWithAI}
-              disabled={loadingAI}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                background: loadingAI ? '#6B7280' : 'linear-gradient(135deg, #8B5CF6, #7C3AED)',
-                border: 'none',
-                borderRadius: '8px',
-                color: '#fff',
-                fontSize: '1rem',
-                fontWeight: 600,
-                cursor: loadingAI ? 'not-allowed' : 'pointer',
-                transition: 'all 0.3s ease',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-                fontFamily: 'Inter, sans-serif'
-              }}
-            >
-              {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Guidance & Recommendations'}
-            </button>
-          </div>
-
-          {/* AI Explanation */}
-          {aiExplanation && (
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.15), rgba(124, 58, 237, 0.08))',
-              border: '2px solid #8B5CF6',
-              borderRadius: '12px',
-              padding: '1.5rem',
-              marginBottom: '1.5rem'
-            }}>
-              <h3 style={{ 
-                color: '#8B5CF6', 
-                marginBottom: '1rem', 
-                fontSize: '1.1rem', 
-                fontWeight: 700,
-                fontFamily: 'Montserrat, sans-serif',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                🤖 AI Guidance & Recommendations
-              </h3>
-              <div style={{ 
-                color: '#1F2937',
-                lineHeight: '1.8', 
-                whiteSpace: 'pre-wrap',
-                fontSize: '0.95rem',
-                background: '#ffffff',
-                padding: '1rem',
-                borderRadius: '8px',
-                border: '1px solid rgba(139, 92, 246, 0.2)',
-                fontFamily: 'Inter, sans-serif'
-              }}>
-                {aiExplanation}
-              </div>
+          <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here…  (whitespace &amp; numbers are ignored)" />
+          {sequence && (
+            <div style={{ marginTop:'.45rem', fontSize:'.7rem', color:'#4a4d5a', fontFamily:'"JetBrains Mono",monospace' }}>
+              {sequence.toUpperCase().replace(/[^ATGC]/g,'').length} bp after cleaning
             </div>
           )}
+        </div>
 
-          {/* Charts */}
-          {renderChart()}
+        {error && (
+          <div style={{ background:'rgba(248,113,113,.1)', border:'1px solid rgba(248,113,113,.3)', borderRadius:8, padding:'.65rem .85rem', marginBottom:'1rem', display:'flex', alignItems:'center', gap:'.5rem' }}>
+            <span style={{ fontSize:'.85rem' }}>⚠️</span>
+            <span style={{ fontSize:'.78rem', color:'#F87171' }}>{error}</span>
+          </div>
+        )}
 
-          {/* Legend */}
-          {showLegend && (
-            <div className="legend-box">
-              <h4 style={{ 
-                margin: '0 0 0.75rem 0', 
-                fontSize: '0.95rem',
-                color: '#1F2937',
-                fontWeight: 700
-              }}>
-                📖 Visualization Legend
-              </h4>
-              <div className="legend-items">
-                <div className="legend-item">
-                  <span className="legend-sample" style={{ 
-                    background: '#10B981', 
-                    color: '#FFFFFF', 
-                    fontWeight: 700,
-                    padding: '4px 10px',
-                    borderRadius: '4px'
-                  }}>
-                    PAM
-                  </span>
-                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Forward PAM (green highlight)</span>
+        {/* ── SUBMIT ── */}
+        <button className="btn-primary" onClick={handleFind} disabled={loading}>
+          {loading ? <><span style={{ width:16,height:16,border:'2px solid #0f111740',borderTop:'2px solid #0f1117',borderRadius:'50%',animation:'spin .55s linear infinite',display:'inline-block' }}></span> Scanning…</> : <><span>🔍</span> Find PAM Sites</>}
+        </button>
+        <style>{`@keyframes spin{ to{transform:rotate(360deg)} }`}</style>
+
+        {/* ── RESULTS ── */}
+        {pamSites && (
+          <>
+            {/* summary stats */}
+            <div style={{ marginTop:'1.75rem' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.65rem' }}>
+                <span style={{ fontSize:'.78rem', fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em' }}>
+                  Results — <span style={{ color:'#34D399' }}>{casConfig.name}</span> · PAM <span style={{ fontFamily:'"JetBrains Mono",monospace', color:'#FBBF24' }}>{casConfig.pam}</span>
+                </span>
+              </div>
+
+              <div className="stat-grid">
+                <div className="stat-box">
+                  <div className="stat-val" style={{ color:'#fff' }}>{pamSites.total}</div>
+                  <div className="stat-lbl">Total Sites</div>
                 </div>
-                <div className="legend-item">
-                  <span className="legend-sample" style={{ 
-                    background: '#3B82F6', 
-                    color: '#FFFFFF', 
-                    fontWeight: 700,
-                    padding: '4px 10px',
-                    borderRadius: '4px'
-                  }}>
-                    PAM
-                  </span>
-                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Reverse PAM (blue highlight)</span>
+                <div className="stat-box">
+                  <div className="stat-val" style={{ color:'#34D399' }}>{pamSites.forward}</div>
+                  <div className="stat-lbl">Forward (+)</div>
                 </div>
-                <div className="legend-item">
-                  <span className="legend-sample" style={{ 
-                    textDecoration: 'underline', 
-                    textDecorationColor: '#10B981', 
-                    textDecorationThickness: '3px',
-                    textUnderlineOffset: '3px',
-                    color: '#1F2937',
-                    fontWeight: 600,
-                    padding: '2px 6px'
-                  }}>
-                    ATGC
-                  </span>
-                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Forward sgRNA (green underline)</span>
+                <div className="stat-box">
+                  <div className="stat-val" style={{ color:'#60A5FA' }}>{pamSites.reverse}</div>
+                  <div className="stat-lbl">Reverse (−)</div>
                 </div>
-                <div className="legend-item">
-                  <span className="legend-sample" style={{ 
-                    textDecoration: 'underline', 
-                    textDecorationColor: '#3B82F6', 
-                    textDecorationThickness: '3px',
-                    textUnderlineOffset: '3px',
-                    color: '#1F2937',
-                    fontWeight: 600,
-                    padding: '2px 6px'
-                  }}>
-                    ATGC
-                  </span>
-                  <span style={{ color: '#1F2937', fontWeight: 500 }}>Reverse sgRNA (blue underline)</span>
+                <div className="stat-box">
+                  <div className="stat-val" style={{ color:'#6b7280', fontSize:'1.15rem' }}>{pamSites.seqLen}<span style={{ fontSize:'.6rem', fontWeight:400 }}> bp</span></div>
+                  <div className="stat-lbl">Seq Length</div>
                 </div>
               </div>
             </div>
-          )}
 
-          {/* Highlighted Sequence */}
-          <div className="highlighted-sequence-section">
-            <h3 style={{ fontFamily: 'Montserrat, sans-serif' }} className="subsection-title">
-              Sequence with PAM Sites & Guide RNAs Highlighted
-            </h3>
-            {highlightPAMInSequence()}
-          </div>
-
-          {/* Results Table */}
-          {pamSites.sites.length > 0 && (
-            <div>
-              <h3 style={{ fontFamily: 'Montserrat, sans-serif' }} className="subsection-title">
-                📋 Detailed PAM Site Results ({pamSites.sites.length} sites)
-              </h3>
-              
-              <div style={{ overflowX: 'auto' }}>
-                <table className="results-table">
-                  <thead>
-                    <tr>
-                      <th>#</th>
-                      <th>Position</th>
-                      <th>Strand</th>
-                      <th>PAM</th>
-                      <th>sgRNA (Guide RNA)</th>
-                      <th>GC%</th>
-                      <th>Efficiency</th>
-                      <th>Context (±10bp)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pamSites.sites.map((site, idx) => (
-                      <tr key={idx}>
-                        <td style={{ fontWeight: 600 }}>{idx + 1}</td>
-                        <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>
-                          {site.position}-{site.positionEnd}
-                        </td>
-                        <td>
-                          <span 
-                            className="strand-indicator"
-                            style={{
-                              background: site.strand === 'forward' ? '#10B98120' : '#3B82F620',
-                              color: site.strand === 'forward' ? '#10B981' : '#3B82F6'
-                            }}
-                          >
-                            {site.strand === 'forward' ? '(+)' : '(-)'}
-                          </span>
-                        </td>
-                        <td className="pam-seq-cell">{site.pamSequence}</td>
-                        <td className="guide-seq-cell" title={site.guideRNA}>
-                          {site.guideRNA}
-                        </td>
-                        <td>{site.gcContent}%</td>
-                        <td>
-                          <span style={{ 
-                            color: getEfficiencyColor(site.efficiency),
-                            fontWeight: 600,
-                            fontSize: '0.85rem'
-                          }}>
-                            {site.efficiency}
-                          </span>
-                        </td>
-                        <td className="context-seq-cell" title={site.context}>
-                          {site.context}
-                        </td>
-                      </tr>
+            {/* efficiency bars */}
+            {pamSites.total > 0 && (
+              <div className="card" style={{ marginTop:'1.25rem' }}>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'.7rem' }}>
+                  <span style={{ fontSize:'.78rem', fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.06em' }}>Efficiency Breakdown</span>
+                  <div style={{ display:'flex', gap:'.75rem' }}>
+                    {['High','Medium','Low'].map(e=>(
+                      <span key={e} style={{ fontSize:'.65rem', color:effColor(e), display:'flex', alignItems:'center', gap:'.25rem' }}>
+                        <span style={{ width:6,height:6,borderRadius:'50%',background:effColor(e),display:'inline-block' }}></span>{e}
+                      </span>
                     ))}
-                  </tbody>
-                </table>
+                  </div>
+                </div>
+                {['High','Medium','Low'].map(e=>{
+                  const count = pamSites.sites.filter(s=>s.efficiency===e).length;
+                  const pct = pamSites.total ? (count/pamSites.total)*100 : 0;
+                  return (
+                    <div key={e} style={{ display:'flex', alignItems:'center', gap:'.7rem', marginBottom:'.45rem' }}>
+                      <span style={{ width:48, fontSize:'.72rem', color:effColor(e), fontWeight:600 }}>{e}</span>
+                      <div style={{ flex:1 }}>
+                        <div className="bar-track"><div className="bar-fill" style={{ width:`${pct}%`, background:effColor(e) }}></div></div>
+                      </div>
+                      <span style={{ width:42, fontSize:'.68rem', color:'#6b7280', textAlign:'right' }}>{count} <span style={{color:'#4a4d5a'}}>({pct.toFixed(0)}%)</span></span>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* No Sites Message */}
-          {pamSites.sites.length === 0 && (
-            <div className="no-mutations">
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔍</div>
-              <p style={{ margin: '0.5rem 0', fontWeight: 600 }}>
-                No PAM sites found with pattern "{casConfig.pam}"
-              </p>
-              <p style={{ margin: 0, fontSize: '0.9rem', color: '#6B7280' }}>
-                Try selecting a different Cas enzyme or checking your sequence
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+            {/* highlighted sequence */}
+            {pamSites.total > 0 && (
+              <div className="card" style={{ marginTop:'1.25rem' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.6rem' }}>
+                  <span style={{ fontSize:'.78rem', fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.06em' }}>Annotated Sequence</span>
+                  <div style={{ display:'flex', gap:'1rem', fontSize:'.67rem' }}>
+                    <span style={{ color:'#34D399' }}>■ PAM (+)</span>
+                    <span style={{ color:'#60A5FA' }}>■ PAM (−)</span>
+                    <span style={{ color:'#34D399', borderBottom:'2px solid #34D399', paddingBottom:1 }}>guide (+)</span>
+                    <span style={{ color:'#60A5FA', borderBottom:'2px solid #60A5FA', paddingBottom:1 }}>guide (−)</span>
+                  </div>
+                </div>
+                <div className="seq-display">
+                  {(() => {
+                    const seq = sequence.toUpperCase().replace(/[^ATGC]/g,'');
+                    // build a map: index → [pam-fwd, pam-rev, guide-fwd, guide-rev]
+                    const map = Array.from({length:seq.length}, ()=>({pam:null, guide:null}));
+                    pamSites.sites.forEach(s => {
+                      const pS = s.position-1, pE = s.positionEnd;
+                      const gS = s.guideStart-1, gE = s.guideEnd;
+                      for(let i=pS;i<pE&&i<seq.length;i++) map[i].pam = s.strand;
+                      for(let i=gS;i<gE&&i<seq.length;i++) if(!map[i].guide) map[i].guide = s.strand;
+                    });
+                    // group consecutive identical states
+                    const chunks = [];
+                    let cur = null;
+                    map.forEach((m,i)=>{
+                      const key = `${m.pam||'_'}|${m.guide||'_'}`;
+                      if(cur && cur.key===key) { cur.end=i+1; }
+                      else { cur={key,pam:m.pam,guide:m.guide,start:i,end:i+1}; chunks.push(cur); }
+                    });
+                    return chunks.map((c,i)=>{
+                      let cls = '';
+                      if(c.pam==='forward') cls+=' pam-fwd';
+                      else if(c.pam==='reverse') cls+=' pam-rev';
+                      if(!c.pam && c.guide==='forward') cls+=' guide-fwd';
+                      else if(!c.pam && c.guide==='reverse') cls+=' guide-rev';
+                      return <span key={i} className={cls.trim()}>{seq.substring(c.start,c.end)}</span>;
+                    });
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* table */}
+            {pamSites.total > 0 && (
+              <div className="card" style={{ marginTop:'1.25rem', padding:0, overflow:'hidden' }}>
+                <div style={{ padding:'.85rem 1rem .5rem', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+                  <span style={{ fontSize:'.78rem', fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.06em' }}>
+                    PAM Sites · {pamSites.total} found
+                  </span>
+                </div>
+                <div style={{ overflowX:'auto' }}>
+                  <table className="results-table">
+                    <thead>
+                      <tr>
+                        <th>#</th><th>Position</th><th>Strand</th><th>PAM</th><th>sgRNA Sequence</th><th>GC %</th><th>Efficiency</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pamSites.sites.map((s,i)=>(
+                        <tr key={i}>
+                          <td style={{ color:'#6b7280', fontWeight:600 }}>{i+1}</td>
+                          <td style={{ color:'#a0a3b1' }}>{s.position}–{s.positionEnd}</td>
+                          <td>
+                            <span className="strand-badge" style={{ background: s.strand==='forward'?'rgba(52,211,153,.12)':'rgba(96,165,250,.12)', color: s.strand==='forward'?'#34D399':'#60A5FA' }}>
+                              {s.strand==='forward'?'(+) Fwd':'(−) Rev'}
+                            </span>
+                          </td>
+                          <td style={{ color: s.strand==='forward'?'#34D399':'#60A5FA', fontWeight:600 }}>{s.pamSequence}</td>
+                          <td style={{ color:'#c8caD0', fontSize:'.72rem', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }} title={s.guideRNA}>{s.guideRNA}</td>
+                          <td style={{ color:'#a0a3b1' }}>{s.gcContent}</td>
+                          <td>
+                            <span className="eff-badge" style={{ background:effBg(s.efficiency), color:effColor(s.efficiency) }}>{s.efficiency}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* empty state */}
+            {pamSites.total === 0 && (
+              <div className="card" style={{ marginTop:'1.5rem', textAlign:'center', padding:'2.5rem 1.5rem' }}>
+                <div style={{ fontSize:'2rem', marginBottom:'.4rem' }}>🔍</div>
+                <p style={{ color:'#a0a3b1', fontWeight:600, fontSize:'.88rem' }}>No PAM sites found</p>
+                <p style={{ color:'#6b7280', fontSize:'.75rem', marginTop:'.3rem' }}>Try a different Cas enzyme or verify your sequence.</p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
