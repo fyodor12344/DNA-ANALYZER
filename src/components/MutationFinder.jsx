@@ -1,1814 +1,771 @@
 import { useState, useEffect } from 'react';
 
-// Configuration for backend URL
-const API_URL = import.meta.env.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
-
-// Genetic code table
+/* ─── CODON TABLE ────────────────────────────────────────────────────────── */
 const CODON_TABLE = {
-  'TTT': 'F', 'TTC': 'F', 'TTA': 'L', 'TTG': 'L',
-  'TCT': 'S', 'TCC': 'S', 'TCA': 'S', 'TCG': 'S',
-  'TAT': 'Y', 'TAC': 'Y', 'TAA': '*', 'TAG': '*',
-  'TGT': 'C', 'TGC': 'C', 'TGA': '*', 'TGG': 'W',
-  'CTT': 'L', 'CTC': 'L', 'CTA': 'L', 'CTG': 'L',
-  'CCT': 'P', 'CCC': 'P', 'CCA': 'P', 'CCG': 'P',
-  'CAT': 'H', 'CAC': 'H', 'CAA': 'Q', 'CAG': 'Q',
-  'CGT': 'R', 'CGC': 'R', 'CGA': 'R', 'CGG': 'R',
-  'ATT': 'I', 'ATC': 'I', 'ATA': 'I', 'ATG': 'M',
-  'ACT': 'T', 'ACC': 'T', 'ACA': 'T', 'ACG': 'T',
-  'AAT': 'N', 'AAC': 'N', 'AAA': 'K', 'AAG': 'K',
-  'AGT': 'S', 'AGC': 'S', 'AGA': 'R', 'AGG': 'R',
-  'GTT': 'V', 'GTC': 'V', 'GTA': 'V', 'GTG': 'V',
-  'GCT': 'A', 'GCC': 'A', 'GCA': 'A', 'GCG': 'A',
-  'GAT': 'D', 'GAC': 'D', 'GAA': 'E', 'GAG': 'E',
-  'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G'
+  'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S',
+  'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*','TGT':'C','TGC':'C','TGA':'*','TGG':'W',
+  'CTT':'L','CTC':'L','CTA':'L','CTG':'L','CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+  'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q','CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+  'ATT':'I','ATC':'I','ATA':'I','ATG':'M','ACT':'T','ACC':'T','ACA':'T','ACG':'T',
+  'AAT':'N','AAC':'N','AAA':'K','AAG':'K','AGT':'S','AGC':'S','AGA':'R','AGG':'R',
+  'GTT':'V','GTC':'V','GTA':'V','GTG':'V','GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+  'GAT':'D','GAC':'D','GAA':'E','GAG':'E','GGT':'G','GGC':'G','GGA':'G','GGG':'G'
 };
 
-// Sample DNA sequences for mutation analysis
+/* ─── SAMPLE SEQUENCES ──────────────────────────────────────────────────── */
 const MUTATION_SAMPLES = {
   normal: {
-    name: '✓ Normal (Wild-Type)',
-    icon: '✓',
-    color: '#10B981',
-    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    readingFrame: '1',
-    strand: 'forward',
-    description: '🧬 Identical Sequences - No Mutations',
-    explanation: 'Both sequences are exactly the same (39 bp). This represents the wild-type or normal sequence without any genetic variations. The tool will detect zero mutations, demonstrating its ability to accurately identify when sequences are identical.',
-    expectedResult: 'No mutations detected',
-    biologicalContext: 'In genetics, wild-type refers to the normal, non-mutated form of a gene. This sample serves as a control to verify the analysis tool is working correctly.'
+    name:'✓ Normal (Wild-Type)', icon:'✓', color:'#10B981',
+    reference:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    readingFrame:'1', strand:'forward',
+    description:'🧬 Identical Sequences – No Mutations',
+    explanation:'Both sequences are exactly the same (39 bp). This represents the wild-type or normal sequence without any genetic variations. The tool will detect zero mutations, demonstrating its ability to accurately identify when sequences are identical.',
+    expectedResult:'No mutations detected',
+    biologicalContext:'In genetics, wild-type refers to the normal, non-mutated form of a gene. This sample serves as a control to verify the analysis tool is working correctly.'
   },
   snp: {
-    name: '⚠ SNP (Missense)',
-    icon: '⚠',
-    color: '#F59E0B',
-    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    alternate: 'ATGGCCATTGTAATGGGCCGTTGAAAGGGTGCCCGATAG',
-    //                                  ^ Position 21: C→T
-    readingFrame: '1',
-    strand: 'forward',
-    description: '⚠️ Single Nucleotide Polymorphism (SNP)',
-    explanation: 'A single base change from C to T at position 21. This SNP changes the codon from GCT (coding for Alanine) to GTT (coding for Valine), resulting in a missense mutation. The amino acid substitution may affect protein structure and function.',
-    expectedResult: '1 SNP detected (Missense mutation)',
-    biologicalContext: 'SNPs are the most common type of genetic variation. This particular mutation is a missense mutation, meaning it changes one amino acid in the protein sequence. Depending on the biochemical properties of the amino acids involved, this could have minimal to significant functional impact.',
-    mutationDetails: {
-      position: 21,
-      change: 'C→T',
-      codonChange: 'GCT→GTT',
-      aminoAcidChange: 'Alanine→Valine'
-    }
+    name:'⚠ SNP (Missense)', icon:'⚠', color:'#F59E0B',
+    reference:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate:'ATGGCCATTGTAATGGGCCGTTGAAAGGGTGCCCGATAG',
+    readingFrame:'1', strand:'forward',
+    description:'⚠️ Single Nucleotide Polymorphism (SNP)',
+    explanation:'A single base change from C to T at position 21. This SNP changes the codon from GCT (coding for Alanine) to GTT (coding for Valine), resulting in a missense mutation. The amino acid substitution may affect protein structure and function.',
+    expectedResult:'1 SNP detected (Missense mutation)',
+    biologicalContext:'SNPs are the most common type of genetic variation. This particular mutation is a missense mutation, meaning it changes one amino acid in the protein sequence. Depending on the biochemical properties of the amino acids involved, this could have minimal to significant functional impact.',
+    mutationDetails:{ position:21, change:'C→T' }
   },
   insertion: {
-    name: '➕ Insertion',
-    icon: '➕',
-    color: '#3B82F6',
-    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG',
-    //                                    ^^^ CAA inserted at position 24
-    readingFrame: '1',
-    strand: 'forward',
-    description: '➕ Insertion Mutation (3 nucleotides)',
-    explanation: 'Three nucleotides (CAA) are inserted at position 24. Since the insertion is exactly 3 bases (one codon), this is an in-frame insertion that adds one extra amino acid (Glutamine) without shifting the reading frame. The protein will be one amino acid longer but the downstream sequence remains correctly translated.',
-    expectedResult: '1 Insertion (3 bp, in-frame)',
-    biologicalContext: 'In-frame insertions add amino acids to the protein without disrupting the reading frame. While the protein structure is altered, it may still retain some function. This is generally less severe than frameshift mutations.',
-    mutationDetails: {
-      position: 24,
-      inserted: 'CAA',
-      length: 3,
-      aminoAcidAdded: 'Glutamine (Q)',
-      frameshift: false
-    }
+    name:'➕ Insertion', icon:'➕', color:'#3B82F6',
+    reference:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate:'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG',
+    readingFrame:'1', strand:'forward',
+    description:'➕ Insertion Mutation (3 nucleotides)',
+    explanation:'Three nucleotides (CAA) are inserted at position 24. Since the insertion is exactly 3 bases (one codon), this is an in-frame insertion that adds one extra amino acid (Glutamine) without shifting the reading frame.',
+    expectedResult:'1 Insertion (3 bp, in-frame)',
+    biologicalContext:'In-frame insertions add amino acids to the protein without disrupting the reading frame. While the protein structure is altered, it may still retain some function.',
+    mutationDetails:{ position:24, inserted:'CAA' }
   },
   deletion: {
-    name: '➖ Deletion',
-    icon: '➖',
-    color: '#EF4444',
-    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    alternate: 'ATGGCCATTGTAATGGGCCGCTGGGTGCCCGATAG',
-    //                                ^^^ AAA deleted at position 21-23
-    readingFrame: '1',
-    strand: 'forward',
-    description: '➖ Deletion Mutation (3 nucleotides)',
-    explanation: 'Three consecutive nucleotides (AAA) are deleted starting at position 21. This in-frame deletion removes exactly one codon, resulting in the loss of one amino acid (Lysine) from the protein sequence. The reading frame is maintained, so downstream codons are still translated correctly.',
-    expectedResult: '1 Deletion (3 bp, in-frame)',
-    biologicalContext: 'In-frame deletions remove amino acids without causing frameshift. The severity depends on which amino acid is removed and its importance for protein function. Some deletions may be tolerated, while others can severely impact protein stability or activity.',
-    mutationDetails: {
-      position: 21,
-      deleted: 'AAA',
-      length: 3,
-      aminoAcidLost: 'Lysine (K)',
-      frameshift: false
-    }
+    name:'➖ Deletion', icon:'➖', color:'#EF4444',
+    reference:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate:'ATGGCCATTGTAATGGGCCGCTGGGTGCCCGATAG',
+    readingFrame:'1', strand:'forward',
+    description:'➖ Deletion Mutation (3 nucleotides)',
+    explanation:'Three consecutive nucleotides (AAA) are deleted starting at position 21. This in-frame deletion removes exactly one codon, resulting in the loss of one amino acid (Lysine) from the protein sequence.',
+    expectedResult:'1 Deletion (3 bp, in-frame)',
+    biologicalContext:'In-frame deletions remove amino acids without causing frameshift. The severity depends on which amino acid is removed and its importance for protein function.',
+    mutationDetails:{ position:21, deleted:'AAA' }
   },
   frameshiftInsertion: {
-    name: '🔴 Frameshift (Insertion)',
-    icon: '🔴',
-    color: '#DC2626',
-    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
-    alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG',
-    //                                    ^^ CA inserted (2 bp = frameshift!)
-    readingFrame: '1',
-    strand: 'forward',
-    description: '🔴 Frameshift Mutation (2 bp Insertion)',
-    explanation: 'Two nucleotides (CA) are inserted at position 24. Since this is NOT a multiple of 3, it causes a frameshift mutation. All downstream codons are shifted, resulting in a completely different amino acid sequence after the mutation point. This typically leads to a non-functional protein.',
-    expectedResult: '1 Insertion causing frameshift',
-    biologicalContext: 'Frameshift mutations are among the most severe types of mutations because they alter the entire downstream reading frame. This usually results in: (1) A completely different amino acid sequence, (2) Premature stop codons, (3) Non-functional proteins. These mutations often cause genetic diseases.',
-    mutationDetails: {
-      position: 24,
-      inserted: 'CA',
-      length: 2,
-      frameshift: true,
-      severity: 'High - Likely loss of protein function'
-    }
+    name:'🔴 Frameshift (Insertion)', icon:'🔴', color:'#DC2626',
+    reference:'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate:'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG',
+    readingFrame:'1', strand:'forward',
+    description:'🔴 Frameshift Mutation (2 bp Insertion)',
+    explanation:'Two nucleotides (CA) are inserted at position 24. Since this is NOT a multiple of 3, it causes a frameshift mutation. All downstream codons are shifted, typically resulting in a completely different amino acid sequence and often premature stop codons.',
+    expectedResult:'1 Insertion causing frameshift',
+    biologicalContext:'Frameshift mutations are among the most severe types because they alter the entire downstream reading frame — usually producing non-functional proteins.',
+    mutationDetails:{ position:24, inserted:'CA' }
   }
 };
 
-// Biological consequence explanations
-const MUTATION_EXPLANATIONS = {
-  'Silent': {
-    short: 'No amino acid change',
-    long: 'Silent mutations do not change the amino acid sequence due to genetic code redundancy. The protein function is typically preserved.',
-    icon: '✓',
-    color: '#10B981'
-  },
-  'Missense': {
-    short: 'Amino acid substitution',
-    long: 'Amino acid change may alter protein structure or function. Effects range from benign to severe depending on the biochemical properties of the substituted amino acid.',
-    icon: '⚠',
-    color: '#F59E0B'
-  },
-  'Nonsense': {
-    short: 'Premature termination',
-    long: 'Premature stop codon may produce truncated protein. This often results in loss of protein function and can have significant biological consequences.',
-    icon: '⛔',
-    color: '#EF4444'
-  }
+/* ─── MUTATION EXPLANATIONS ─────────────────────────────────────────────── */
+const MUT_EXP = {
+  Silent:   { short:'No amino acid change',       long:'Silent mutations do not change the amino acid sequence due to genetic code redundancy. Protein function is typically preserved.',                                                                                                     icon:'✓',  color:'#10B981' },
+  Missense: { short:'Amino acid substitution',    long:'Amino acid change may alter protein structure or function. Effects range from benign to severe depending on the biochemical properties of the substituted amino acid.',                                                          icon:'⚠',  color:'#F59E0B' },
+  Nonsense: { short:'Premature termination',      long:'Premature stop codon may produce a truncated protein. This often results in loss of protein function and can have significant biological consequences.',                                                                              icon:'⛔', color:'#EF4444' }
 };
 
+/* ─── MOCK BACKEND ──────────────────────────────────────────────────────── */
+const API_URL = import.meta?.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
+
+/* ─── HELPERS ────────────────────────────────────────────────────────────── */
+const revComp = seq => { const m={A:'T',T:'A',G:'C',C:'G'}; return seq.split('').reverse().map(b=>m[b]||b).join(''); };
+const translateCodon = codon => CODON_TABLE[codon.replace(/T/g,'U')] || '?';
+const parseIntoCodons = (seq, frame) => {
+  if (!seq || !frame) return [];
+  const off = parseInt(frame) - 1, codons = [];
+  for (let i = off; i < seq.length; i += 3) {
+    const c = seq.substring(i, i+3);
+    if (c.length === 3) codons.push({ codon:c, position:i, aminoAcid:translateCodon(c) });
+  }
+  return codons;
+};
+
+/* ════════════════════════════════════════════════════════════════════════════
+   MAIN
+   ════════════════════════════════════════════════════════════════════════════ */
 export default function MutationFinder() {
-  const [seq1, setSeq1] = useState('');
-  const [seq2, setSeq2] = useState('');
-  const [mutations, setMutations] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [aiExplanation, setAiExplanation] = useState('');
-  const [loadingAI, setLoadingAI] = useState(false);
-  
-  const [readingFrame, setReadingFrame] = useState('');
-  const [strand, setStrand] = useState('');
-  
+  const [seq1, setSeq1]                         = useState('');
+  const [seq2, setSeq2]                         = useState('');
+  const [mutations, setMutations]               = useState(null);
+  const [loading, setLoading]                   = useState(false);
+  const [error, setError]                       = useState('');
+  const [aiExplanation, setAiExplanation]       = useState('');
+  const [loadingAI, setLoadingAI]               = useState(false);
+  const [readingFrame, setReadingFrame]         = useState('');
+  const [strand, setStrand]                     = useState('');
   const [showCodonPreview, setShowCodonPreview] = useState(false);
-  const [previewSequence, setPreviewSequence] = useState('');
-  
-  // Frameshift detection
+  const [previewSequence, setPreviewSequence]   = useState('');
   const [frameshiftDetected, setFrameshiftDetected] = useState(false);
-  const [frameshiftInfo, setFrameshiftInfo] = useState(null);
+  const [frameshiftInfo, setFrameshiftInfo]     = useState(null);
+  const [showSampleMenu, setShowSampleMenu]     = useState(false);
+  const [currentSample, setCurrentSample]       = useState(null);
+  const [sampleBannerVisible, setSampleBannerVisible] = useState(false);
+  const [infoOpen, setInfoOpen]                 = useState(false);
 
-  // Sample loading
-  const [showSampleMenu, setShowSampleMenu] = useState(false);
-  const [currentSample, setCurrentSample] = useState(null);
-  const [sampleExplanationVisible, setSampleExplanationVisible] = useState(false);
-
-  const validateSequence = (seq) => {
-    const cleaned = seq.toUpperCase().replace(/\s/g, '');
-    if (!cleaned) return { valid: false, error: 'Sequence cannot be empty' };
-    if (!/^[ATGC]+$/.test(cleaned)) return { valid: false, error: 'Invalid characters. Only ATGC allowed' };
-    return { valid: true, cleaned };
+  /* ── validate ── */
+  const validate = seq => {
+    const c = seq.toUpperCase().replace(/\s/g,'');
+    if (!c) return { valid:false, error:'Sequence cannot be empty' };
+    if (!/^[ATGC]+$/.test(c)) return { valid:false, error:'Invalid characters — only A T G C allowed' };
+    return { valid:true, cleaned:c };
   };
 
-  const dnaToRna = (dna) => {
-    return dna.replace(/T/g, 'U');
+  /* ── load sample ── */
+  const loadSample = key => {
+    const s = MUTATION_SAMPLES[key];
+    setSeq1(s.reference); setSeq2(s.alternate);
+    setReadingFrame(s.readingFrame); setStrand(s.strand);
+    setCurrentSample(s); setSampleBannerVisible(true);
+    setShowSampleMenu(false); setMutations(null); setError('');
+    setAiExplanation(''); setFrameshiftDetected(false); setFrameshiftInfo(null);
   };
 
-  const translateCodon = (codon) => {
-    const rnaCodon = dnaToRna(codon);
-    return CODON_TABLE[rnaCodon] || '?';
-  };
-
-  const reverseComplement = (seq) => {
-    const complement = { 'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G' };
-    return seq.split('').reverse().map(base => complement[base] || base).join('');
-  };
-
-  const parseIntoCodons = (sequence, frame) => {
-    if (!sequence || !frame) return [];
-    
-    const offset = parseInt(frame) - 1;
-    const codons = [];
-    
-    for (let i = offset; i < sequence.length; i += 3) {
-      const codon = sequence.substring(i, i + 3);
-      if (codon.length === 3) {
-        codons.push({
-          codon: codon,
-          position: i,
-          aminoAcid: translateCodon(codon)
-        });
-      }
-    }
-    
-    return codons;
-  };
-
-  // Load sample function
-  const loadSample = (sampleKey) => {
-    const sample = MUTATION_SAMPLES[sampleKey];
-    setSeq1(sample.reference);
-    setSeq2(sample.alternate);
-    setReadingFrame(sample.readingFrame);
-    setStrand(sample.strand);
-    setCurrentSample(sample);
-    setSampleExplanationVisible(true);
-    setShowSampleMenu(false);
-    setMutations(null);
-    setError('');
-    setAiExplanation('');
-    setFrameshiftDetected(false);
-    setFrameshiftInfo(null);
-  };
-
-  // Close sample menu when clicking outside
+  /* ── close menu on outside click ── */
   useEffect(() => {
-    const handleClickOutside = () => setShowSampleMenu(false);
-    if (showSampleMenu) {
-      document.addEventListener('click', handleClickOutside);
-      return () => document.removeEventListener('click', handleClickOutside);
-    }
+    const close = () => setShowSampleMenu(false);
+    if (showSampleMenu) { document.addEventListener('click', close); return () => document.removeEventListener('click', close); }
   }, [showSampleMenu]);
 
-  // Detect frameshift mutations
-  const detectFrameshift = (mutationData) => {
-    if (!mutationData || !mutationData.mutations) return;
+  /* ── codon preview update ── */
+  useEffect(() => {
+    if (readingFrame && seq1) {
+      const v = validate(seq1);
+      if (v.valid) {
+        let s = v.cleaned;
+        if (strand === 'reverse') s = revComp(s);
+        setPreviewSequence(s.substring(0, 60));
+      }
+    }
+  }, [readingFrame, strand, seq1]);
 
-    const indels = mutationData.mutations.filter(
-      mut => mut.type === 'Insertion' || mut.type === 'Deletion'
-    );
-
-    for (const indel of indels) {
-      const length = indel.type === 'Insertion' 
-        ? (indel.inserted_sequence?.length || 0)
-        : (indel.deleted_sequence?.length || 0);
-
-      if (length % 3 !== 0) {
-        // Frameshift detected!
-        const validation1 = validateSequence(seq1);
-        const validation2 = validateSequence(seq2);
-        
-        if (validation1.valid && validation2.valid) {
-          let seq1Clean = validation1.cleaned;
-          let seq2Clean = validation2.cleaned;
-          
-          if (strand === 'reverse') {
-            seq1Clean = reverseComplement(seq1Clean);
-            seq2Clean = reverseComplement(seq2Clean);
+  /* ── frameshift detection ── */
+  const detectFrameshift = data => {
+    if (!data?.mutations) return;
+    for (const mut of data.mutations.filter(m => m.type === 'Insertion' || m.type === 'Deletion')) {
+      const len = mut.type === 'Insertion' ? (mut.inserted_sequence?.length || 0) : (mut.deleted_sequence?.length || 0);
+      if (len % 3 !== 0) {
+        const v1 = validate(seq1), v2 = validate(seq2);
+        if (v1.valid && v2.valid) {
+          let s1 = v1.cleaned, s2 = v2.cleaned;
+          if (strand === 'reverse') { s1 = revComp(s1); s2 = revComp(s2); }
+          const off = parseInt(readingFrame) - 1;
+          let firstStop = null;
+          for (let i = mut.position + len + off; i < s2.length; i += 3) {
+            const c = s2.substring(i, i+3);
+            if (c.length === 3 && translateCodon(c) === '*') { firstStop = { position:i, codon:c }; break; }
           }
-
-          // Find first stop codon after frameshift
-          const offset = parseInt(readingFrame) - 1;
-          const frameshiftPos = indel.position + length;
-          
-          let firstStopCodon = null;
-          for (let i = frameshiftPos + offset; i < seq2Clean.length; i += 3) {
-            const codon = seq2Clean.substring(i, i + 3);
-            if (codon.length === 3) {
-              const aa = translateCodon(codon);
-              if (aa === '*') {
-                firstStopCodon = { position: i, codon: codon };
-                break;
-              }
-            }
-          }
-
           setFrameshiftDetected(true);
           setFrameshiftInfo({
-            position: indel.position,
-            type: indel.type,
-            length: length,
-            codon: indel.type === 'Insertion' 
-              ? seq2Clean.substring(indel.position, indel.position + 3)
-              : seq1Clean.substring(indel.position, indel.position + 3),
-            firstStopCodon: firstStopCodon
+            position: mut.position, type: mut.type, length: len,
+            codon: mut.type === 'Insertion' ? s2.substring(mut.position, mut.position+3) : s1.substring(mut.position, mut.position+3),
+            firstStopCodon: firstStop
           });
           return;
         }
       }
     }
-
-    setFrameshiftDetected(false);
-    setFrameshiftInfo(null);
+    setFrameshiftDetected(false); setFrameshiftInfo(null);
   };
 
-  // Calculate mutation confidence
-  const getMutationConfidence = (mutation) => {
-    // High confidence: clear SNP with definitive codon change
-    if (mutation.type === 'SNP' && mutation.reference_codon && mutation.alternate_codon) {
-      const refLength = mutation.reference_codon.length;
-      const altLength = mutation.alternate_codon.length;
-      if (refLength === 3 && altLength === 3) {
-        return { level: 'High', reason: 'Clear codon change' };
-      }
-    }
+  useEffect(() => { if (mutations) detectFrameshift(mutations); }, [mutations, readingFrame, strand]);
 
-    // Moderate confidence: frame-dependent or indels
-    if (mutation.type === 'Insertion' || mutation.type === 'Deletion') {
-      return { level: 'Moderate', reason: 'Frame-dependent interpretation' };
-    }
-
-    // Default moderate
-    return { level: 'Moderate', reason: 'Frame-dependent interpretation' };
+  /* ── confidence ── */
+  const getConfidence = mut => {
+    if (mut.type === 'SNP' && mut.reference_codon?.length === 3 && mut.alternate_codon?.length === 3)
+      return { level:'High', reason:'Clear codon change' };
+    if (mut.type === 'Insertion' || mut.type === 'Deletion')
+      return { level:'Moderate', reason:'Frame-dependent interpretation' };
+    return { level:'Moderate', reason:'Frame-dependent interpretation' };
   };
 
-  useEffect(() => {
-    if (readingFrame && seq1) {
-      const validation = validateSequence(seq1);
-      if (validation.valid) {
-        let processedSeq = validation.cleaned;
-        if (strand === 'reverse') {
-          processedSeq = reverseComplement(processedSeq);
-        }
-        setPreviewSequence(processedSeq.substring(0, 60));
-      }
-    }
-  }, [readingFrame, strand, seq1]);
-
-  useEffect(() => {
-    if (mutations) {
-      detectFrameshift(mutations);
-    }
-  }, [mutations, readingFrame, strand]);
-
-  const handleFindMutations = async () => {
-    if (!seq1.trim() || !seq2.trim()) {
-      setError('Please enter both sequences');
-      return;
-    }
-
-    if (!readingFrame || !strand) {
-      setError('Please select both Reading Frame and Strand before analyzing mutations');
-      return;
-    }
-
-    const validation1 = validateSequence(seq1);
-    const validation2 = validateSequence(seq2);
-
-    if (!validation1.valid) {
-      setError(`Sequence 1: ${validation1.error}`);
-      return;
-    }
-
-    if (!validation2.valid) {
-      setError(`Sequence 2: ${validation2.error}`);
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setAiExplanation('');
-    setMutations(null);
-    setFrameshiftDetected(false);
-    setFrameshiftInfo(null);
-
+  /* ── submit ── */
+  const handleFind = async () => {
+    if (!seq1.trim() || !seq2.trim()) { setError('Please enter both sequences'); return; }
+    if (!readingFrame || !strand) { setError('Please select both Reading Frame and Strand before analyzing'); return; }
+    const v1 = validate(seq1), v2 = validate(seq2);
+    if (!v1.valid) { setError(`Reference: ${v1.error}`); return; }
+    if (!v2.valid) { setError(`Alternate: ${v2.error}`); return; }
+    setLoading(true); setError(''); setAiExplanation(''); setMutations(null);
+    setFrameshiftDetected(false); setFrameshiftInfo(null);
     try {
-      console.log('📤 Sending mutation finder request to:', `${API_URL}/api/mutations`);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      const response = await fetch(`${API_URL}/api/mutations`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          sequence1: validation1.cleaned,
-          sequence2: validation2.cleaned,
-          reading_frame: parseInt(readingFrame),
-          strand: strand
-        }),
-        signal: controller.signal
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 30000);
+      const res = await fetch(`${API_URL}/api/mutations`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ sequence1:v1.cleaned, sequence2:v2.cleaned, reading_frame:parseInt(readingFrame), strand }),
+        signal: ctrl.signal
       });
-
-      clearTimeout(timeoutId);
-      console.log('Response status:', response.status);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      const data = await response.json();
-      console.log('📥 Mutations Response:', data);
-
-      if (data && data.mutations !== undefined) {
-        console.log('✅ Mutations received:', data.mutations.length);
-        setMutations(data);
-        setError('');
-      } else {
-        const errorMsg = data.error || 'Invalid response format';
-        console.error('❌ Error:', errorMsg);
-        setError(errorMsg);
-        setMutations(null);
-      }
-    } catch (err) {
-      console.error('💥 Exception:', err);
-      let errorMsg = 'An unexpected error occurred';
-      
-      if (err.name === 'AbortError') {
-        errorMsg = 'Request timed out. The sequences might be too long or the server is slow. Try with shorter sequences.';
-      } else if (err.message.includes('fetch')) {
-        errorMsg = `Cannot connect to backend at ${API_URL}. Please check if the backend is running.`;
-      } else {
-        errorMsg = err.message;
-      }
-      
-      setError(errorMsg);
-      setMutations(null);
-    } finally {
-      setLoading(false);
-    }
+      clearTimeout(t);
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error || `HTTP ${res.status}`); }
+      const data = await res.json();
+      if (data?.mutations !== undefined) setMutations(data);
+      else setError(data.error || 'Invalid response');
+    } catch (e) {
+      setError(e.name === 'AbortError' ? 'Request timed out.' : (e.message.includes('fetch') ? 'Cannot connect to backend.' : e.message));
+    } finally { setLoading(false); }
   };
 
-  const handleExplainWithAI = async () => {
+  /* ── AI explain ── */
+  const handleAI = async () => {
     if (!mutations) return;
-
-    setLoadingAI(true);
-    setError('');
-    setAiExplanation('');
-
+    setLoadingAI(true); setError(''); setAiExplanation('');
     try {
-      console.log('📤 Sending AI explanation request...');
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-      const response = await fetch(`${API_URL}/api/explain`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          tool: 'Mutation Finder',
-          data: mutations
-        }),
-        signal: controller.signal
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 60000);
+      const res = await fetch(`${API_URL}/api/explain`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tool:'Mutation Finder', data:mutations }),
+        signal: ctrl.signal
       });
-
-      clearTimeout(timeoutId);
-      console.log('AI response status:', response.status);
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'AI explanation failed');
-      }
-
-      const data = await response.json();
-      console.log('📥 AI Response:', data);
-
-      const explanation =
-        data.explanation ||
-        data.output_text ||
-        data.data?.explanation ||
-        data.choices?.[0]?.message?.content;
-
-      if (!explanation) {
-        throw new Error('AI returned no explanation text');
-      }
-
-      setAiExplanation(explanation);
-    } catch (err) {
-      console.error('💥 AI Exception:', err);
-      setError(
-        err.name === 'AbortError'
-          ? 'AI explanation timed out'
-          : err.message || 'Failed to get AI explanation'
-      );
-    } finally {
-      setLoadingAI(false);
-    }
+      clearTimeout(t);
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error || 'AI failed'); }
+      const data = await res.json();
+      const txt = data.explanation || data.output_text || data.data?.explanation || data.choices?.[0]?.message?.content;
+      if (!txt) throw new Error('No explanation returned');
+      setAiExplanation(txt);
+    } catch (e) { setError(e.name === 'AbortError' ? 'AI timed out' : (e.message || 'AI failed')); }
+    finally { setLoadingAI(false); }
   };
 
-  const getMutationColor = (type) => {
-    if (!type) return '#6B7280';
-    if (type.includes('Silent')) return '#10B981';
-    if (type.includes('Missense')) return '#F59E0B';
-    if (type.includes('Nonsense')) return '#EF4444';
-    return '#6B7280';
-  };
-
-  // Render Before/After Codon Alignment
-  const renderCodonAlignment = (mutation) => {
-    const refCodon = mutation.reference_codon || mutation.reference || '---';
-    const altCodon = mutation.alternate_codon || mutation.alternate || mutation.inserted_sequence || '---';
-    
-    const refAA = refCodon.length === 3 ? translateCodon(refCodon) : '-';
-    const altAA = altCodon.length === 3 ? translateCodon(altCodon) : '-';
-    
-    const isMutated = refCodon !== altCodon;
-
-    return (
-      <div style={{
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        border: '1px solid #475569',
-        borderRadius: '12px',
-        padding: '1.25rem',
-        marginTop: '0.75rem',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.3)'
-      }}>
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: '110px 1fr',
-          gap: '1.25rem',
-          alignItems: 'center'
-        }}>
-          {/* Reference */}
-          <div style={{ 
-            fontSize: '0.875rem', 
-            color: '#cbd5e1',
-            fontWeight: 700,
-            letterSpacing: '0.5px'
-          }}>
-            Reference
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{
-              fontFamily: 'JetBrains Mono, Consolas, monospace',
-              fontSize: '1.15rem',
-              background: isMutated ? 'linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(96, 165, 250, 0.15))' : 'rgba(100, 116, 139, 0.2)',
-              border: `2px solid ${isMutated ? '#3B82F6' : '#64748b'}`,
-              borderRadius: '8px',
-              padding: '0.4rem 1rem',
-              color: '#f1f5f9',
-              fontWeight: 700,
-              letterSpacing: '3px',
-              boxShadow: isMutated ? '0 2px 8px rgba(59, 130, 246, 0.3)' : 'none'
-            }}>
-              {refCodon}
-            </span>
-            <span style={{ color: '#64748b', fontSize: '1.4rem', fontWeight: 300 }}>→</span>
-            <span style={{
-              fontSize: '1.1rem',
-              color: '#60A5FA',
-              fontWeight: 800,
-              background: 'linear-gradient(135deg, rgba(96, 165, 250, 0.2), rgba(96, 165, 250, 0.1))',
-              padding: '0.35rem 0.75rem',
-              borderRadius: '6px',
-              border: '1px solid rgba(96, 165, 250, 0.3)',
-              letterSpacing: '1px'
-            }}>
-              {refAA}
-            </span>
-          </div>
-
-          {/* Mutant */}
-          <div style={{ 
-            fontSize: '0.875rem', 
-            color: '#cbd5e1',
-            fontWeight: 700,
-            letterSpacing: '0.5px'
-          }}>
-            Mutant
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <span style={{
-              fontFamily: 'JetBrains Mono, Consolas, monospace',
-              fontSize: '1.15rem',
-              background: isMutated ? 'linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(248, 113, 113, 0.15))' : 'rgba(100, 116, 139, 0.2)',
-              border: `2px solid ${isMutated ? '#EF4444' : '#64748b'}`,
-              borderRadius: '8px',
-              padding: '0.4rem 1rem',
-              color: '#f1f5f9',
-              fontWeight: 700,
-              letterSpacing: '3px',
-              boxShadow: isMutated ? '0 2px 8px rgba(239, 68, 68, 0.3)' : 'none'
-            }}>
-              {altCodon}
-            </span>
-            <span style={{ color: '#64748b', fontSize: '1.4rem', fontWeight: 300 }}>→</span>
-            <span style={{
-              fontSize: '1.1rem',
-              color: '#FBBF24',
-              fontWeight: 800,
-              background: 'linear-gradient(135deg, rgba(251, 191, 36, 0.2), rgba(251, 191, 36, 0.1))',
-              padding: '0.35rem 0.75rem',
-              borderRadius: '6px',
-              border: '1px solid rgba(251, 191, 36, 0.3)',
-              letterSpacing: '1px'
-            }}>
-              {altAA}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const renderCodonPreview = () => {
-    if (!previewSequence || !readingFrame) return null;
-
-    const codons = parseIntoCodons(previewSequence, readingFrame);
-    const offset = parseInt(readingFrame) - 1;
-
-    return (
-      <div style={{
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-        border: '2px solid #475569',
-        borderRadius: '12px',
-        padding: '1.25rem',
-        marginTop: '1.25rem',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-      }}>
-        <div style={{
-          fontSize: '0.9rem',
-          color: '#cbd5e1',
-          marginBottom: '1rem',
-          fontWeight: 700,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem'
-        }}>
-          <span style={{ fontSize: '1.2rem' }}>🔬</span>
-          <span>Codon Preview (Frame +{readingFrame}, {strand})</span>
-        </div>
-        
-        <div style={{
-          fontFamily: 'JetBrains Mono, Consolas, monospace',
-          fontSize: '0.85rem',
-          marginBottom: '0.75rem',
-          color: '#64748b',
-          letterSpacing: '1px'
-        }}>
-          {previewSequence.split('').map((base, idx) => (
-            <span key={idx} style={{ marginRight: idx % 10 === 9 ? '8px' : '0' }}>
-              {idx % 10 === 0 ? '|' : ''}
-            </span>
-          ))}
-        </div>
-
-        {offset > 0 && (
-          <span style={{
-            fontFamily: 'JetBrains Mono, Consolas, monospace',
-            fontSize: '1rem',
-            color: '#64748b',
-            opacity: 0.4
-          }}>
-            {previewSequence.substring(0, offset)}
-          </span>
-        )}
-
-        <div style={{ display: 'inline-block' }}>
-          {codons.map((codonData, idx) => (
-            <span key={idx} style={{ display: 'inline-block', marginRight: '10px' }}>
-              <span style={{
-                fontFamily: 'JetBrains Mono, Consolas, monospace',
-                fontSize: '1.05rem',
-                background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(96, 165, 250, 0.1))',
-                border: '2px solid #3B82F6',
-                borderRadius: '6px',
-                padding: '3px 6px',
-                color: '#f1f5f9',
-                letterSpacing: '2px',
-                fontWeight: 600
-              }}>
-                {codonData.codon}
-              </span>
-              <span style={{
-                fontSize: '0.8rem',
-                color: '#60A5FA',
-                marginLeft: '4px',
-                fontWeight: 700
-              }}>
-                {codonData.aminoAcid}
-              </span>
-            </span>
-          ))}
-        </div>
-
-        <div style={{
-          fontSize: '0.8rem',
-          color: '#94a3b8',
-          marginTop: '1rem',
-          fontStyle: 'italic',
-          background: 'rgba(100, 116, 139, 0.1)',
-          padding: '0.75rem',
-          borderRadius: '6px',
-          borderLeft: '3px solid #3B82F6'
-        }}>
-          💡 Codon interpretation depends on the selected reading frame. Change the frame to see different groupings.
-        </div>
-      </div>
-    );
-  };
-
+  /* ════════════════════════════════════════════════════════════════════════
+     RENDER
+     ════════════════════════════════════════════════════════════════════════ */
   return (
-    <div style={{ 
-      fontFamily: 'system-ui, -apple-system, sans-serif', 
-      padding: '2rem', 
-      maxWidth: '1400px', 
-      margin: '0 auto',
-      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
-      minHeight: '100vh'
-    }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
-        
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        
-        .loading-spinner {
-          display: inline-block;
-          width: 18px;
-          height: 18px;
-          border: 3px solid rgba(255, 255, 255, 0.3);
-          border-top-color: #ffffff;
-          border-radius: 50%;
-          animation: spin 0.7s linear infinite;
-        }
+  <div style={{ minHeight:'100vh', background:'#0c0e14', color:'#e2e4e9', fontFamily:'"Sora",sans-serif' }}>
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    ::-webkit-scrollbar{ width:5px; }
+    ::-webkit-scrollbar-track{ background:#131518; }
+    ::-webkit-scrollbar-thumb{ background:#2a2d3a; border-radius:3px; }
 
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
+    .pc{ background:#141720; border:1px solid #24272f; border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; }
+    .lbl{ display:block; font-size:.82rem; font-weight:600; color:#6b7080; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.42rem; }
 
-        .loading-text {
-          animation: pulse 1.5s ease-in-out infinite;
-        }
+    select, textarea{
+      width:100%; background:#0f1117; border:1px solid #24272f; border-radius:8px;
+      color:#e2e4e9; font-family:'Sora',sans-serif; font-size:.92rem;
+      padding:.7rem .85rem; outline:none; transition:border-color .2s;
+    }
+    select:focus, textarea:focus{ border-color:#8B5CF6; }
+    textarea{ resize:vertical; font-family:'JetBrains Mono',monospace; font-size:.82rem; line-height:1.85; }
+    textarea::placeholder{ color:#2e3145; }
+    select option{ background:#0f1117; }
 
-        @keyframes slideIn {
-          from { transform: translateY(-20px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
-        }
+    /* ── buttons ── */
+    .btn-p{
+      display:flex; align-items:center; justify-content:center; gap:.5rem;
+      width:100%; padding:.88rem 1.25rem;
+      background:linear-gradient(135deg,#8B5CF6,#7C3AED);
+      border:none; border-radius:10px;
+      color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:.98rem;
+      cursor:pointer; transition:all .22s;
+    }
+    .btn-p:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 24px rgba(139,92,246,.35); }
+    .btn-p:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
-        .frameshift-banner {
-          animation: slideIn 0.5s ease-out;
-        }
+    .btn-ai{
+      display:flex; align-items:center; justify-content:center; gap:.5rem;
+      width:100%; padding:.82rem 1.25rem;
+      background:linear-gradient(135deg,#6366f1,#4f46e5);
+      border:none; border-radius:10px;
+      color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:.92rem;
+      cursor:pointer; transition:all .22s;
+    }
+    .btn-ai:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 20px rgba(99,102,241,.35); }
+    .btn-ai:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
-        @keyframes slideDown {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+    .btn-g{
+      display:inline-flex; align-items:center; gap:.38rem;
+      padding:.46rem .9rem; background:transparent;
+      border:1px solid #24272f; border-radius:7px;
+      color:#8a8f9e; font-family:'Sora',sans-serif; font-size:.84rem; font-weight:500;
+      cursor:pointer; transition:all .2s;
+    }
+    .btn-g:hover{ border-color:#8B5CF6; color:#8B5CF6; background:rgba(139,92,246,.06); }
 
-        .slide-down {
-          animation: slideDown 0.3s ease-out;
-        }
+    .btn-sample{
+      display:inline-flex; align-items:center; gap:.38rem;
+      padding:.42rem .88rem; background:rgba(139,92,246,.1);
+      border:1px solid rgba(139,92,246,.3); border-radius:7px;
+      color:#a78bfa; font-family:'Sora',sans-serif; font-size:.82rem; font-weight:500;
+      cursor:pointer; transition:all .2s; position:relative;
+    }
+    .btn-sample:hover{ background:rgba(139,92,246,.18); border-color:rgba(139,92,246,.55); }
 
-        @media (max-width: 768px) {
-          .seq-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .config-grid {
-            grid-template-columns: 1fr !important;
-          }
-        }
+    /* ── sample dropdown ── */
+    .sample-menu{
+      position:absolute; top:calc(100% + .35rem); left:0;
+      background:#141720; border:1px solid #24272f; border-radius:10px;
+      box-shadow:0 12px 32px rgba(0,0,0,.45); padding:.55rem;
+      z-index:100; min-width:280px; max-width:90vw;
+    }
+    .sample-item{
+      padding:.7rem .8rem; border-radius:8px; cursor:pointer;
+      border:1px solid transparent; margin-bottom:.28rem; transition:all .18s;
+    }
+    .sample-item:hover{ border-color:#8B5CF6; background:rgba(139,92,246,.07); }
+    .sample-item:last-child{ margin-bottom:0; }
 
-        button:hover:not(:disabled) {
-          transform: translateY(-1px);
-          box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
-        }
+    /* ── info panel ── */
+    .info-wrap{ overflow:hidden; transition:max-height .4s cubic-bezier(.4,0,.2,1), opacity .3s; }
+    .info-wrap.closed{ max-height:0; opacity:0; }
+    .info-wrap.open{ max-height:1200px; opacity:1; }
 
-        button {
-          transition: all 0.3s ease;
-        }
+    /* ── step ── */
+    .step-row{ display:flex; gap:.55rem; align-items:flex-start; margin-bottom:.6rem; }
+    .step-num{ flex-shrink:0; width:24px; height:24px; border-radius:50%; background:#8B5CF6; color:#fff; font-size:.66rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:.08rem; }
 
-        textarea:focus {
-          outline: none;
-          border-color: #3B82F6 !important;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-        }
+    /* ── stat ── */
+    .stat-b{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:.78rem .6rem; text-align:center; }
+    .stat-v{ font-size:1.4rem; font-weight:700; line-height:1.2; }
+    .stat-l{ font-size:.74rem; color:#6b7080; text-transform:uppercase; letter-spacing:.06em; margin-top:.25rem; }
 
-        select:focus {
-          outline: none;
-          box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
-        }
+    /* ── codon alignment ── */
+    .align-box{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1rem 1.1rem; margin-top:.7rem; }
+    .align-row{ display:flex; align-items:center; gap:.7rem; margin-bottom:.5rem; }
+    .align-row:last-child{ margin-bottom:0; }
+    .align-lbl{ width:72px; font-size:.82rem; font-weight:600; color:#8a8f9e; flex-shrink:0; }
+    .codon-chip{
+      font-family:'JetBrains Mono',monospace; font-size:.92rem; font-weight:700;
+      padding:.32rem .72rem; border-radius:7px; letter-spacing:2px;
+    }
+    .aa-chip{ font-size:.88rem; font-weight:700; padding:.28rem .6rem; border-radius:6px; }
 
-        .sample-menu {
-          position: absolute;
-          top: 100%;
-          left: 0;
-          background: #1e293b;
-          border: 2px solid #475569;
-          borderRadius: 12px;
-          boxShadow: 0 8px 24px rgba(0,0,0,0.4);
-          padding: 0.75rem;
-          zIndex: 100;
-          minWidth: 280px;
-          marginTop: 0.5rem;
-        }
+    /* ── mutation card ── */
+    .mut-card{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1.1rem; margin-bottom:.7rem; }
 
-        .sample-menu-item {
-          padding: 1rem;
-          cursor: pointer;
-          borderRadius: 8px;
-          transition: all 0.2s ease;
-          fontSize: 0.9rem;
-          color: #e2e8f0;
-          border: 2px solid transparent;
-          marginBottom: 0.5rem;
-        }
+    /* ── tip / consequence ── */
+    .consequence-box{ border-radius:9px; padding:.78rem; margin-top:.65rem; }
+    .note-box{ background:rgba(100,116,139,.08); border-left:3px solid #24272f; border-radius:6px; padding:.6rem .7rem; margin-top:.55rem; font-style:italic; font-size:.8rem; color:#6b7080; line-height:1.6; }
 
-        .sample-menu-item:hover {
-          background: #334155;
-          border-color: #60A5FA;
-          transform: translateX(4px);
-        }
+    /* ── frameshift banner ── */
+    .fs-banner{ background:linear-gradient(135deg,#7f1d1d,#991B1B); border:1px solid #dc2626; border-radius:12px; padding:1.2rem; margin-bottom:1rem; }
 
-        .sample-menu-item:last-child {
-          marginBottom: 0;
-        }
-      `}</style>
-      
-      <div style={{ 
-        marginBottom: '2.5rem', 
-        textAlign: 'center'
-      }}>
-        <h1 style={{ 
-          fontSize: '3rem', 
-          fontWeight: 800,
-          background: 'linear-gradient(135deg, #60A5FA 0%, #3B82F6 50%, #2563EB 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          marginBottom: '0.5rem',
-          letterSpacing: '-1px'
-        }}>
-          🧬 Mutation Finder
-        </h1>
-        <p style={{
-          fontSize: '1.1rem',
-          color: '#94a3b8',
-          fontWeight: 500
-        }}>
-          Analyze DNA sequences to identify and classify genetic variations
-        </p>
+    /* ── AI box ── */
+    .ai-box{ background:rgba(139,92,246,.08); border:1px solid rgba(139,92,246,.3); border-radius:12px; padding:1.2rem; margin-bottom:1rem; }
+
+    /* ── grids / responsive ── */
+    .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; }
+    .seq-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.85rem; }
+    .config-grid{ display:grid; grid-template-columns:1fr 1fr; gap:.85rem; }
+    .summary-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.55rem; }
+
+    @media(max-width:640px){
+      .seq-grid{ grid-template-columns:1fr; }
+      .config-grid{ grid-template-columns:1fr; }
+      .stat-grid{ grid-template-columns:repeat(2,1fr); }
+      .summary-grid{ grid-template-columns:repeat(2,1fr); }
+      .pc{ padding:1rem; }
+      .align-box{ padding:.75rem .7rem; }
+    }
+    @media(max-width:380px){
+      .stat-grid{ grid-template-columns:1fr 1fr; gap:.4rem; }
+      .summary-grid{ grid-template-columns:1fr 1fr; gap:.4rem; }
+    }
+
+    /* ── spinner ── */
+    @keyframes spin{ to{ transform:rotate(360deg); } }
+    .spin{ display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:spin .5s linear infinite; }
+  `}</style>
+
+  {/* ═══ HEADER ═══ */}
+  <div style={{ background:'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom:'1px solid #1e2130', padding:'1.5rem 1.2rem 1.2rem' }}>
+    <div style={{ maxWidth:860, margin:'0 auto' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'.65rem', marginBottom:'.4rem', flexWrap:'wrap' }}>
+        <span style={{ fontSize:'1.5rem' }}>🧬</span>
+        <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.5rem', color:'#fff' }}>Mutation Finder</h1>
+        <span style={{ background:'rgba(139,92,246,.1)', border:'1px solid rgba(139,92,246,.25)', color:'#a78bfa', fontSize:'.64rem', fontWeight:600, padding:'.2rem .52rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Research Grade</span>
       </div>
+      <p style={{ color:'#6b7080', fontSize:'.9rem', lineHeight:1.55, maxWidth:560 }}>
+        Compare two DNA sequences to identify and classify SNPs, insertions, deletions, and frameshift mutations with codon-level resolution.
+      </p>
+    </div>
+  </div>
 
-      {/* Load Sample Button */}
-      <div style={{ 
-        marginBottom: '2rem',
-        display: 'flex',
-        justifyContent: 'center'
-      }}>
-        <div style={{ position: 'relative' }}>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowSampleMenu(!showSampleMenu);
-            }}
-            style={{
-              padding: '1rem 2rem',
-              background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
-              border: 'none',
-              borderRadius: '12px',
-              color: '#fff',
-              fontSize: '1.1rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              boxShadow: '0 4px 16px rgba(139, 92, 246, 0.4)'
-            }}
-          >
-            <span style={{ fontSize: '1.3rem' }}>📋</span>
-            <span>Load Sample Mutations</span>
-            <span style={{ fontSize: '0.9rem' }}>▼</span>
-          </button>
+  <div style={{ maxWidth:860, margin:'0 auto', padding:'1.15rem 1.1rem 3rem' }}>
 
-          {showSampleMenu && (
-            <div className="sample-menu slide-down" onClick={(e) => e.stopPropagation()}>
-              {Object.entries(MUTATION_SAMPLES).map(([key, sample]) => (
-                <div
-                  key={key}
-                  className="sample-menu-item"
-                  onClick={() => loadSample(key)}
-                  style={{
-                    background: `linear-gradient(135deg, ${sample.color}15, ${sample.color}08)`
-                  }}
-                >
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '0.75rem',
-                    marginBottom: '0.5rem'
-                  }}>
-                    <span style={{ fontSize: '1.5rem' }}>{sample.icon}</span>
-                    <strong style={{ color: sample.color, fontSize: '1rem' }}>
-                      {sample.name}
-                    </strong>
-                  </div>
-                  <div style={{ 
-                    fontSize: '0.8rem', 
-                    color: '#cbd5e1',
-                    lineHeight: '1.4'
-                  }}>
-                    {sample.description}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+    {/* ═══ INFO TOGGLE ═══ */}
+    <button className="btn-g" onClick={()=>setInfoOpen(v=>!v)} style={{ width:'100%', justifyContent:'space-between', marginBottom:'1rem' }}>
+      <span style={{ display:'flex', alignItems:'center', gap:'.42rem' }}>
+        <span style={{ fontSize:'.9rem' }}>💡</span>
+        <span style={{ fontSize:'.86rem' }}>Why This Tool Matters &amp; How to Use It</span>
+      </span>
+      <span style={{ fontSize:'.72rem', color:'#6b7080', transition:'transform .25s', transform:infoOpen?'rotate(180deg)':'rotate(0)', display:'inline-block' }}>▼</span>
+    </button>
 
-      {/* Sample Explanation Banner */}
-      {sampleExplanationVisible && currentSample && (
-        <div className="slide-down" style={{
-          background: `linear-gradient(135deg, ${currentSample.color}20, ${currentSample.color}10)`,
-          border: `2px solid ${currentSample.color}`,
-          borderRadius: '16px',
-          padding: '2rem',
-          marginBottom: '2rem',
-          boxShadow: `0 8px 24px ${currentSample.color}30`
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'flex-start',
-            marginBottom: '1.5rem'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <span style={{ fontSize: '2.5rem' }}>{currentSample.icon}</span>
-              <div>
-                <h3 style={{ 
-                  color: currentSample.color, 
-                  margin: 0,
-                  fontSize: '1.5rem',
-                  fontWeight: 800
-                }}>
-                  Sample Loaded: {currentSample.name}
-                </h3>
-                <p style={{ 
-                  color: '#cbd5e1', 
-                  margin: '0.5rem 0 0 0',
-                  fontSize: '0.95rem'
-                }}>
-                  {currentSample.description}
-                </p>
-              </div>
-            </div>
-            <button
-              onClick={() => setSampleExplanationVisible(false)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: '#94a3b8',
-                fontSize: '1.5rem',
-                cursor: 'pointer',
-                padding: '0.25rem',
-                lineHeight: 1
-              }}
-            >
-              ×
-            </button>
+    <div className={`info-wrap ${infoOpen?'open':'closed'}`}>
+      <div className="pc" style={{ padding:'1.3rem' }}>
+        {/* WHY */}
+        <div style={{ marginBottom:'1.1rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.5rem' }}>
+            <span style={{ fontSize:'.92rem' }}>🎯</span>
+            <span style={{ fontSize:'.82rem', fontWeight:600, color:'#8B5CF6', textTransform:'uppercase', letterSpacing:'.07em' }}>Why This Tool Matters</span>
           </div>
-
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.3)',
-            borderRadius: '12px',
-            padding: '1.5rem',
-            border: `1px solid ${currentSample.color}40`
-          }}>
-            <h4 style={{ 
-              color: '#e2e8f0', 
-              marginTop: 0,
-              marginBottom: '1rem',
-              fontSize: '1.1rem',
-              fontWeight: 700
-            }}>
-              📚 Educational Explanation
-            </h4>
-            <p style={{ 
-              color: '#cbd5e1', 
-              lineHeight: '1.8',
-              marginBottom: '1.25rem',
-              fontSize: '0.95rem'
-            }}>
-              {currentSample.explanation}
-            </p>
-
-            <div style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              borderRadius: '8px',
-              padding: '1rem',
-              marginBottom: '1.25rem'
-            }}>
-              <strong style={{ color: '#60A5FA', fontSize: '0.9rem' }}>
-                🔬 Biological Context:
-              </strong>
-              <p style={{ 
-                color: '#cbd5e1', 
-                margin: '0.5rem 0 0 0',
-                fontSize: '0.9rem',
-                lineHeight: '1.7'
-              }}>
-                {currentSample.biologicalContext}
-              </p>
-            </div>
-
-            <div style={{
-              display: 'flex',
-              gap: '2rem',
-              flexWrap: 'wrap',
-              fontSize: '0.9rem'
-            }}>
-              <div>
-                <strong style={{ color: '#94a3b8' }}>Expected Result:</strong>
-                <div style={{ 
-                  color: currentSample.color,
-                  fontWeight: 700,
-                  marginTop: '0.25rem'
-                }}>
-                  {currentSample.expectedResult}
-                </div>
-              </div>
-              {currentSample.mutationDetails && (
-                <div>
-                  <strong style={{ color: '#94a3b8' }}>Mutation Details:</strong>
-                  <div style={{ 
-                    color: '#cbd5e1',
-                    marginTop: '0.25rem',
-                    lineHeight: '1.6'
-                  }}>
-                    {currentSample.mutationDetails.change && `Change: ${currentSample.mutationDetails.change}`}
-                    {currentSample.mutationDetails.inserted && `Inserted: ${currentSample.mutationDetails.inserted}`}
-                    {currentSample.mutationDetails.deleted && `Deleted: ${currentSample.mutationDetails.deleted}`}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+          <p style={{ fontSize:'.9rem', color:'#8a8f9e', lineHeight:1.75, margin:0 }}>
+            Manually comparing two DNA sequences base-by-base is tedious and error-prone — especially when you need to know <strong style={{color:'#c8cad4'}}>what the mutation does at the protein level</strong>. This tool aligns your reference and alternate sequences, pinpoints every variation, and classifies each one as a
+            <strong style={{color:'#c8cad4'}}> Silent </strong>,
+            <strong style={{color:'#c8cad4'}}> Missense </strong>, or
+            <strong style={{color:'#c8cad4'}}> Nonsense </strong>
+            mutation — and flags any <strong style={{color:'#EF4444'}}>frameshift</strong> events that could destroy the entire downstream reading frame.
+          </p>
         </div>
-      )}
-
-      {/* Frameshift Detection Banner */}
-      {frameshiftDetected && frameshiftInfo && (
-        <div className="frameshift-banner" style={{
-          background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
-          border: '2px solid #FCA5A5',
-          borderRadius: '16px',
-          padding: '2rem',
-          marginBottom: '2rem',
-          boxShadow: '0 8px 24px rgba(220, 38, 38, 0.4)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '1.25rem' }}>
-            <div style={{ 
-              fontSize: '2.5rem',
-              background: 'rgba(254, 202, 202, 0.25)',
-              padding: '0.75rem',
-              borderRadius: '12px'
-            }}>
-              ⚠️
-            </div>
+        <div style={{ borderTop:'1px solid #24272f', margin:'1rem 0' }}></div>
+        {/* WORKFLOW */}
+        <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.65rem' }}>
+          <span style={{ fontSize:'.92rem' }}>📖</span>
+          <span style={{ fontSize:'.82rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'.07em' }}>Workflow &amp; Next Steps</span>
+        </div>
+        {[
+          ['Pick Your Settings',         'Select the reading frame (+1, +2, or +3) and strand direction. These determine how codons are grouped — different settings produce different protein translations.'],
+          ['Load or Paste Sequences',    'Use the sample dropdown to explore pre-built mutation scenarios, or paste your own reference and alternate sequences. Only A, T, G, C characters are accepted.'],
+          ['Run the Analysis',           'Hit Find Mutations. The tool aligns both sequences, detects every SNP / indel, classifies each by biological consequence, and flags any frameshifts with a prominent banner.'],
+          ['Interpret the Results',      'Each mutation card shows a before/after codon alignment, the amino acid change, a confidence score, and a plain-English explanation of the biological impact. Use this to prioritise which variants need further investigation.']
+        ].map(([title, desc], i) => (
+          <div key={i} className="step-row">
+            <div className="step-num">{i+1}</div>
             <div>
-              <h3 style={{ 
-                color: '#FEF2F2', 
-                margin: 0,
-                fontSize: '1.5rem',
-                fontWeight: 800,
-                letterSpacing: '-0.5px'
-              }}>
-                Frameshift Mutation Detected!
-              </h3>
-              <p style={{ 
-                color: '#FCA5A5', 
-                margin: '0.5rem 0 0 0',
-                fontSize: '1rem',
-                fontWeight: 500
-              }}>
-                {frameshiftInfo.type} of {frameshiftInfo.length} base(s) at position {frameshiftInfo.position}
-              </p>
+              <div style={{ fontSize:'.88rem', fontWeight:600, color:'#c8cad4', marginBottom:'.1rem' }}>{title}</div>
+              <div style={{ fontSize:'.84rem', color:'#6b7080', lineHeight:1.6 }}>{desc}</div>
             </div>
           </div>
+        ))}
+      </div>
+    </div>
 
-          <div style={{
-            background: 'rgba(0, 0, 0, 0.4)',
-            borderRadius: '12px',
-            padding: '1.5rem',
-            border: '1px solid rgba(254, 202, 202, 0.3)'
-          }}>
-            <div style={{ fontSize: '0.95rem', color: '#FEF2F2', lineHeight: '1.8' }}>
-              <div style={{ marginBottom: '1rem' }}>
-                <strong style={{ fontSize: '1rem' }}>📍 Frameshift begins at codon:</strong> 
-                <span style={{
-                  marginLeft: '0.75rem',
-                  fontFamily: 'JetBrains Mono, monospace',
-                  background: 'rgba(254, 202, 202, 0.25)',
-                  padding: '0.4rem 0.75rem',
-                  borderRadius: '6px',
-                  fontSize: '1.1rem',
-                  fontWeight: 700,
-                  letterSpacing: '2px'
-                }}>
-                  {frameshiftInfo.codon}
-                </span>
+    {/* ═══ LOAD SAMPLE ═══ */}
+    <div style={{ position:'relative', marginBottom:'1rem' }}>
+      <button className="btn-sample" onClick={e=>{ e.stopPropagation(); setShowSampleMenu(v=>!v); }}>
+        <span style={{ fontSize:'.88rem' }}>📋</span>
+        <span>Load Sample Mutations</span>
+        <span style={{ fontSize:'.72rem', color:'#6b7080', marginLeft:'.2rem' }}>▼</span>
+      </button>
+      {showSampleMenu && (
+        <div className="sample-menu" onClick={e=>e.stopPropagation()}>
+          {Object.entries(MUTATION_SAMPLES).map(([k, s]) => (
+            <div key={k} className="sample-item" onClick={()=>loadSample(k)} style={{ background:`${s.color}0a` }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.2rem' }}>
+                <span style={{ fontSize:'1.1rem' }}>{s.icon}</span>
+                <span style={{ fontSize:'.86rem', fontWeight:600, color:s.color }}>{s.name}</span>
               </div>
-              
-              {frameshiftInfo.firstStopCodon && (
-                <div style={{ marginBottom: '1rem' }}>
-                  <strong style={{ fontSize: '1rem' }}>🛑 First premature stop codon at position {frameshiftInfo.firstStopCodon.position}:</strong>
-                  <span style={{
-                    marginLeft: '0.75rem',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    background: 'rgba(254, 202, 202, 0.25)',
-                    padding: '0.4rem 0.75rem',
-                    borderRadius: '6px',
-                    fontSize: '1.1rem',
-                    fontWeight: 700,
-                    letterSpacing: '2px'
-                  }}>
-                    {frameshiftInfo.firstStopCodon.codon}
-                  </span>
+              <div style={{ fontSize:'.78rem', color:'#8a8f9e', lineHeight:1.45 }}>{s.description}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* ═══ SAMPLE EXPLANATION BANNER ═══ */}
+    {sampleBannerVisible && currentSample && (
+      <div className="pc" style={{ borderColor:currentSample.color+'55', background:`${currentSample.color}08`, marginBottom:'1rem' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'.6rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.55rem' }}>
+            <span style={{ fontSize:'1.4rem' }}>{currentSample.icon}</span>
+            <div>
+              <div style={{ fontSize:'.92rem', fontWeight:700, color:currentSample.color }}>Sample Loaded: {currentSample.name}</div>
+              <div style={{ fontSize:'.82rem', color:'#8a8f9e', marginTop:'.1rem' }}>{currentSample.description}</div>
+            </div>
+          </div>
+          <button onClick={()=>setSampleBannerVisible(false)} style={{ background:'none', border:'none', color:'#6b7080', fontSize:'1.2rem', cursor:'pointer', padding:'.1rem' }}>×</button>
+        </div>
+        <div style={{ background:'rgba(0,0,0,.25)', borderRadius:8, padding:'.85rem', border:`1px solid ${currentSample.color}30` }}>
+          <div style={{ fontSize:'.82rem', fontWeight:600, color:'#60A5FA', marginBottom:'.35rem' }}>📚 Educational Explanation</div>
+          <p style={{ fontSize:'.86rem', color:'#8a8f9e', lineHeight:1.7, margin:'0 0 .5rem' }}>{currentSample.explanation}</p>
+          <div style={{ fontSize:'.82rem', color:'#8a8f9e', lineHeight:1.6 }}>
+            <span style={{ color:'#60A5FA', fontWeight:600 }}>🔬 Biological Context: </span>{currentSample.biologicalContext}
+          </div>
+          <div style={{ marginTop:'.55rem', display:'flex', gap:'1.5rem', flexWrap:'wrap' }}>
+            <div>
+              <div style={{ fontSize:'.76rem', color:'#6b7080', textTransform:'uppercase', letterSpacing:'.05em' }}>Expected Result</div>
+              <div style={{ fontSize:'.84rem', color:currentSample.color, fontWeight:600, marginTop:'.12rem' }}>{currentSample.expectedResult}</div>
+            </div>
+            {currentSample.mutationDetails && (
+              <div>
+                <div style={{ fontSize:'.76rem', color:'#6b7080', textTransform:'uppercase', letterSpacing:'.05em' }}>Details</div>
+                <div style={{ fontSize:'.82rem', color:'#8a8f9e', marginTop:'.12rem' }}>
+                  {currentSample.mutationDetails.change && `Change: ${currentSample.mutationDetails.change}`}
+                  {currentSample.mutationDetails.inserted && `Inserted: ${currentSample.mutationDetails.inserted}`}
+                  {currentSample.mutationDetails.deleted && `Deleted: ${currentSample.mutationDetails.deleted}`}
                 </div>
-              )}
-
-              <div style={{
-                marginTop: '1.25rem',
-                paddingTop: '1.25rem',
-                borderTop: '1px solid rgba(254, 202, 202, 0.3)',
-                fontSize: '0.9rem',
-                color: '#FCA5A5',
-                fontStyle: 'italic',
-                lineHeight: '1.7'
-              }}>
-                💡 <strong>Biological Impact:</strong> Frameshifts alter all downstream codons, 
-                typically resulting in completely different amino acid sequences and often premature 
-                termination. This usually produces non-functional proteins.
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ═══ FRAMESHIFT BANNER ═══ */}
+    {frameshiftDetected && frameshiftInfo && (
+      <div className="fs-banner">
+        <div style={{ display:'flex', alignItems:'center', gap:'.65rem', marginBottom:'.55rem' }}>
+          <span style={{ fontSize:'1.3rem' }}>⚠️</span>
+          <div>
+            <div style={{ fontSize:'.92rem', fontWeight:700, color:'#FEF2F2' }}>Frameshift Mutation Detected!</div>
+            <div style={{ fontSize:'.82rem', color:'#FCA5A5', marginTop:'.08rem' }}>
+              {frameshiftInfo.type} of {frameshiftInfo.length} base(s) at position {frameshiftInfo.position}
             </div>
           </div>
+        </div>
+        <div style={{ background:'rgba(0,0,0,.35)', borderRadius:8, padding:'.75rem', border:'1px solid rgba(254,202,202,.2)' }}>
+          <div style={{ fontSize:'.84rem', color:'#FEF2F2', lineHeight:1.75 }}>
+            <div style={{ marginBottom:'.35rem' }}>
+              <strong>📍 Frameshift begins at codon: </strong>
+              <span style={{ fontFamily:'"JetBrains Mono",monospace', background:'rgba(254,202,202,.2)', padding:'.22rem .55rem', borderRadius:5, fontSize:'.88rem', fontWeight:700, letterSpacing:'2px', marginLeft:'.4rem' }}>{frameshiftInfo.codon}</span>
+            </div>
+            {frameshiftInfo.firstStopCodon && (
+              <div style={{ marginBottom:'.35rem' }}>
+                <strong>🛑 First premature stop at position {frameshiftInfo.firstStopCodon.position}: </strong>
+                <span style={{ fontFamily:'"JetBrains Mono",monospace', background:'rgba(254,202,202,.2)', padding:'.22rem .55rem', borderRadius:5, fontSize:'.88rem', fontWeight:700, letterSpacing:'2px', marginLeft:'.4rem' }}>{frameshiftInfo.firstStopCodon.codon}</span>
+              </div>
+            )}
+            <div style={{ fontSize:'.82rem', color:'#FCA5A5', fontStyle:'italic', borderTop:'1px solid rgba(254,202,202,.2)', paddingTop:'.45rem', marginTop:'.3rem' }}>
+              💡 <strong>Impact:</strong> Frameshifts alter all downstream codons — typically producing completely different amino acid sequences and often premature termination. This usually results in a non-functional protein.
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ═══ CONFIG ═══ */}
+    <div className="pc" style={{ borderColor:'rgba(139,92,246,.3)', background:'rgba(139,92,246,.04)' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.7rem', flexWrap:'wrap' }}>
+        <span style={{ fontSize:'.92rem' }}>⚙️</span>
+        <span style={{ fontSize:'.86rem', fontWeight:600, color:'#a78bfa' }}>Analysis Configuration</span>
+        <span style={{ background:'#EF4444', color:'#fff', fontSize:'.62rem', fontWeight:700, padding:'.15rem .42rem', borderRadius:8, letterSpacing:'.04em', textTransform:'uppercase', marginLeft:'.3rem' }}>Required</span>
+      </div>
+      <div className="config-grid">
+        <div>
+          <label className="lbl">Reading Frame <span style={{ textTransform:'none', color:'#6b7080', fontWeight:400, letterSpacing:0 }}>(codon boundaries)</span></label>
+          <select value={readingFrame} onChange={e=>{ setReadingFrame(e.target.value); setShowCodonPreview(!!e.target.value); }} style={{ borderColor: readingFrame ? '#8B5CF6' : '#EF4444' }}>
+            <option value="">Select reading frame…</option>
+            <option value="1">+1  (start at position 1)</option>
+            <option value="2">+2  (start at position 2)</option>
+            <option value="3">+3  (start at position 3)</option>
+          </select>
+        </div>
+        <div>
+          <label className="lbl">Strand</label>
+          <select value={strand} onChange={e=>setStrand(e.target.value)} style={{ borderColor: strand ? '#8B5CF6' : '#EF4444' }}>
+            <option value="">Select strand…</option>
+            <option value="forward">Forward  (5′ → 3′)</option>
+            <option value="reverse">Reverse  (3′ → 5′)</option>
+          </select>
+        </div>
+      </div>
+
+      {/* codon preview */}
+      {showCodonPreview && previewSequence && readingFrame && (
+        <div style={{ marginTop:'.9rem', background:'#0f1117', border:'1px solid #1e2130', borderRadius:9, padding:'.8rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.5rem' }}>
+            <span style={{ fontSize:'.88rem' }}>🔬</span>
+            <span style={{ fontSize:'.82rem', color:'#8a8f9e', fontWeight:600 }}>Codon Preview — Frame +{readingFrame}, {strand}</span>
+          </div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:'.35rem' }}>
+            {parseIntoCodons(previewSequence, readingFrame).map((cd, i) => (
+              <span key={i} style={{ display:'inline-flex', flexDirection:'column', alignItems:'center' }}>
+                <span style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.82rem', background:'rgba(139,92,246,.15)', border:'1px solid #8B5CF6', borderRadius:5, padding:'.2rem .4rem', color:'#e2e4e9', letterSpacing:'1.5px', fontWeight:600 }}>{cd.codon}</span>
+                <span style={{ fontSize:'.7rem', color:'#a78bfa', fontWeight:700, marginTop:'.08rem' }}>{cd.aminoAcid}</span>
+              </span>
+            ))}
+          </div>
+          <div className="note-box" style={{ marginTop:'.55rem' }}>💡 Codon grouping depends on the selected reading frame. Change the frame to see different translations.</div>
         </div>
       )}
 
-      {/* Reading Frame & Strand Configuration */}
-      <div style={{
-        background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-        border: '2px solid #3B82F6',
-        borderRadius: '16px',
-        padding: '2rem',
-        marginBottom: '2rem',
-        boxShadow: '0 8px 24px rgba(59, 130, 246, 0.2)'
-      }}>
-        <h3 style={{ 
-          color: '#60A5FA', 
-          marginBottom: '1.5rem',
-          fontSize: '1.3rem',
-          fontWeight: 800,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          letterSpacing: '-0.5px'
-        }}>
-          <span style={{ fontSize: '1.5rem' }}>⚙️</span>
-          <span>Analysis Configuration</span>
-          <span style={{
-            fontSize: '0.75rem',
-            background: '#EF4444',
-            color: '#FEF2F2',
-            padding: '0.25rem 0.6rem',
-            borderRadius: '6px',
-            fontWeight: 700
-          }}>
-            REQUIRED
-          </span>
-        </h3>
-        
-        <div className="config-grid" style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: '2rem',
-          marginBottom: '1.5rem'
-        }}>
-          <div>
-            <label style={{
-              display: 'block',
-              marginBottom: '0.75rem',
-              fontWeight: 700,
-              color: '#f1f5f9',
-              fontSize: '1rem',
-              letterSpacing: '0.3px'
-            }}>
-              Reading Frame
-              <span style={{ 
-                fontSize: '0.8rem', 
-                color: '#60A5FA',
-                fontWeight: 500,
-                marginLeft: '0.75rem'
-              }}>
-                (Affects codon boundaries)
-              </span>
-            </label>
-            <select
-              value={readingFrame}
-              onChange={(e) => {
-                setReadingFrame(e.target.value);
-                setShowCodonPreview(!!e.target.value);
-              }}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                borderRadius: '10px',
-                border: readingFrame ? '2px solid #3B82F6' : '2px solid #EF4444',
-                background: '#0f172a',
-                color: '#f1f5f9',
-                fontSize: '1rem',
-                cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              <option value="">Select reading frame...</option>
-              <option value="1">+1 (Start at position 1)</option>
-              <option value="2">+2 (Start at position 2)</option>
-              <option value="3">+3 (Start at position 3)</option>
-            </select>
-          </div>
-
-          <div>
-            <label style={{
-              display: 'block',
-              marginBottom: '0.75rem',
-              fontWeight: 700,
-              color: '#f1f5f9',
-              fontSize: '1rem',
-              letterSpacing: '0.3px'
-            }}>
-              Strand
-            </label>
-            <select
-              value={strand}
-              onChange={(e) => setStrand(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '1rem',
-                borderRadius: '10px',
-                border: strand ? '2px solid #3B82F6' : '2px solid #EF4444',
-                background: '#0f172a',
-                color: '#f1f5f9',
-                fontSize: '1rem',
-                cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              <option value="">Select strand...</option>
-              <option value="forward">Forward (5' → 3')</option>
-              <option value="reverse">Reverse (3' → 5')</option>
-            </select>
-          </div>
-        </div>
-
-        {showCodonPreview && previewSequence && renderCodonPreview()}
-
-        <div style={{
-          background: 'rgba(15, 23, 42, 0.7)',
-          border: '1px solid #475569',
-          borderRadius: '10px',
-          padding: '1.25rem',
-          marginTop: '1.5rem'
-        }}>
-          <div style={{ fontSize: '0.9rem', color: '#e2e8f0', lineHeight: '1.8', fontWeight: 500 }}>
-            <strong style={{ color: '#60A5FA', fontSize: '1rem' }}>ℹ️ Why this matters:</strong>
-            <ul style={{ marginTop: '0.75rem', paddingLeft: '1.75rem', marginBottom: 0 }}>
-              <li style={{ marginBottom: '0.5rem' }}>DNA is read in groups of 3 nucleotides (codons) to produce amino acids</li>
-              <li style={{ marginBottom: '0.5rem' }}>The reading frame determines where these groups start</li>
-              <li style={{ marginBottom: '0.5rem' }}>The strand determines the direction of reading</li>
-              <li>Different frames/strands produce different proteins</li>
-            </ul>
-          </div>
-        </div>
-
-        {(!readingFrame || !strand) && (
-          <div style={{
-            background: 'linear-gradient(135deg, #7f1d1d 0%, #991B1B 100%)',
-            border: '2px solid #dc2626',
-            borderRadius: '10px',
-            padding: '1rem',
-            marginTop: '1.5rem',
-            fontSize: '0.95rem',
-            color: '#fecaca',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem'
-          }}>
-            <span style={{ fontSize: '1.25rem' }}>⚠️</span>
-            <span>Please select both reading frame and strand to enable mutation classification</span>
-          </div>
-        )}
-      </div>
-      
-      <div className="seq-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
-        <div>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '0.75rem', 
-            fontWeight: 700, 
-            color: '#f1f5f9',
-            fontSize: '1.1rem',
-            letterSpacing: '0.3px'
-          }}>
-            Reference Sequence
-          </label>
-          <textarea
-            value={seq1}
-            onChange={(e) => setSeq1(e.target.value)}
-            placeholder="Enter reference DNA sequence (ATGC)..."
-            style={{
-              width: '100%',
-              padding: '1.25rem',
-              borderRadius: '12px',
-              border: '2px solid #475569',
-              fontFamily: 'JetBrains Mono, Consolas, monospace',
-              fontSize: '0.95rem',
-              resize: 'vertical',
-              minHeight: '220px',
-              background: '#0f172a',
-              color: '#f1f5f9',
-              lineHeight: '1.6',
-              letterSpacing: '0.5px'
-            }}
-          />
-          <div style={{ 
-            fontSize: '0.85rem', 
-            color: '#94a3b8', 
-            marginTop: '0.5rem',
-            fontWeight: 600 
-          }}>
-            Length: {seq1.replace(/\s/g, '').length} bp
-          </div>
-        </div>
-
-        <div>
-          <label style={{ 
-            display: 'block', 
-            marginBottom: '0.75rem', 
-            fontWeight: 700, 
-            color: '#f1f5f9',
-            fontSize: '1.1rem',
-            letterSpacing: '0.3px'
-          }}>
-            Alternate Sequence
-          </label>
-          <textarea
-            value={seq2}
-            onChange={(e) => setSeq2(e.target.value)}
-            placeholder="Enter alternate DNA sequence (ATGC)..."
-            style={{
-              width: '100%',
-              padding: '1.25rem',
-              borderRadius: '12px',
-              border: '2px solid #475569',
-              fontFamily: 'JetBrains Mono, Consolas, monospace',
-              fontSize: '0.95rem',
-              resize: 'vertical',
-              minHeight: '220px',
-              background: '#0f172a',
-              color: '#f1f5f9',
-              lineHeight: '1.6',
-              letterSpacing: '0.5px'
-            }}
-          />
-          <div style={{ 
-            fontSize: '0.85rem', 
-            color: '#94a3b8', 
-            marginTop: '0.5rem',
-            fontWeight: 600
-          }}>
-            Length: {seq2.replace(/\s/g, '').length} bp
-          </div>
+      {/* why it matters mini */}
+      <div style={{ marginTop:'.85rem', background:'rgba(0,0,0,.2)', borderRadius:8, padding:'.7rem .8rem', border:'1px solid #24272f' }}>
+        <div style={{ fontSize:'.84rem', color:'#8a8f9e', lineHeight:1.7 }}>
+          <strong style={{ color:'#a78bfa' }}>ℹ️ Why this matters:</strong> DNA is read in triplets (codons). The reading frame sets where each triplet starts; the strand sets the direction. Different combinations produce different proteins.
         </div>
       </div>
 
-      <button 
-        onClick={handleFindMutations} 
-        disabled={loading || !readingFrame || !strand}
-        style={{
-          width: '100%',
-          padding: '1.25rem',
-          background: (loading || !readingFrame || !strand) 
-            ? 'linear-gradient(135deg, #475569 0%, #334155 100%)' 
-            : 'linear-gradient(135deg, #3B82F6 0%, #2563EB 100%)',
-          border: 'none',
-          borderRadius: '12px',
-          color: '#fff',
-          fontSize: '1.15rem',
-          fontWeight: 700,
-          cursor: (loading || !readingFrame || !strand) ? 'not-allowed' : 'pointer',
-          marginBottom: '2rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '0.75rem',
-          letterSpacing: '0.3px',
-          boxShadow: (loading || !readingFrame || !strand) 
-            ? 'none' 
-            : '0 4px 16px rgba(59, 130, 246, 0.4)',
-          opacity: (!readingFrame || !strand) ? 0.6 : 1
-        }}
-      >
-        {loading && <span className="loading-spinner"></span>}
-        <span className={loading ? 'loading-text' : ''}>
-          {loading ? 'Analyzing sequences...' : '🔍 Find Mutations'}
-        </span>
+      {(!readingFrame || !strand) && (
+        <div style={{ marginTop:'.7rem', background:'rgba(239,68,68,.1)', border:'1px solid rgba(239,68,68,.3)', borderRadius:8, padding:'.55rem .7rem', display:'flex', alignItems:'center', gap:'.45rem' }}>
+          <span style={{ fontSize:'.88rem' }}>⚠️</span>
+          <span style={{ fontSize:'.82rem', color:'#FCA5A5', fontWeight:600 }}>Please select both reading frame and strand to enable mutation classification.</span>
+        </div>
+      )}
+    </div>
+
+    {/* ═══ SEQUENCES ═══ */}
+    <div className="seq-grid">
+      {[['Reference Sequence', seq1, setSeq1], ['Alternate Sequence', seq2, setSeq2]].map(([label, val, setter], i) => (
+        <div key={i}>
+          <label className="lbl" style={{ margin:'0 0 .42rem' }}>{label}</label>
+          <textarea rows={4} value={val} onChange={e=>setter(e.target.value)} placeholder={`Paste ${i===0?'reference':'alternate'} DNA sequence (ATGC)…`} />
+          <div style={{ marginTop:'.32rem', fontSize:'.8rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace' }}>
+            {val.replace(/\s/g,'').length} bp
+          </div>
+        </div>
+      ))}
+    </div>
+
+    {error && (
+      <div style={{ background:'rgba(239,68,68,.08)', border:'1px solid rgba(239,68,68,.25)', borderRadius:8, padding:'.6rem .8rem', marginBottom:'.9rem', display:'flex', alignItems:'center', gap:'.45rem' }}>
+        <span style={{ fontSize:'.88rem' }}>⚠️</span>
+        <span style={{ fontSize:'.84rem', color:'#F87171' }}>{error}</span>
+      </div>
+    )}
+
+    {/* ═══ SUBMIT ═══ */}
+    <button className="btn-p" onClick={handleFind} disabled={loading || !readingFrame || !strand} style={{ marginTop:'.3rem' }}>
+      {loading ? <><span className="spin"></span> Analyzing sequences…</> : <><span>🔍</span> Find Mutations</>}
+    </button>
+
+    {/* ═══════════════════════════════════════════════════════════════════
+        RESULTS
+        ═══════════════════════════════════════════════════════════════════ */}
+    {mutations && (<>
+
+      {/* analysis params strip */}
+      <div className="pc" style={{ marginTop:'1.2rem', borderColor:'rgba(139,92,246,.22)', background:'rgba(139,92,246,.04)' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'1.5rem', flexWrap:'wrap' }}>
+          <span style={{ fontSize:'.82rem', color:'#a78bfa', fontWeight:600 }}>📋 Analysis Parameters</span>
+          <span style={{ fontSize:'.84rem', color:'#8a8f9e' }}>Frame: <strong style={{ color:'#a78bfa' }}>+{readingFrame}</strong></span>
+          <span style={{ fontSize:'.84rem', color:'#8a8f9e' }}>Strand: <strong style={{ color:'#a78bfa' }}>{strand.charAt(0).toUpperCase()+strand.slice(1)}</strong></span>
+        </div>
+      </div>
+
+      {/* AI button */}
+      <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
+        {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <><span>🤖</span> Get AI Explanation</>}
       </button>
 
-      {error && (
-        <div style={{
-          background: 'linear-gradient(135deg, #7f1d1d 0%, #991B1B 100%)',
-          border: '2px solid #dc2626',
-          borderRadius: '12px',
-          padding: '1.5rem',
-          marginBottom: '2rem',
-          color: '#fecaca',
-          fontWeight: 600,
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '1rem'
-        }}>
-          <span style={{ fontSize: '1.5rem', flexShrink: 0 }}>⚠️</span>
-          <div>
-            <strong style={{ fontSize: '1.1rem', display: 'block', marginBottom: '0.5rem' }}>Error:</strong>
-            <span style={{ fontSize: '0.95rem' }}>{error}</span>
+      {/* AI result */}
+      {aiExplanation && (
+        <div className="ai-box">
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.6rem' }}>
+            <span style={{ fontSize:'1rem' }}>🤖</span>
+            <span style={{ fontSize:'.86rem', fontWeight:600, color:'#a78bfa' }}>AI Analysis</span>
+          </div>
+          <div style={{ fontSize:'.88rem', color:'#e2e4e9', lineHeight:1.8, whiteSpace:'pre-wrap', maxHeight:440, overflowY:'auto', background:'rgba(0,0,0,.25)', borderRadius:8, padding:'.75rem', border:'1px solid #24272f' }}>
+            {aiExplanation}
           </div>
         </div>
       )}
 
-      {mutations && (
-        <div>
-          <div style={{
-            background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-            border: '2px solid #3B82F6',
-            borderRadius: '12px',
-            padding: '1.5rem',
-            marginBottom: '2rem',
-            fontSize: '0.95rem',
-            color: '#e2e8f0',
-            boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)'
-          }}>
-            <strong style={{ color: '#60A5FA', fontSize: '1.1rem', fontWeight: 700 }}>📋 Analysis Parameters</strong>
-            <div style={{ marginTop: '1rem', display: 'flex', gap: '3rem', flexWrap: 'wrap' }}>
-              <span>
-                <span style={{ color: '#cbd5e1', fontWeight: 500 }}>Reading Frame:</span> 
-                <strong style={{ 
-                  color: '#60A5FA', 
-                  marginLeft: '0.75rem',
-                  fontSize: '1.05rem',
-                  fontWeight: 700
-                }}>+{readingFrame}</strong>
-              </span>
-              <span>
-                <span style={{ color: '#cbd5e1', fontWeight: 500 }}>Strand:</span>
-                <strong style={{ 
-                  color: '#60A5FA', 
-                  marginLeft: '0.75rem',
-                  fontSize: '1.05rem',
-                  fontWeight: 700
-                }}>
-                  {strand.charAt(0).toUpperCase() + strand.slice(1)}
-                </strong>
-              </span>
-            </div>
+      {/* SUMMARY STATS */}
+      {mutations.summary && (
+        <div className="pc" style={{ marginTop:'.6rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.6rem' }}>
+            <span style={{ fontSize:'.92rem' }}>📊</span>
+            <span style={{ fontSize:'.86rem', fontWeight:600, color:'#c8cad4' }}>Summary</span>
+          </div>
+          <div className="summary-grid">
+            {[
+              { l:'Total',     v:mutations.summary.total_mutations||0,     c:'#fff' },
+              { l:'SNPs',      v:mutations.summary.snps||0,                c:'#60A5FA' },
+              { l:'Insertions',v:mutations.summary.insertions||0,          c:'#F59E0B' },
+              { l:'Deletions', v:mutations.summary.deletions||0,           c:'#EF4444' },
+              { l:'Silent',    v:mutations.summary.silent_mutations||0,    c:'#10B981' },
+              { l:'Missense',  v:mutations.summary.missense_mutations||0,  c:'#F59E0B' },
+              { l:'Nonsense',  v:mutations.summary.nonsense_mutations||0,  c:'#EF4444' }
+            ].map((s,i) => (
+              <div key={i} className="stat-b">
+                <div className="stat-v" style={{ color:s.c }}>{s.v}</div>
+                <div className="stat-l">{s.l}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* DETAILED MUTATIONS */}
+      {mutations.mutations?.length > 0 && (
+        <div className="pc" style={{ marginTop:'.6rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.7rem', flexWrap:'wrap' }}>
+            <span style={{ fontSize:'.92rem' }}>📋</span>
+            <span style={{ fontSize:'.86rem', fontWeight:600, color:'#c8cad4' }}>Detailed Mutation Analysis</span>
+            <span style={{ background:'rgba(139,92,246,.18)', color:'#a78bfa', fontSize:'.7rem', fontWeight:600, padding:'.15rem .42rem', borderRadius:8 }}>{mutations.mutations.length} found</span>
           </div>
 
-          <div style={{ marginBottom: '2rem' }}>
-            <button 
-              onClick={handleExplainWithAI}
-              disabled={loadingAI}
-              style={{
-                width: '100%',
-                padding: '1.25rem',
-                background: loadingAI 
-                  ? 'linear-gradient(135deg, #475569 0%, #334155 100%)' 
-                  : 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
-                border: 'none',
-                borderRadius: '12px',
-                color: '#fff',
-                fontSize: '1.15rem',
-                fontWeight: 700,
-                cursor: loadingAI ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.75rem',
-                letterSpacing: '0.3px',
-                boxShadow: loadingAI ? 'none' : '0 4px 16px rgba(139, 92, 246, 0.4)'
-              }}
-            >
-              {loadingAI && <span className="loading-spinner"></span>}
-              <span className={loadingAI ? 'loading-text' : ''}>
-                {loadingAI ? 'Generating AI Analysis...' : '🤖 Get AI Explanation'}
-              </span>
-            </button>
-          </div>
+          {mutations.mutations.slice(0, 50).map((mut, idx) => {
+            const refC  = mut.reference_codon || mut.reference || '---';
+            const altC  = mut.alternate_codon || mut.alternate || mut.inserted_sequence || '---';
+            const refAA = refC.length === 3 ? translateCodon(refC) : '–';
+            const altAA = altC.length === 3 ? translateCodon(altC) : '–';
+            const conf  = getConfidence(mut);
+            const exp   = MUT_EXP[mut.mutation_class] || {};
+            const confCol = conf.level === 'High' ? '#10B981' : '#F59E0B';
 
-          {aiExplanation && (
-            <div style={{
-              background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.2) 0%, rgba(124, 58, 237, 0.1) 100%)',
-              border: '2px solid #8B5CF6',
-              borderRadius: '16px',
-              padding: '2rem',
-              marginBottom: '2rem',
-              boxShadow: '0 8px 24px rgba(139, 92, 246, 0.3)'
-            }}>
-              <h3 style={{ 
-                color: '#c4b5fd', 
-                marginBottom: '1.5rem',
-                fontSize: '1.4rem',
-                fontWeight: 800,
-                letterSpacing: '-0.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem'
-              }}>
-                <span style={{ fontSize: '1.75rem' }}>🤖</span>
-                <span>AI Analysis</span>
-              </h3>
-              <div style={{ 
-                color: '#f1f5f9',
-                background: 'rgba(15, 23, 42, 0.7)',
-                padding: '1.5rem',
-                borderRadius: '10px',
-                lineHeight: '1.8',
-                whiteSpace: 'pre-wrap',
-                fontSize: '1rem',
-                maxHeight: '500px',
-                overflowY: 'auto',
-                border: '1px solid #475569',
-                fontWeight: 500
-              }}>
-                {aiExplanation}
-              </div>
-            </div>
-          )}
-
-          {mutations.summary && (
-            <div style={{
-              background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-              borderRadius: '16px',
-              padding: '2rem',
-              marginBottom: '2rem',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-              border: '2px solid #475569'
-            }}>
-              <h3 style={{ 
-                marginBottom: '1.5rem', 
-                color: '#f1f5f9', 
-                fontWeight: 800,
-                fontSize: '1.5rem',
-                letterSpacing: '-0.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem'
-              }}>
-                <span style={{ fontSize: '1.75rem' }}>📊</span>
-                <span>Summary</span>
-              </h3>
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                gap: '1.25rem'
-              }}>
-                <StatCard label="Total Mutations" value={mutations.summary.total_mutations || 0} color="#3B82F6" />
-                <StatCard label="SNPs" value={mutations.summary.snps || 0} color="#06B6D4" />
-                <StatCard label="Insertions" value={mutations.summary.insertions || 0} color="#F59E0B" />
-                <StatCard label="Deletions" value={mutations.summary.deletions || 0} color="#EF4444" />
-                <StatCard label="Silent" value={mutations.summary.silent_mutations || 0} color="#10B981" />
-                <StatCard label="Missense" value={mutations.summary.missense_mutations || 0} color="#F59E0B" />
-                <StatCard label="Nonsense" value={mutations.summary.nonsense_mutations || 0} color="#EF4444" />
-              </div>
-            </div>
-          )}
-
-          {/* Detailed Mutations with Before/After Alignment */}
-          {mutations.mutations && mutations.mutations.length > 0 && (
-            <div style={{
-              background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
-              borderRadius: '16px',
-              padding: '2rem',
-              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-              border: '2px solid #475569'
-            }}>
-              <h3 style={{ 
-                marginBottom: '1.5rem', 
-                color: '#f1f5f9', 
-                fontWeight: 800,
-                fontSize: '1.5rem',
-                letterSpacing: '-0.5px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem'
-              }}>
-                <span style={{ fontSize: '1.75rem' }}>📋</span>
-                <span>Detailed Mutation Analysis</span>
-                <span style={{
-                  fontSize: '0.9rem',
-                  background: '#3B82F6',
-                  color: '#f1f5f9',
-                  padding: '0.25rem 0.75rem',
-                  borderRadius: '8px',
-                  fontWeight: 700
-                }}>
-                  {mutations.mutations.length} found
-                </span>
-              </h3>
-
-              {/* Mutations List */}
-              {mutations.mutations.slice(0, 50).map((mut, idx) => {
-                const refCodon = mut.reference_codon || mut.reference || '---';
-                const altCodon = mut.alternate_codon || mut.alternate || mut.inserted_sequence || '---';
-                const refAA = refCodon.length === 3 ? translateCodon(refCodon) : '-';
-                const altAA = altCodon.length === 3 ? translateCodon(altCodon) : '-';
-                const confidence = getMutationConfidence(mut);
-                const explanation = MUTATION_EXPLANATIONS[mut.mutation_class] || {};
-
-                return (
-                  <div key={idx} style={{
-                    background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-                    border: '2px solid #475569',
-                    borderRadius: '12px',
-                    padding: '1.75rem',
-                    marginBottom: '1.25rem',
-                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
-                  }}>
-                    {/* Header */}
-                    <div style={{ 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      marginBottom: '1.25rem',
-                      flexWrap: 'wrap',
-                      gap: '1rem'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                        <span style={{ 
-                          color: '#cbd5e1', 
-                          fontSize: '0.9rem',
-                          fontWeight: 600
-                        }}>
-                          Position {mut.position}
-                        </span>
-                        <span style={{
-                          background: 'rgba(30, 41, 59, 0.7)',
-                          padding: '0.35rem 0.85rem',
-                          borderRadius: '6px',
-                          fontSize: '0.9rem',
-                          fontWeight: 700,
-                          color: '#e2e8f0',
-                          border: '1px solid #475569'
-                        }}>
-                          {mut.type}
-                        </span>
-                      </div>
-                      
-                      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                        {/* Confidence Tag */}
-                        <span style={{
-                          background: confidence.level === 'High' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
-                          color: confidence.level === 'High' ? '#10B981' : '#F59E0B',
-                          border: `2px solid ${confidence.level === 'High' ? '#10B981' : '#F59E0B'}`,
-                          padding: '0.35rem 0.85rem',
-                          borderRadius: '8px',
-                          fontSize: '0.8rem',
-                          fontWeight: 700
-                        }}>
-                          {confidence.level} Confidence
-                        </span>
-
-                        {/* Classification */}
-                        <span style={{
-                          backgroundColor: getMutationColor(mut.mutation_class) + '35',
-                          color: getMutationColor(mut.mutation_class),
-                          border: `2px solid ${getMutationColor(mut.mutation_class)}`,
-                          padding: '0.35rem 0.85rem',
-                          borderRadius: '8px',
-                          fontSize: '0.9rem',
-                          fontWeight: 700
-                        }}>
-                          {explanation.icon} {mut.mutation_class || 'Unknown'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Before/After Codon Alignment */}
-                    {renderCodonAlignment(mut)}
-
-                    {/* Biological Consequence Explanation */}
-                    {explanation.long && (
-                      <div style={{
-                        marginTop: '1.25rem',
-                        background: `linear-gradient(135deg, ${explanation.color}20, ${explanation.color}10)`,
-                        border: `2px solid ${explanation.color}60`,
-                        borderRadius: '10px',
-                        padding: '1rem',
-                      }}>
-                        <div style={{ 
-                          fontSize: '0.875rem',
-                          color: '#e2e8f0',
-                          lineHeight: '1.7',
-                          fontWeight: 500
-                        }}>
-                          <strong style={{ 
-                            color: explanation.color,
-                            fontSize: '0.95rem',
-                            fontWeight: 700
-                          }}>
-                            Biological Consequence:
-                          </strong>
-                          <div style={{ marginTop: '0.5rem' }}>
-                            {explanation.long}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Confidence Note */}
-                    <div style={{
-                      marginTop: '1rem',
-                      fontSize: '0.8rem',
-                      color: '#94a3b8',
-                      fontStyle: 'italic',
-                      background: 'rgba(100, 116, 139, 0.1)',
-                      padding: '0.75rem',
-                      borderRadius: '6px',
-                      borderLeft: '3px solid #475569',
-                      fontWeight: 500
-                    }}>
-                      ℹ️ Confidence reflects interpretation certainty, not biological effect. 
-                      {confidence.reason && ` (${confidence.reason})`}
-                    </div>
+            return (
+              <div key={idx} className="mut-card">
+                {/* header row */}
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'.55rem', flexWrap:'wrap', gap:'.4rem' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'.5rem', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:'.84rem', color:'#8a8f9e', fontWeight:600 }}>Position {mut.position}</span>
+                    <span style={{ background:'rgba(139,92,246,.12)', border:'1px solid rgba(139,92,246,.25)', color:'#a78bfa', fontSize:'.78rem', fontWeight:600, padding:'.18rem .52rem', borderRadius:6 }}>{mut.type}</span>
                   </div>
-                );
-              })}
-
-              {mutations.mutations.length > 50 && (
-                <div style={{
-                  marginTop: '1.5rem',
-                  textAlign: 'center',
-                  color: '#cbd5e1',
-                  fontSize: '1rem',
-                  fontWeight: 600,
-                  background: 'rgba(100, 116, 139, 0.2)',
-                  padding: '1rem',
-                  borderRadius: '8px'
-                }}>
-                  Showing 50 of {mutations.mutations.length} mutations
+                  <div style={{ display:'flex', gap:'.42rem', alignItems:'center', flexWrap:'wrap' }}>
+                    <span style={{ background:`${confCol}15`, color:confCol, border:`1px solid ${confCol}40`, fontSize:'.72rem', fontWeight:600, padding:'.18rem .48rem', borderRadius:6 }}>{conf.level} Confidence</span>
+                    {exp.color && (
+                      <span style={{ background:`${exp.color}18`, color:exp.color, border:`1px solid ${exp.color}45`, fontSize:'.78rem', fontWeight:600, padding:'.18rem .52rem', borderRadius:6 }}>
+                        {exp.icon} {mut.mutation_class || 'Unknown'}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
 
-          {mutations.mutations && mutations.mutations.length === 0 && (
-            <div style={{
-              background: 'linear-gradient(135deg, #064e3b 0%, #065f46 100%)',
-              border: '2px solid #10B981',
-              borderRadius: '16px',
-              padding: '2rem',
-              color: '#6ee7b7',
-              textAlign: 'center',
-              fontWeight: 700,
-              fontSize: '1.2rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '1rem',
-              boxShadow: '0 8px 24px rgba(16, 185, 129, 0.3)'
-            }}>
-              <span style={{ fontSize: '2rem' }}>✅</span>
-              <span>No mutations detected - sequences are identical!</span>
+                {/* codon alignment */}
+                <div className="align-box">
+                  {[
+                    { label:'Reference', codon:refC, aa:refAA, codonBg:'rgba(96,165,250,.15)', codonBorder:'#3B82F6', codonGlow:'rgba(59,130,246,.25)', aaBg:'rgba(96,165,250,.15)', aaBorder:'rgba(96,165,250,.3)', aaColor:'#60A5FA' },
+                    { label:'Mutant',    codon:altC, aa:altAA, codonBg:'rgba(239,68,68,.15)',   codonBorder:'#EF4444', codonGlow:'rgba(239,68,68,.25)',  aaBg:'rgba(251,191,36,.15)',  aaBorder:'rgba(251,191,36,.3)', aaColor:'#FBBF24' }
+                  ].map((r, i) => (
+                    <div key={i} className="align-row">
+                      <span className="align-lbl">{r.label}</span>
+                      <span className="codon-chip" style={{ background:r.codonBg, border:`2px solid ${r.codonBorder}`, color:'#f1f5f9', boxShadow:`0 2px 8px ${r.codonGlow}` }}>{r.codon}</span>
+                      <span style={{ color:'#6b7080', fontSize:'1.1rem', fontWeight:300 }}>→</span>
+                      <span className="aa-chip" style={{ background:r.aaBg, border:`1px solid ${r.aaBorder}`, color:r.aaColor }}>{r.aa}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* biological consequence */}
+                {exp.long && (
+                  <div className="consequence-box" style={{ background:`${exp.color}0d`, border:`1px solid ${exp.color}35` }}>
+                    <div style={{ fontSize:'.82rem', fontWeight:600, color:exp.color, marginBottom:'.28rem' }}>Biological Consequence</div>
+                    <div style={{ fontSize:'.86rem', color:'#8a8f9e', lineHeight:1.7 }}>{exp.long}</div>
+                  </div>
+                )}
+
+                {/* confidence note */}
+                <div className="note-box">ℹ️ Confidence reflects interpretation certainty, not biological effect.{conf.reason && ` (${conf.reason})`}</div>
+              </div>
+            );
+          })}
+
+          {mutations.mutations.length > 50 && (
+            <div style={{ textAlign:'center', fontSize:'.84rem', color:'#8a8f9e', padding:'.7rem', background:'rgba(100,116,139,.08)', borderRadius:8 }}>
+              Showing 50 of {mutations.mutations.length} mutations
             </div>
           )}
         </div>
       )}
-    </div>
-  );
-}
 
-function StatCard({ label, value, color }) {
-  return (
-    <div style={{
-      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 100%)',
-      borderRadius: '12px',
-      padding: '1.5rem',
-      textAlign: 'center',
-      border: '2px solid #475569',
-      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)',
-      transition: 'transform 0.2s ease',
-      cursor: 'default'
-    }}>
-      <div style={{ 
-        color: '#cbd5e1', 
-        fontSize: '0.9rem', 
-        marginBottom: '0.75rem',
-        fontWeight: 700,
-        letterSpacing: '0.5px'
-      }}>
-        {label}
-      </div>
-      <div style={{ 
-        color, 
-        fontSize: '2.25rem', 
-        fontWeight: 800,
-        textShadow: `0 2px 8px ${color}40`
-      }}>
-        {value}
-      </div>
-    </div>
+      {/* NO MUTATIONS */}
+      {mutations.mutations?.length === 0 && (
+        <div className="pc" style={{ marginTop:'.6rem', textAlign:'center', padding:'2rem 1.5rem', borderColor:'rgba(16,185,129,.3)', background:'rgba(16,185,129,.06)' }}>
+          <div style={{ fontSize:'1.6rem', marginBottom:'.35rem' }}>✅</div>
+          <div style={{ fontSize:'.92rem', color:'#10B981', fontWeight:700 }}>No mutations detected — sequences are identical!</div>
+        </div>
+      )}
+    </>)}
+
+  </div>
+  </div>
   );
 }
