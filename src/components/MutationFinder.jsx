@@ -23,6 +23,106 @@ const CODON_TABLE = {
   'GGT': 'G', 'GGC': 'G', 'GGA': 'G', 'GGG': 'G'
 };
 
+// Sample DNA sequences for mutation analysis
+const MUTATION_SAMPLES = {
+  normal: {
+    name: '✓ Normal (Wild-Type)',
+    icon: '✓',
+    color: '#10B981',
+    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    readingFrame: '1',
+    strand: 'forward',
+    description: '🧬 Identical Sequences - No Mutations',
+    explanation: 'Both sequences are exactly the same (39 bp). This represents the wild-type or normal sequence without any genetic variations. The tool will detect zero mutations, demonstrating its ability to accurately identify when sequences are identical.',
+    expectedResult: 'No mutations detected',
+    biologicalContext: 'In genetics, wild-type refers to the normal, non-mutated form of a gene. This sample serves as a control to verify the analysis tool is working correctly.'
+  },
+  snp: {
+    name: '⚠ SNP (Missense)',
+    icon: '⚠',
+    color: '#F59E0B',
+    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate: 'ATGGCCATTGTAATGGGCCGTTGAAAGGGTGCCCGATAG',
+    //                                  ^ Position 21: C→T
+    readingFrame: '1',
+    strand: 'forward',
+    description: '⚠️ Single Nucleotide Polymorphism (SNP)',
+    explanation: 'A single base change from C to T at position 21. This SNP changes the codon from GCT (coding for Alanine) to GTT (coding for Valine), resulting in a missense mutation. The amino acid substitution may affect protein structure and function.',
+    expectedResult: '1 SNP detected (Missense mutation)',
+    biologicalContext: 'SNPs are the most common type of genetic variation. This particular mutation is a missense mutation, meaning it changes one amino acid in the protein sequence. Depending on the biochemical properties of the amino acids involved, this could have minimal to significant functional impact.',
+    mutationDetails: {
+      position: 21,
+      change: 'C→T',
+      codonChange: 'GCT→GTT',
+      aminoAcidChange: 'Alanine→Valine'
+    }
+  },
+  insertion: {
+    name: '➕ Insertion',
+    icon: '➕',
+    color: '#3B82F6',
+    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG',
+    //                                    ^^^ CAA inserted at position 24
+    readingFrame: '1',
+    strand: 'forward',
+    description: '➕ Insertion Mutation (3 nucleotides)',
+    explanation: 'Three nucleotides (CAA) are inserted at position 24. Since the insertion is exactly 3 bases (one codon), this is an in-frame insertion that adds one extra amino acid (Glutamine) without shifting the reading frame. The protein will be one amino acid longer but the downstream sequence remains correctly translated.',
+    expectedResult: '1 Insertion (3 bp, in-frame)',
+    biologicalContext: 'In-frame insertions add amino acids to the protein without disrupting the reading frame. While the protein structure is altered, it may still retain some function. This is generally less severe than frameshift mutations.',
+    mutationDetails: {
+      position: 24,
+      inserted: 'CAA',
+      length: 3,
+      aminoAcidAdded: 'Glutamine (Q)',
+      frameshift: false
+    }
+  },
+  deletion: {
+    name: '➖ Deletion',
+    icon: '➖',
+    color: '#EF4444',
+    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate: 'ATGGCCATTGTAATGGGCCGCTGGGTGCCCGATAG',
+    //                                ^^^ AAA deleted at position 21-23
+    readingFrame: '1',
+    strand: 'forward',
+    description: '➖ Deletion Mutation (3 nucleotides)',
+    explanation: 'Three consecutive nucleotides (AAA) are deleted starting at position 21. This in-frame deletion removes exactly one codon, resulting in the loss of one amino acid (Lysine) from the protein sequence. The reading frame is maintained, so downstream codons are still translated correctly.',
+    expectedResult: '1 Deletion (3 bp, in-frame)',
+    biologicalContext: 'In-frame deletions remove amino acids without causing frameshift. The severity depends on which amino acid is removed and its importance for protein function. Some deletions may be tolerated, while others can severely impact protein stability or activity.',
+    mutationDetails: {
+      position: 21,
+      deleted: 'AAA',
+      length: 3,
+      aminoAcidLost: 'Lysine (K)',
+      frameshift: false
+    }
+  },
+  frameshiftInsertion: {
+    name: '🔴 Frameshift (Insertion)',
+    icon: '🔴',
+    color: '#DC2626',
+    reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG',
+    alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG',
+    //                                    ^^ CA inserted (2 bp = frameshift!)
+    readingFrame: '1',
+    strand: 'forward',
+    description: '🔴 Frameshift Mutation (2 bp Insertion)',
+    explanation: 'Two nucleotides (CA) are inserted at position 24. Since this is NOT a multiple of 3, it causes a frameshift mutation. All downstream codons are shifted, resulting in a completely different amino acid sequence after the mutation point. This typically leads to a non-functional protein.',
+    expectedResult: '1 Insertion causing frameshift',
+    biologicalContext: 'Frameshift mutations are among the most severe types of mutations because they alter the entire downstream reading frame. This usually results in: (1) A completely different amino acid sequence, (2) Premature stop codons, (3) Non-functional proteins. These mutations often cause genetic diseases.',
+    mutationDetails: {
+      position: 24,
+      inserted: 'CA',
+      length: 2,
+      frameshift: true,
+      severity: 'High - Likely loss of protein function'
+    }
+  }
+};
+
 // Biological consequence explanations
 const MUTATION_EXPLANATIONS = {
   'Silent': {
@@ -64,6 +164,11 @@ export default function MutationFinder() {
   const [frameshiftDetected, setFrameshiftDetected] = useState(false);
   const [frameshiftInfo, setFrameshiftInfo] = useState(null);
 
+  // Sample loading
+  const [showSampleMenu, setShowSampleMenu] = useState(false);
+  const [currentSample, setCurrentSample] = useState(null);
+  const [sampleExplanationVisible, setSampleExplanationVisible] = useState(false);
+
   const validateSequence = (seq) => {
     const cleaned = seq.toUpperCase().replace(/\s/g, '');
     if (!cleaned) return { valid: false, error: 'Sequence cannot be empty' };
@@ -104,6 +209,32 @@ export default function MutationFinder() {
     
     return codons;
   };
+
+  // Load sample function
+  const loadSample = (sampleKey) => {
+    const sample = MUTATION_SAMPLES[sampleKey];
+    setSeq1(sample.reference);
+    setSeq2(sample.alternate);
+    setReadingFrame(sample.readingFrame);
+    setStrand(sample.strand);
+    setCurrentSample(sample);
+    setSampleExplanationVisible(true);
+    setShowSampleMenu(false);
+    setMutations(null);
+    setError('');
+    setAiExplanation('');
+    setFrameshiftDetected(false);
+    setFrameshiftInfo(null);
+  };
+
+  // Close sample menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = () => setShowSampleMenu(false);
+    if (showSampleMenu) {
+      document.addEventListener('click', handleClickOutside);
+      return () => document.removeEventListener('click', handleClickOutside);
+    }
+  }, [showSampleMenu]);
 
   // Detect frameshift mutations
   const detectFrameshift = (mutationData) => {
@@ -612,6 +743,15 @@ export default function MutationFinder() {
           animation: slideIn 0.5s ease-out;
         }
 
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        .slide-down {
+          animation: slideDown 0.3s ease-out;
+        }
+
         @media (max-width: 768px) {
           .seq-grid {
             grid-template-columns: 1fr !important;
@@ -640,6 +780,41 @@ export default function MutationFinder() {
           outline: none;
           box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
         }
+
+        .sample-menu {
+          position: absolute;
+          top: 100%;
+          left: 0;
+          background: #1e293b;
+          border: 2px solid #475569;
+          borderRadius: 12px;
+          boxShadow: 0 8px 24px rgba(0,0,0,0.4);
+          padding: 0.75rem;
+          zIndex: 100;
+          minWidth: 280px;
+          marginTop: 0.5rem;
+        }
+
+        .sample-menu-item {
+          padding: 1rem;
+          cursor: pointer;
+          borderRadius: 8px;
+          transition: all 0.2s ease;
+          fontSize: 0.9rem;
+          color: #e2e8f0;
+          border: 2px solid transparent;
+          marginBottom: 0.5rem;
+        }
+
+        .sample-menu-item:hover {
+          background: #334155;
+          border-color: #60A5FA;
+          transform: translateX(4px);
+        }
+
+        .sample-menu-item:last-child {
+          marginBottom: 0;
+        }
       `}</style>
       
       <div style={{ 
@@ -665,6 +840,204 @@ export default function MutationFinder() {
           Analyze DNA sequences to identify and classify genetic variations
         </p>
       </div>
+
+      {/* Load Sample Button */}
+      <div style={{ 
+        marginBottom: '2rem',
+        display: 'flex',
+        justifyContent: 'center'
+      }}>
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowSampleMenu(!showSampleMenu);
+            }}
+            style={{
+              padding: '1rem 2rem',
+              background: 'linear-gradient(135deg, #8B5CF6 0%, #7C3AED 100%)',
+              border: 'none',
+              borderRadius: '12px',
+              color: '#fff',
+              fontSize: '1.1rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              boxShadow: '0 4px 16px rgba(139, 92, 246, 0.4)'
+            }}
+          >
+            <span style={{ fontSize: '1.3rem' }}>📋</span>
+            <span>Load Sample Mutations</span>
+            <span style={{ fontSize: '0.9rem' }}>▼</span>
+          </button>
+
+          {showSampleMenu && (
+            <div className="sample-menu slide-down" onClick={(e) => e.stopPropagation()}>
+              {Object.entries(MUTATION_SAMPLES).map(([key, sample]) => (
+                <div
+                  key={key}
+                  className="sample-menu-item"
+                  onClick={() => loadSample(key)}
+                  style={{
+                    background: `linear-gradient(135deg, ${sample.color}15, ${sample.color}08)`
+                  }}
+                >
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '0.75rem',
+                    marginBottom: '0.5rem'
+                  }}>
+                    <span style={{ fontSize: '1.5rem' }}>{sample.icon}</span>
+                    <strong style={{ color: sample.color, fontSize: '1rem' }}>
+                      {sample.name}
+                    </strong>
+                  </div>
+                  <div style={{ 
+                    fontSize: '0.8rem', 
+                    color: '#cbd5e1',
+                    lineHeight: '1.4'
+                  }}>
+                    {sample.description}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Sample Explanation Banner */}
+      {sampleExplanationVisible && currentSample && (
+        <div className="slide-down" style={{
+          background: `linear-gradient(135deg, ${currentSample.color}20, ${currentSample.color}10)`,
+          border: `2px solid ${currentSample.color}`,
+          borderRadius: '16px',
+          padding: '2rem',
+          marginBottom: '2rem',
+          boxShadow: `0 8px 24px ${currentSample.color}30`
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'flex-start',
+            marginBottom: '1.5rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <span style={{ fontSize: '2.5rem' }}>{currentSample.icon}</span>
+              <div>
+                <h3 style={{ 
+                  color: currentSample.color, 
+                  margin: 0,
+                  fontSize: '1.5rem',
+                  fontWeight: 800
+                }}>
+                  Sample Loaded: {currentSample.name}
+                </h3>
+                <p style={{ 
+                  color: '#cbd5e1', 
+                  margin: '0.5rem 0 0 0',
+                  fontSize: '0.95rem'
+                }}>
+                  {currentSample.description}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setSampleExplanationVisible(false)}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: '#94a3b8',
+                fontSize: '1.5rem',
+                cursor: 'pointer',
+                padding: '0.25rem',
+                lineHeight: 1
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          <div style={{
+            background: 'rgba(0, 0, 0, 0.3)',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            border: `1px solid ${currentSample.color}40`
+          }}>
+            <h4 style={{ 
+              color: '#e2e8f0', 
+              marginTop: 0,
+              marginBottom: '1rem',
+              fontSize: '1.1rem',
+              fontWeight: 700
+            }}>
+              📚 Educational Explanation
+            </h4>
+            <p style={{ 
+              color: '#cbd5e1', 
+              lineHeight: '1.8',
+              marginBottom: '1.25rem',
+              fontSize: '0.95rem'
+            }}>
+              {currentSample.explanation}
+            </p>
+
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              borderRadius: '8px',
+              padding: '1rem',
+              marginBottom: '1.25rem'
+            }}>
+              <strong style={{ color: '#60A5FA', fontSize: '0.9rem' }}>
+                🔬 Biological Context:
+              </strong>
+              <p style={{ 
+                color: '#cbd5e1', 
+                margin: '0.5rem 0 0 0',
+                fontSize: '0.9rem',
+                lineHeight: '1.7'
+              }}>
+                {currentSample.biologicalContext}
+              </p>
+            </div>
+
+            <div style={{
+              display: 'flex',
+              gap: '2rem',
+              flexWrap: 'wrap',
+              fontSize: '0.9rem'
+            }}>
+              <div>
+                <strong style={{ color: '#94a3b8' }}>Expected Result:</strong>
+                <div style={{ 
+                  color: currentSample.color,
+                  fontWeight: 700,
+                  marginTop: '0.25rem'
+                }}>
+                  {currentSample.expectedResult}
+                </div>
+              </div>
+              {currentSample.mutationDetails && (
+                <div>
+                  <strong style={{ color: '#94a3b8' }}>Mutation Details:</strong>
+                  <div style={{ 
+                    color: '#cbd5e1',
+                    marginTop: '0.25rem',
+                    lineHeight: '1.6'
+                  }}>
+                    {currentSample.mutationDetails.change && `Change: ${currentSample.mutationDetails.change}`}
+                    {currentSample.mutationDetails.inserted && `Inserted: ${currentSample.mutationDetails.inserted}`}
+                    {currentSample.mutationDetails.deleted && `Deleted: ${currentSample.mutationDetails.deleted}`}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Frameshift Detection Banner */}
       {frameshiftDetected && frameshiftInfo && (
