@@ -118,7 +118,7 @@ function App() {
   const copySequence = (e) => {
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(dna).then(() => {
-      const btn = e.target;   // ✅ now works
+      const btn = e.target;
       const originalText = btn.textContent;
       btn.textContent = "Copied!";
       setTimeout(() => {
@@ -334,7 +334,7 @@ function App() {
           background: white;
           border-radius: 12px;
           padding: 2rem;
-          max-width: 600px;
+          max-width: 700px;
           max-height: 80vh;
           overflow-y: auto;
           box-shadow: 0 8px 24px rgba(0,0,0,0.2);
@@ -407,6 +407,11 @@ function App() {
           .sample-menu {
             right: auto;
             left: 0;
+          }
+          
+          .help-content {
+            padding: 1.5rem;
+            max-width: 95%;
           }
         }
       `}</style>
@@ -613,12 +618,14 @@ function App() {
           </div>
         </div>
 
-        {/* Help Modal */}
+        {/* Help Modal - UPDATED */}
         {showHelp && (
           <div className="help-modal" onClick={() => setShowHelp(false)}>
             <div className="help-content" onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-                <h2 style={{ fontFamily: 'Montserrat, sans-serif', margin: 0 }}>Help & Guide</h2>
+                <h2 style={{ fontFamily: 'Montserrat, sans-serif', margin: 0, color: '#00BFA5' }}>
+                  🧬 Help & Guide
+                </h2>
                 <button 
                   onClick={() => setShowHelp(false)}
                   style={{ 
@@ -634,35 +641,48 @@ function App() {
               </div>
               
               <div style={{ lineHeight: '1.8' }}>
-                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00A389', marginTop: '1.5rem' }}>
+                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Available Tools
                 </h3>
                 <ul style={{ marginLeft: '1.5rem' }}>
-                  <li><strong>Overview:</strong> Basic sequence statistics, GC content, melting temperature, and ORF analysis</li>
-                  <li><strong>Mutations:</strong> Compare two sequences to find SNPs, insertions, and deletions</li>
-                  <li><strong>Alignment:</strong> Perform global or local sequence alignment</li>
-                  <li><strong>CRISPR:</strong> Find PAM sites for CRISPR-Cas9 gene editing</li>
-                  <li><strong>Primers:</strong> Design PCR primers with optimal parameters</li>
+                  <li><strong>Overview:</strong> Comprehensive sequence statistics, GC content, melting temperature, and ORF analysis</li>
+                  <li><strong>Mutations:</strong> Compare two sequences to identify SNPs, insertions, and deletions with functional impact</li>
+                  <li><strong>Alignment:</strong> Perform global (Needleman-Wunsch) or local (Smith-Waterman) sequence alignment</li>
+                  <li><strong>CRISPR:</strong> Find PAM sites for CRISPR-Cas9/Cas12a gene editing with multiple enzyme support</li>
+                  <li><strong>Primers:</strong> Design optimized PCR primers with application-specific parameters (qPCR, cloning, diagnostic)</li>
                 </ul>
                 
-                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00A389', marginTop: '1.5rem' }}>
+                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Quick Tips
                 </h3>
                 <ul style={{ marginLeft: '1.5rem' }}>
-                  <li>Use "Load Sample" to quickly test with example sequences</li>
-                  <li>Upload FASTA files for easy sequence input</li>
-                  <li>Most tools work independently - no need to analyze first</li>
-                  <li>Dark Mode is enabled for comfortable viewing</li>
-                  <li>Use AI explanations for detailed insights</li>
+                  <li>Use "Load Sample" to quickly test with example sequences (100bp, 300bp, 500bp)</li>
+                  <li>Upload FASTA files (.fasta, .fa) or text files for easy sequence input</li>
+                  <li>Each tool works independently - switch between tabs anytime without re-analyzing</li>
+                  <li>Click "Get AI Analysis" in any tool for detailed biological insights and recommendations</li>
+                  <li>Download comprehensive reports as TXT or PDF for documentation and sharing</li>
+                  <li>Use "Copy" button to quickly copy sequences to clipboard</li>
+                  <li>Real-time sequence statistics update as you type (A, T, G, C counts)</li>
                 </ul>
                 
-                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00A389', marginTop: '1.5rem' }}>
+                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Supported Formats
                 </h3>
                 <ul style={{ marginLeft: '1.5rem' }}>
-                  <li>Plain DNA sequence (A, T, G, C)</li>
+                  <li>Plain DNA sequence (A, T, G, C nucleotides only)</li>
                   <li>FASTA format files (.fasta, .fa)</li>
                   <li>Text files (.txt)</li>
+                  <li>Sequences up to 100,000 bp (100 kb)</li>
+                </ul>
+
+                <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
+                  Pro Tips
+                </h3>
+                <ul style={{ marginLeft: '1.5rem' }}>
+                  <li>For primer design, use application mode selector (Diagnostic, Cloning, qPCR, Mutation Detection)</li>
+                  <li>CRISPR tool supports multiple Cas enzymes - choose based on your target organism</li>
+                  <li>Alignment tool automatically handles sequences up to 10,000 bp</li>
+                  <li>All analyses include actionable recommendations for experimental optimization</li>
                 </ul>
               </div>
               
@@ -678,7 +698,8 @@ function App() {
                   color: 'white',
                   fontWeight: 600,
                   cursor: 'pointer',
-                  fontFamily: 'Inter, sans-serif'
+                  fontFamily: 'Inter, sans-serif',
+                  fontSize: '1rem'
                 }}
               >
                 Got it!

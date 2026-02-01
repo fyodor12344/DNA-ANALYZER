@@ -299,11 +299,13 @@ ${'='.repeat(60)}
     return (
       <div style={{ 
         fontFamily: 'monospace', 
-        fontSize: '0.9rem',
+        fontSize: 'clamp(0.65rem, 2vw, 0.9rem)',
         background: '#F9FAFB',
-        padding: '1.5rem',
+        padding: '1rem',
         borderRadius: '8px',
-        overflowX: 'auto'
+        overflowX: 'auto',
+        width: '100%',
+        boxSizing: 'border-box'
       }}>
         {chunks.map((chunk, idx) => {
           // Check if this chunk contains conserved or variable regions
@@ -318,22 +320,22 @@ ${'='.repeat(60)}
             <div key={idx} style={{ marginBottom: '1.5rem' }}>
               <div style={{ 
                 color: '#6B7280', 
-                fontSize: '0.8rem', 
+                fontSize: 'clamp(0.7rem, 1.5vw, 0.8rem)', 
                 marginBottom: '0.5rem', 
                 fontFamily: 'Inter, sans-serif',
                 display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
+                flexDirection: 'column',
+                gap: '0.5rem'
               }}>
                 <span>Position {chunk.start + 1} - {Math.min(chunk.start + chunkSize, align1.length)}</span>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {hasConserved && (
                     <span style={{
                       background: '#D1FAE5',
                       color: '#065F46',
                       padding: '0.125rem 0.5rem',
                       borderRadius: '4px',
-                      fontSize: '0.7rem',
+                      fontSize: 'clamp(0.65rem, 1.5vw, 0.7rem)',
                       fontWeight: 600
                     }}>
                       Conserved
@@ -345,7 +347,7 @@ ${'='.repeat(60)}
                       color: '#92400E',
                       padding: '0.125rem 0.5rem',
                       borderRadius: '4px',
-                      fontSize: '0.7rem',
+                      fontSize: 'clamp(0.65rem, 1.5vw, 0.7rem)',
                       fontWeight: 600
                     }}>
                       Variable
@@ -354,7 +356,7 @@ ${'='.repeat(60)}
                 </div>
               </div>
               
-              <div style={{ marginBottom: '0.25rem' }}>
+              <div style={{ marginBottom: '0.25rem', wordBreak: 'break-all' }}>
                 <span style={{ color: '#3B82F6', fontWeight: 600 }}>Seq1: </span>
                 {chunk.seq1.split('').map((char, i) => (
                   <span key={i} style={{
@@ -369,7 +371,7 @@ ${'='.repeat(60)}
                 ))}
               </div>
 
-              <div style={{ marginBottom: '0.25rem' }}>
+              <div style={{ marginBottom: '0.25rem', wordBreak: 'break-all' }}>
                 <span style={{ color: '#6B7280', fontWeight: 600 }}>      </span>
                 {chunk.seq1.split('').map((char, i) => (
                   <span key={i}>
@@ -378,7 +380,7 @@ ${'='.repeat(60)}
                 ))}
               </div>
 
-              <div>
+              <div style={{ wordBreak: 'break-all' }}>
                 <span style={{ color: '#8B5CF6', fontWeight: 600 }}>Seq2: </span>
                 {chunk.seq2.split('').map((char, i) => (
                   <span key={i} style={{
@@ -401,20 +403,21 @@ ${'='.repeat(60)}
           padding: '1rem',
           background: '#fff',
           borderRadius: '6px',
-          fontSize: '0.85rem',
+          fontSize: 'clamp(0.75rem, 2vw, 0.85rem)',
           fontFamily: 'Inter, sans-serif'
         }}>
           <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: '#374151' }}>
             Legend:
           </div>
-          <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <div style={{ 
                 width: '20px', 
                 height: '20px', 
                 background: '#D1FAE5', 
                 border: '1px solid #10B981',
-                borderRadius: '4px' 
+                borderRadius: '4px',
+                flexShrink: 0
               }}></div>
               <span style={{ color: '#6B7280' }}>Match</span>
             </div>
@@ -424,7 +427,8 @@ ${'='.repeat(60)}
                 height: '20px', 
                 background: '#FEF3C7', 
                 border: '1px solid #F59E0B',
-                borderRadius: '4px' 
+                borderRadius: '4px',
+                flexShrink: 0
               }}></div>
               <span style={{ color: '#6B7280' }}>Mismatch</span>
             </div>
@@ -434,7 +438,8 @@ ${'='.repeat(60)}
                 height: '20px', 
                 background: '#FEE2E2', 
                 border: '1px solid #EF4444',
-                borderRadius: '4px' 
+                borderRadius: '4px',
+                flexShrink: 0
               }}></div>
               <span style={{ color: '#6B7280' }}>Gap</span>
             </div>
@@ -445,7 +450,14 @@ ${'='.repeat(60)}
   };
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '2rem', fontFamily: 'Inter, sans-serif' }}>
+    <div style={{ 
+      maxWidth: '1200px', 
+      margin: '0 auto', 
+      padding: 'clamp(1rem, 3vw, 2rem)', 
+      fontFamily: 'Inter, sans-serif',
+      width: '100%',
+      boxSizing: 'border-box'
+    }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700&display=swap');
         
@@ -462,129 +474,172 @@ ${'='.repeat(60)}
           border-radius: 50%;
           animation: spin 0.6s linear infinite;
         }
+
+        /* Mobile-specific styles */
+        @media (max-width: 768px) {
+          .mobile-stack {
+            flex-direction: column !important;
+          }
+          
+          .mobile-full-width {
+            width: 100% !important;
+            flex: 1 !important;
+          }
+        }
       `}</style>
       
       <div style={{
         background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
         borderRadius: '12px',
-        padding: '2rem',
-        marginBottom: '2rem',
+        padding: 'clamp(1.5rem, 4vw, 2rem)',
+        marginBottom: '1.5rem',
         color: '#fff'
       }}>
-        <h1 style={{ margin: 0, fontSize: '2rem', fontWeight: 700, fontFamily: 'Montserrat, sans-serif' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: 'clamp(1.5rem, 5vw, 2rem)', 
+          fontWeight: 700, 
+          fontFamily: 'Montserrat, sans-serif' 
+        }}>
           Sequence Alignment
         </h1>
-        <p style={{ margin: '0.5rem 0 0 0', opacity: 0.9 }}>
-          Compare DNA sequences using global or local alignment algorithms
+        <p style={{ margin: '0.5rem 0 0 0', opacity: 0.9, fontSize: 'clamp(0.85rem, 2.5vw, 1rem)' }}>
+          Compare DNA sequences using global or local alignment
         </p>
       </div>
 
       <div style={{
         background: '#fff',
         borderRadius: '12px',
-        padding: '1.5rem',
+        padding: 'clamp(1rem, 3vw, 1.5rem)',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-        marginBottom: '1.5rem'
+        marginBottom: '1.5rem',
+        width: '100%',
+        boxSizing: 'border-box'
       }}>
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#374151' }}>
+          <label style={{ 
+            display: 'block', 
+            marginBottom: '0.5rem', 
+            fontWeight: 600, 
+            color: '#374151',
+            fontSize: 'clamp(0.9rem, 2.5vw, 1rem)'
+          }}>
             First Sequence
           </label>
           <textarea
             value={sequence1}
             onChange={(e) => setSequence1(e.target.value.toUpperCase())}
-            placeholder="Enter first DNA sequence (e.g., ATGCGATCG...)"
+            placeholder="Enter first DNA sequence&#10;e.g., ATGCGATCG..."
             style={{
               width: '100%',
               minHeight: '100px',
               padding: '0.75rem',
               border: '2px solid #E5E7EB',
               borderRadius: '8px',
-              fontSize: '0.95rem',
+              fontSize: 'clamp(0.85rem, 2.5vw, 0.95rem)',
               fontFamily: 'monospace',
-              resize: 'vertical'
+              resize: 'vertical',
+              boxSizing: 'border-box'
             }}
           />
         </div>
 
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#374151' }}>
+          <label style={{ 
+            display: 'block', 
+            marginBottom: '0.5rem', 
+            fontWeight: 600, 
+            color: '#374151',
+            fontSize: 'clamp(0.9rem, 2.5vw, 1rem)'
+          }}>
             Second Sequence
           </label>
           <textarea
             value={sequence2}
             onChange={(e) => setSequence2(e.target.value.toUpperCase())}
-            placeholder="Enter second DNA sequence (e.g., ATGCAATCG...)"
+            placeholder="Enter second DNA sequence&#10;e.g., ATGCAATCG..."
             style={{
               width: '100%',
               minHeight: '100px',
               padding: '0.75rem',
               border: '2px solid #E5E7EB',
               borderRadius: '8px',
-              fontSize: '0.95rem',
+              fontSize: 'clamp(0.85rem, 2.5vw, 0.95rem)',
               fontFamily: 'monospace',
-              resize: 'vertical'
+              resize: 'vertical',
+              boxSizing: 'border-box'
             }}
           />
         </div>
 
         <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#374151' }}>
+          <label style={{ 
+            display: 'block', 
+            marginBottom: '0.5rem', 
+            fontWeight: 600, 
+            color: '#374151',
+            fontSize: 'clamp(0.9rem, 2.5vw, 1rem)'
+          }}>
             Alignment Algorithm
           </label>
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <label style={{ 
+          <div className="mobile-stack" style={{ display: 'flex', gap: '1rem' }}>
+            <label className="mobile-full-width" style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              padding: '0.75rem 1.5rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               border: `2px solid ${algorithm === 'global' ? '#10B981' : '#E5E7EB'}`,
               borderRadius: '8px',
               cursor: 'pointer',
               background: algorithm === 'global' ? '#D1FAE5' : '#fff',
               flex: 1,
-              transition: 'all 0.3s ease'
+              transition: 'all 0.3s ease',
+              minWidth: 0,
+              boxSizing: 'border-box'
             }}>
               <input
                 type="radio"
                 value="global"
                 checked={algorithm === 'global'}
                 onChange={(e) => setAlgorithm(e.target.value)}
-                style={{ marginRight: '0.5rem' }}
+                style={{ marginRight: '0.5rem', flexShrink: 0 }}
               />
-              <div>
-                <div style={{ fontWeight: 600, color: '#1F2937' }}>
-                  Global Alignment
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: '#1F2937', fontSize: 'clamp(0.85rem, 2vw, 1rem)' }}>
+                  Global
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#6B7280', marginTop: '0.25rem' }}>
-                  Needleman-Wunsch (end-to-end)
+                <div style={{ fontSize: 'clamp(0.7rem, 1.8vw, 0.85rem)', color: '#6B7280', marginTop: '0.25rem' }}>
+                  Needleman-Wunsch
                 </div>
               </div>
             </label>
 
-            <label style={{ 
+            <label className="mobile-full-width" style={{ 
               display: 'flex', 
               alignItems: 'center', 
-              padding: '0.75rem 1.5rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               border: `2px solid ${algorithm === 'local' ? '#10B981' : '#E5E7EB'}`,
               borderRadius: '8px',
               cursor: 'pointer',
               background: algorithm === 'local' ? '#D1FAE5' : '#fff',
               flex: 1,
-              transition: 'all 0.3s ease'
+              transition: 'all 0.3s ease',
+              minWidth: 0,
+              boxSizing: 'border-box'
             }}>
               <input
                 type="radio"
                 value="local"
                 checked={algorithm === 'local'}
                 onChange={(e) => setAlgorithm(e.target.value)}
-                style={{ marginRight: '0.5rem' }}
+                style={{ marginRight: '0.5rem', flexShrink: 0 }}
               />
-              <div>
-                <div style={{ fontWeight: 600, color: '#1F2937' }}>
-                  Local Alignment
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 600, color: '#1F2937', fontSize: 'clamp(0.85rem, 2vw, 1rem)' }}>
+                  Local
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#6B7280', marginTop: '0.25rem' }}>
-                  Smith-Waterman (best region)
+                <div style={{ fontSize: 'clamp(0.7rem, 1.8vw, 0.85rem)', color: '#6B7280', marginTop: '0.25rem' }}>
+                  Smith-Waterman
                 </div>
               </div>
             </label>
@@ -596,12 +651,12 @@ ${'='.repeat(60)}
           disabled={loading}
           style={{
             width: '100%',
-            padding: '1rem',
+            padding: 'clamp(0.875rem, 2.5vw, 1rem)',
             background: loading ? '#9CA3AF' : 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
             border: 'none',
             borderRadius: '8px',
             color: '#fff',
-            fontSize: '1rem',
+            fontSize: 'clamp(0.9rem, 2.5vw, 1rem)',
             fontWeight: 600,
             cursor: loading ? 'not-allowed' : 'pointer',
             transition: 'all 0.3s ease',
@@ -609,11 +664,12 @@ ${'='.repeat(60)}
             alignItems: 'center',
             justifyContent: 'center',
             gap: '0.5rem',
-            fontFamily: 'Inter, sans-serif'
+            fontFamily: 'Inter, sans-serif',
+            boxSizing: 'border-box'
           }}
         >
           {loading && <span className="loading-spinner"></span>}
-          {loading ? 'Aligning Sequences...' : 'Align Sequences'}
+          {loading ? 'Aligning...' : 'Align Sequences'}
         </button>
       </div>
 
@@ -624,7 +680,9 @@ ${'='.repeat(60)}
           borderRadius: '8px',
           padding: '1rem',
           marginBottom: '1.5rem',
-          color: '#991B1B'
+          color: '#991B1B',
+          fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+          wordBreak: 'break-word'
         }}>
           {error}
         </div>
@@ -634,11 +692,23 @@ ${'='.repeat(60)}
         <div style={{
           background: '#fff',
           borderRadius: '12px',
-          padding: '1.5rem',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+          padding: 'clamp(1rem, 3vw, 1.5rem)',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          width: '100%',
+          boxSizing: 'border-box'
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
-            <h2 style={{ color: '#1F2937', margin: 0, fontSize: '1.5rem', fontFamily: 'Montserrat, sans-serif' }}>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column',
+            gap: '1rem',
+            marginBottom: '1.5rem' 
+          }}>
+            <h2 style={{ 
+              color: '#1F2937', 
+              margin: 0, 
+              fontSize: 'clamp(1.25rem, 4vw, 1.5rem)', 
+              fontFamily: 'Montserrat, sans-serif' 
+            }}>
               Alignment Results
             </h2>
             
@@ -647,25 +717,29 @@ ${'='.repeat(60)}
               background: `${biologicalInterpretation.confidenceColor}20`,
               border: `2px solid ${biologicalInterpretation.confidenceColor}`,
               borderRadius: '8px',
-              padding: '0.5rem 1rem',
+              padding: '0.75rem',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '0.75rem',
+              alignSelf: 'flex-start',
+              width: '100%',
+              maxWidth: '300px',
+              boxSizing: 'border-box'
             }}>
-              <span style={{ fontSize: '1.2rem' }}>
+              <span style={{ fontSize: 'clamp(1.2rem, 3vw, 1.5rem)', flexShrink: 0 }}>
                 {biologicalInterpretation.confidence === 'High' ? '🎯' : 
                  biologicalInterpretation.confidence === 'Moderate' ? '⚖️' : '⚠️'}
               </span>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ 
                   fontWeight: 700, 
                   color: biologicalInterpretation.confidenceColor,
-                  fontSize: '0.9rem'
+                  fontSize: 'clamp(0.85rem, 2vw, 0.9rem)'
                 }}>
                   {biologicalInterpretation.confidence} Confidence
                 </div>
                 <div style={{ 
-                  fontSize: '0.7rem', 
+                  fontSize: 'clamp(0.7rem, 1.8vw, 0.75rem)', 
                   color: '#6B7280',
                   marginTop: '0.125rem'
                 }}>
@@ -682,13 +756,14 @@ ${'='.repeat(60)}
             borderRadius: '8px',
             padding: '1rem',
             marginBottom: '1.5rem',
-            fontSize: '0.9rem',
-            color: '#374151'
+            fontSize: 'clamp(0.85rem, 2vw, 0.9rem)',
+            color: '#374151',
+            wordBreak: 'break-word'
           }}>
-            <strong>Confidence Assessment:</strong> {biologicalInterpretation.confidenceReason}
+            <strong>Assessment:</strong> {biologicalInterpretation.confidenceReason}
           </div>
 
-          {/* Algorithm and Score Info */}
+          {/* Algorithm Info */}
           <div style={{
             background: '#F0FDF4',
             border: '2px solid #10B981',
@@ -696,73 +771,77 @@ ${'='.repeat(60)}
             padding: '1rem',
             marginBottom: '1.5rem'
           }}>
-            <div style={{ fontWeight: 600, color: '#065F46', marginBottom: '0.5rem' }}>
+            <div style={{ fontWeight: 600, color: '#065F46', marginBottom: '0.5rem', fontSize: 'clamp(0.9rem, 2vw, 1rem)' }}>
               {alignment.algorithm}
             </div>
-            <div style={{ color: '#065F46', fontSize: '0.9rem' }}>
-              Alignment Score: {alignment.score}
+            <div style={{ color: '#065F46', fontSize: 'clamp(0.85rem, 2vw, 0.9rem)' }}>
+              Score: {alignment.score}
             </div>
           </div>
 
           {/* Statistics Grid */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-            gap: '1rem',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+            gap: 'clamp(0.75rem, 2vw, 1rem)',
             marginBottom: '1.5rem'
           }}>
             <div style={{
               background: 'linear-gradient(135deg, #10B98120, #10B98110)',
-              padding: '1rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               borderRadius: '8px',
-              border: '2px solid #10B981'
+              border: '2px solid #10B981',
+              textAlign: 'center'
             }}>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#10B981' }}>
+              <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#10B981' }}>
                 {alignment.matches}
               </div>
-              <div style={{ color: '#6B7280', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+              <div style={{ color: '#6B7280', fontSize: 'clamp(0.75rem, 2vw, 0.9rem)', marginTop: '0.25rem' }}>
                 Matches
               </div>
             </div>
 
             <div style={{
               background: 'linear-gradient(135deg, #F59E0B20, #F59E0B10)',
-              padding: '1rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               borderRadius: '8px',
-              border: '2px solid #F59E0B'
+              border: '2px solid #F59E0B',
+              textAlign: 'center'
             }}>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#F59E0B' }}>
+              <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#F59E0B' }}>
                 {alignment.mismatches}
               </div>
-              <div style={{ color: '#6B7280', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+              <div style={{ color: '#6B7280', fontSize: 'clamp(0.75rem, 2vw, 0.9rem)', marginTop: '0.25rem' }}>
                 Mismatches
               </div>
             </div>
 
             <div style={{
               background: 'linear-gradient(135deg, #EF444420, #EF444410)',
-              padding: '1rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               borderRadius: '8px',
-              border: '2px solid #EF4444'
+              border: '2px solid #EF4444',
+              textAlign: 'center'
             }}>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#EF4444' }}>
+              <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#EF4444' }}>
                 {alignment.gaps}
               </div>
-              <div style={{ color: '#6B7280', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+              <div style={{ color: '#6B7280', fontSize: 'clamp(0.75rem, 2vw, 0.9rem)', marginTop: '0.25rem' }}>
                 Gaps ({biologicalInterpretation.gapFrequency}%)
               </div>
             </div>
 
             <div style={{
               background: 'linear-gradient(135deg, #3B82F620, #2563EB20)',
-              padding: '1rem',
+              padding: 'clamp(0.75rem, 2vw, 1rem)',
               borderRadius: '8px',
-              border: '2px solid #3B82F6'
+              border: '2px solid #3B82F6',
+              textAlign: 'center'
             }}>
-              <div style={{ fontSize: '2rem', fontWeight: 700, color: '#3B82F6' }}>
+              <div style={{ fontSize: 'clamp(1.5rem, 5vw, 2rem)', fontWeight: 700, color: '#3B82F6' }}>
                 {alignment.similarity_percentage}%
               </div>
-              <div style={{ color: '#6B7280', fontSize: '0.9rem', marginTop: '0.25rem' }}>
+              <div style={{ color: '#6B7280', fontSize: 'clamp(0.75rem, 2vw, 0.9rem)', marginTop: '0.25rem' }}>
                 Similarity
               </div>
             </div>
@@ -773,17 +852,20 @@ ${'='.repeat(60)}
             background: 'linear-gradient(135deg, #EEF2FF, #E0E7FF)',
             border: '2px solid #6366F1',
             borderRadius: '12px',
-            padding: '1.5rem',
-            marginBottom: '1.5rem'
+            padding: 'clamp(1rem, 3vw, 1.5rem)',
+            marginBottom: '1.5rem',
+            width: '100%',
+            boxSizing: 'border-box'
           }}>
             <h3 style={{ 
               color: '#4F46E5', 
               marginBottom: '1rem', 
-              fontSize: '1.2rem', 
+              fontSize: 'clamp(1rem, 3vw, 1.2rem)', 
               fontFamily: 'Montserrat, sans-serif',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '0.5rem',
+              flexWrap: 'wrap'
             }}>
               🔬 Biological Interpretation
             </h3>
@@ -792,38 +874,41 @@ ${'='.repeat(60)}
               <div key={idx} style={{
                 background: '#fff',
                 borderRadius: '8px',
-                padding: '1rem',
+                padding: 'clamp(0.75rem, 2vw, 1rem)',
                 marginBottom: idx < biologicalInterpretation.insights.length - 1 ? '1rem' : 0,
                 border: '1px solid #C7D2FE'
               }}>
                 <div style={{ 
-                  fontSize: '0.95rem', 
+                  fontSize: 'clamp(0.85rem, 2vw, 0.95rem)', 
                   fontWeight: 600, 
                   color: '#4338CA',
                   marginBottom: '0.5rem',
                   display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
+                  alignItems: 'flex-start',
+                  gap: '0.5rem',
+                  flexWrap: 'wrap'
                 }}>
-                  <span>{insight.icon}</span>
+                  <span style={{ flexShrink: 0 }}>{insight.icon}</span>
                   <span>{insight.title}</span>
                 </div>
                 <div style={{ 
-                  fontSize: '0.9rem', 
+                  fontSize: 'clamp(0.8rem, 2vw, 0.9rem)', 
                   color: '#4B5563',
-                  lineHeight: '1.6'
+                  lineHeight: '1.6',
+                  wordBreak: 'break-word'
                 }}>
                   {insight.description}
                 </div>
                 {insight.regions && insight.regions.length > 0 && (
                   <div style={{
                     marginTop: '0.75rem',
-                    fontSize: '0.8rem',
+                    fontSize: 'clamp(0.7rem, 1.8vw, 0.8rem)',
                     color: '#6B7280',
                     fontFamily: 'monospace',
                     background: '#F9FAFB',
                     padding: '0.5rem',
-                    borderRadius: '4px'
+                    borderRadius: '4px',
+                    wordBreak: 'break-word'
                   }}>
                     <strong>Locations:</strong> {insight.regions.slice(0, 5).map(r => 
                       `${r.start + 1}-${r.start + r.length}`
@@ -835,40 +920,19 @@ ${'='.repeat(60)}
             ))}
           </div>
 
-          {/* BLAST Comparison Note */}
-          <div style={{
-            background: '#F0FDFA',
-            border: '1px solid #14B8A6',
-            borderRadius: '8px',
-            padding: '1rem',
-            marginBottom: '1.5rem',
-            fontSize: '0.85rem',
-            color: '#134E4A'
-          }}>
-            <div style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
-              ℹ️ About This Analysis
-            </div>
-            <div style={{ lineHeight: '1.6' }}>
-              Results are conceptually comparable to BLAST pairwise alignment, but optimized 
-              for educational and mutation analysis purposes. This tool uses classic dynamic 
-              programming algorithms (Needleman-Wunsch and Smith-Waterman) to provide detailed 
-              sequence comparison suitable for learning bioinformatics concepts.
-            </div>
-          </div>
-
           {/* Export Options */}
           <div style={{
             background: '#F8FAFC',
             border: '1px solid #CBD5E1',
             borderRadius: '8px',
-            padding: '1rem',
+            padding: 'clamp(0.75rem, 2vw, 1rem)',
             marginBottom: '1.5rem'
           }}>
             <div style={{ 
               fontWeight: 600, 
               color: '#1E293B',
               marginBottom: '0.75rem',
-              fontSize: '0.95rem'
+              fontSize: 'clamp(0.85rem, 2vw, 0.95rem)'
             }}>
               📥 Export Options
             </div>
@@ -881,16 +945,14 @@ ${'='.repeat(60)}
                   border: '2px solid #3B82F6',
                   borderRadius: '6px',
                   color: '#3B82F6',
-                  fontSize: '0.9rem',
+                  fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
                   fontFamily: 'Inter, sans-serif'
                 }}
-                onMouseOver={(e) => e.target.style.background = '#EFF6FF'}
-                onMouseOut={(e) => e.target.style.background = '#fff'}
               >
-                💾 Download FASTA
+                💾 FASTA
               </button>
               
               <button
@@ -901,33 +963,31 @@ ${'='.repeat(60)}
                   border: '2px solid #10B981',
                   borderRadius: '6px',
                   color: '#10B981',
-                  fontSize: '0.9rem',
+                  fontSize: 'clamp(0.8rem, 2vw, 0.9rem)',
                   fontWeight: 600,
                   cursor: 'pointer',
                   transition: 'all 0.3s ease',
                   fontFamily: 'Inter, sans-serif'
                 }}
-                onMouseOver={(e) => e.target.style.background = '#ECFDF5'}
-                onMouseOut={(e) => e.target.style.background = '#fff'}
               >
-                📄 Download Report (TXT)
+                📄 Report
               </button>
             </div>
           </div>
 
-          {/* AI Interpretation Button */}
+          {/* AI Button */}
           <div style={{ marginBottom: '1.5rem' }}>
             <button 
               onClick={handleExplainWithAI}
               disabled={loadingAI}
               style={{
                 width: '100%',
-                padding: '1rem',
+                padding: 'clamp(0.875rem, 2.5vw, 1rem)',
                 background: loadingAI ? '#6B7280' : 'linear-gradient(135deg, #8B5CF6, #7C3AED)',
                 border: 'none',
                 borderRadius: '8px',
                 color: '#fff',
-                fontSize: '1rem',
+                fontSize: 'clamp(0.9rem, 2.5vw, 1rem)',
                 fontWeight: 600,
                 cursor: loadingAI ? 'not-allowed' : 'pointer',
                 transition: 'all 0.3s ease',
@@ -935,43 +995,45 @@ ${'='.repeat(60)}
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.5rem',
-                fontFamily: 'Inter, sans-serif'
+                fontFamily: 'Inter, sans-serif',
+                boxSizing: 'border-box'
               }}
             >
               {loadingAI && <span className="loading-spinner"></span>}
-              {loadingAI ? 'Generating AI Analysis...' : '🤖 Get Advanced AI Interpretation'}
+              {loadingAI ? 'Analyzing...' : '🤖 Get AI Analysis'}
             </button>
           </div>
 
-          {/* AI Explanation Display */}
+          {/* AI Explanation */}
           {aiExplanation && (
             <div style={{
               background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))',
               border: '1px solid #8B5CF6',
               borderRadius: '8px',
-              padding: '1.5rem',
+              padding: 'clamp(1rem, 3vw, 1.5rem)',
               marginBottom: '1.5rem'
             }}>
               <h3 style={{ 
                 color: '#8B5CF6', 
                 marginBottom: '1rem', 
-                fontSize: '1.1rem', 
+                fontSize: 'clamp(1rem, 3vw, 1.1rem)', 
                 fontWeight: 600,
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.5rem',
                 fontFamily: 'Montserrat, sans-serif'
               }}>
-                🤖 AI Interpretation
+                🤖 AI Analysis
               </h3>
               <div style={{ 
                 color: '#1F2937',
                 background: '#ffffff',
-                padding: '1rem',
+                padding: 'clamp(0.75rem, 2vw, 1rem)',
                 borderRadius: '6px',
                 lineHeight: '1.7', 
                 whiteSpace: 'pre-wrap',
-                fontSize: '0.95rem'
+                fontSize: 'clamp(0.85rem, 2vw, 0.95rem)',
+                wordBreak: 'break-word'
               }}>
                 {aiExplanation}
               </div>
@@ -983,7 +1045,7 @@ ${'='.repeat(60)}
             <h3 style={{ 
               color: '#374151', 
               marginBottom: '1rem', 
-              fontSize: '1.1rem', 
+              fontSize: 'clamp(1rem, 3vw, 1.1rem)', 
               fontFamily: 'Montserrat, sans-serif' 
             }}>
               Alignment Visualization
