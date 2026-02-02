@@ -1,5 +1,8 @@
 import { useState } from 'react';
 
+/* ─── API CONFIG ─────────────────────────────────────────────────────────── */
+const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
+
 // ─── SAMPLE SEQUENCE ────────────────────────────────────────────────────────
 const SAMPLE_SEQUENCE = [
   'ATGCGATCGTAGCTAGCTAGCTAGCTGATCGTAGCTAGCATGCGATCGTAGCTAGCTAGC',
@@ -42,6 +45,8 @@ export default function CRISPRFinder() {
   const [loading, setLoading]             = useState(false);
   const [error, setError]                 = useState('');
   const [showInfo, setShowInfo]           = useState(false);
+  const [aiExplanation, setAiExplanation] = useState('');
+  const [loadingAI, setLoadingAI]         = useState(false);
 
   // ── config ──
   const casConfig = selectedCas === 'custom'
@@ -90,6 +95,7 @@ export default function CRISPRFinder() {
     if (clean.length < 20) { setError('Sequence must be at least 20 bp.'); return; }
     setLoading(true);
     setPamSites(null);
+    setAiExplanation('');
     setTimeout(() => {
       const sites = findPAMSites(clean, casConfig);
       setPamSites({
@@ -104,7 +110,29 @@ export default function CRISPRFinder() {
   };
 
   // ── load sample ──
-  const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPamSites(null); };
+  const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPamSites(null); setAiExplanation(''); };
+
+  /* ── AI explain ── */
+  const handleAI = async () => {
+    if (!pamSites) return;
+    setLoadingAI(true); setError(''); setAiExplanation('');
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 60000);
+      const res = await fetch(`${API_URL}/api/explain`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ tool:'CRISPR PAM Site Finder', data:pamSites }),
+        signal: ctrl.signal
+      });
+      clearTimeout(t);
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error || 'AI failed'); }
+      const data = await res.json();
+      const txt = data.explanation || data.output_text || data.data?.explanation || data.choices?.[0]?.message?.content;
+      if (!txt) throw new Error('No explanation returned');
+      setAiExplanation(txt);
+    } catch (e) { setError(e.name === 'AbortError' ? 'AI timed out' : (e.message || 'AI failed')); }
+    finally { setLoadingAI(false); }
+  };
 
   // ── efficiency colour ──
   const effColor = e => ({ High:'#34D399', Medium:'#FBBF24', Low:'#F87171' }[e]);
@@ -140,6 +168,19 @@ export default function CRISPRFinder() {
         }
         .btn-primary:hover { filter:brightness(1.15); transform:translateY(-1px); box-shadow:0 4px 20px rgba(52,211,153,.35); }
         .btn-primary:disabled { filter:brightness(.6); cursor:not-allowed; transform:none; box-shadow:none; }
+
+        .btn-ai {
+          display:flex; align-items:center; justify-content:center; gap:0.5rem;
+          width:100%; padding:0.82rem 1.25rem;
+          background:linear-gradient(135deg,#6366f1,#4f46e5);
+          border:none; border-radius:10px;
+          color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:0.92rem;
+          cursor:pointer; transition:all .22s;
+        }
+        .btn-ai:hover { filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 20px rgba(99,102,241,.35); }
+        .btn-ai:disabled { filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
+
+        .ai-box { background:rgba(99,102,241,.08); border:1px solid rgba(99,102,241,.3); border-radius:12px; padding:1.2rem; margin-bottom:1rem; }
 
         .btn-ghost {
           display:inline-flex; align-items:center; gap:0.4rem;
@@ -224,6 +265,9 @@ export default function CRISPRFinder() {
           .stat-grid { grid-template-columns:repeat(2,1fr); }
           .card { padding:1rem; }
         }
+
+        @keyframes spin{ to{ transform:rotate(360deg); } }
+        .spin{ display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:spin .5s linear infinite; }
       `}</style>
 
       {/* ── HEADER ── */}
@@ -390,6 +434,25 @@ export default function CRISPRFinder() {
                 </div>
               </div>
             </div>
+
+            {/* AI EXPLAIN BUTTON */}
+            <div style={{ marginTop:'1.1rem' }}>
+              <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
+                {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
+              </button>
+            </div>
+
+            {/* AI RESULT */}
+            {aiExplanation && (
+              <div className="ai-box">
+                <div style={{ display:'flex', alignItems:'center', gap:'.4rem', marginBottom:'.6rem' }}>
+                  <span style={{ fontSize:'.86rem', fontWeight:600, color:'#818cf8' }}>AI Analysis</span>
+                </div>
+                <div style={{ fontSize:'.88rem', color:'#e2e4e9', lineHeight:1.8, whiteSpace:'pre-wrap', maxHeight:440, overflowY:'auto', background:'rgba(0,0,0,.25)', borderRadius:8, padding:'.75rem', border:'1px solid #24272f' }}>
+                  {aiExplanation}
+                </div>
+              </div>
+            )}
 
             {/* efficiency bars */}
             {pamSites.total > 0 && (
