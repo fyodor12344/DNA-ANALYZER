@@ -163,37 +163,56 @@ function App() {
           transition: background-color 0.3s ease, color 0.3s ease;
         }
         
+        /* UPDATED: Professional research-grade dark theme with subtle vertical gradient */
         .dark-mode {
-          background: linear-gradient(to bottom, #0f172a, #1e293b);
+          background: linear-gradient(180deg, #0b1220 0%, #0e1626 50%, #0b1220 100%);
           color: #e2e8f0;
+          min-height: 100vh;
         }
         
         .dark-mode .container {
-          background: #1e293b;
+          background: transparent;
         }
         
+        /* UPDATED: Header with subtle bottom border for visual separation */
+        .dark-mode .header {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          padding-bottom: 1.5rem;
+          margin-bottom: 2rem;
+        }
+        
+        /* UPDATED: Improved contrast for cards */
         .dark-mode .input-section,
         .dark-mode .results-section {
-          background: #0f172a;
-          border-color: #334155;
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          backdrop-filter: blur(10px);
         }
         
+        /* UPDATED: Higher contrast for text inputs */
         .dark-mode .dna-input,
         .dark-mode textarea {
-          background: #1e293b;
-          color: #e2e8f0;
-          border-color: #334155;
+          background: rgba(11, 18, 32, 0.8);
+          color: #f1f5f9;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .dark-mode .dna-input:focus,
+        .dark-mode textarea:focus {
+          border-color: rgba(0, 191, 165, 0.5);
+          outline: none;
         }
         
         .dark-mode .tab-btn {
-          background: #1e293b;
+          background: rgba(15, 23, 42, 0.6);
           color: #94a3b8;
-          border-color: #334155;
+          border: 1px solid rgba(255, 255, 255, 0.08);
         }
         
         .dark-mode .tab-btn.active {
           background: linear-gradient(135deg, #00A389, #00BFA5);
           color: white;
+          border-color: transparent;
         }
         
         .dark-mode .tab-btn:disabled {
@@ -238,59 +257,68 @@ function App() {
           box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         }
         
+        /* UPDATED: Tool card with improved contrast */
         .dark-mode .tool-card {
-          background: #1e293b;
+          background: rgba(15, 23, 42, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.08);
           box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
         
         .dark-mode .tool-card:hover {
           box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+          border-color: rgba(255, 255, 255, 0.12);
         }
         
+        /* UPDATED: Quick action buttons with better contrast */
         .quick-action-btn {
           padding: 0.5rem 1rem;
-          border: 1px solid #e5e7eb;
-          background: white;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(15, 23, 42, 0.6);
           border-radius: 6px;
           cursor: pointer;
           font-size: 0.875rem;
           font-weight: 500;
           transition: all 0.2s ease;
           font-family: 'Inter', sans-serif;
+          color: #e2e8f0;
         }
         
         .quick-action-btn:hover {
-          background: #f3f4f6;
+          background: rgba(30, 41, 59, 0.8);
+          border-color: rgba(255, 255, 255, 0.15);
           transform: translateY(-1px);
         }
         
         .dark-mode .quick-action-btn {
-          background: #1e293b;
-          border-color: #334155;
+          background: rgba(15, 23, 42, 0.6);
+          border-color: rgba(255, 255, 255, 0.1);
           color: #e2e8f0;
         }
         
         .dark-mode .quick-action-btn:hover {
-          background: #334155;
+          background: rgba(30, 41, 59, 0.8);
+          border-color: rgba(255, 255, 255, 0.15);
         }
         
+        /* UPDATED: Sample menu with improved visibility */
         .sample-menu {
           position: absolute;
           top: 100%;
           right: 0;
-          background: white;
-          border: 1px solid #e5e7eb;
+          background: rgba(15, 23, 42, 0.95);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 8px;
-          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
           padding: 0.5rem;
           z-index: 100;
           min-width: 220px;
           margin-top: 0.5rem;
+          backdrop-filter: blur(10px);
         }
         
         .dark-mode .sample-menu {
-          background: #1e293b;
-          border-color: #334155;
+          background: rgba(15, 23, 42, 0.95);
+          border-color: rgba(255, 255, 255, 0.1);
           box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         }
         
@@ -300,11 +328,11 @@ function App() {
           border-radius: 6px;
           transition: background 0.2s ease;
           font-size: 0.875rem;
-          color: #1f2937;
+          color: #e2e8f0;
         }
         
         .sample-menu-item:hover {
-          background: #f3f4f6;
+          background: rgba(30, 41, 59, 0.8);
         }
         
         .dark-mode .sample-menu-item {
@@ -312,16 +340,17 @@ function App() {
         }
         
         .dark-mode .sample-menu-item:hover {
-          background: #334155;
+          background: rgba(30, 41, 59, 0.8);
         }
         
+        /* UPDATED: Help modal with improved readability */
         .help-modal {
           position: fixed;
           top: 0;
           left: 0;
           right: 0;
           bottom: 0;
-          background: rgba(0,0,0,0.5);
+          background: rgba(0,0,0,0.7);
           display: flex;
           align-items: center;
           justify-content: center;
@@ -331,26 +360,29 @@ function App() {
         }
         
         .help-content {
-          background: white;
+          background: rgba(15, 23, 42, 0.98);
+          border: 1px solid rgba(255, 255, 255, 0.1);
           border-radius: 12px;
           padding: 2rem;
           max-width: 700px;
           max-height: 80vh;
           overflow-y: auto;
-          box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+          box-shadow: 0 8px 24px rgba(0,0,0,0.4);
           animation: slideDown 0.3s ease-out;
         }
         
         .dark-mode .help-content {
-          background: #1e293b;
-          color: #e2e8f0;
+          background: rgba(15, 23, 42, 0.98);
+          color: #f1f5f9;
         }
         
+        /* UPDATED: Stats bar with better contrast */
         .stats-bar {
           display: flex;
           gap: 1rem;
           padding: 0.75rem;
-          background: #f9fafb;
+          background: rgba(11, 18, 32, 0.6);
+          border: 1px solid rgba(255, 255, 255, 0.05);
           border-radius: 8px;
           margin-top: 0.5rem;
           font-size: 0.875rem;
@@ -358,7 +390,8 @@ function App() {
         }
         
         .dark-mode .stats-bar {
-          background: #1e293b;
+          background: rgba(11, 18, 32, 0.6);
+          border-color: rgba(255, 255, 255, 0.05);
         }
         
         .stat-item {
@@ -390,6 +423,13 @@ function App() {
         
         .dark-mode .help-content ul {
           color: #cbd5e1;
+        }
+        
+        /* UPDATED: Footer with subtle top border */
+        .dark-mode .app-footer {
+          border-top: 1px solid rgba(255, 255, 255, 0.05);
+          margin-top: 3rem;
+          padding-top: 2rem;
         }
         
         @media (max-width: 768px) {
