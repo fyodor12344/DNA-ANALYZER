@@ -78,7 +78,7 @@ const MUT_EXP = {
 };
 
 /* ─── MOCK BACKEND ──────────────────────────────────────────────────────── */
-const API_URL = import.meta?.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
+const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────── */
 const revComp = seq => { const m={A:'T',T:'A',G:'C',C:'G'}; return seq.split('').reverse().map(b=>m[b]||b).join(''); };

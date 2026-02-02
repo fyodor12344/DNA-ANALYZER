@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
@@ -47,11 +47,154 @@ export default function CRISPRFinder() {
   const [showInfo, setShowInfo]           = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI]         = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // ── close export menu on outside click ──
+  useEffect(() => {
+    const close = () => setShowExportMenu(false);
+    if (showExportMenu) {
+      document.addEventListener('click', close);
+      return () => document.removeEventListener('click', close);
+    }
+  }, [showExportMenu]);
 
   // ── config ──
   const casConfig = selectedCas === 'custom'
     ? { ...CAS_ENZYMES.custom, pam: customPAM.toUpperCase(), pamLength: customPAM.length, guideLength: customGuideLen, pamPosition: customPAMPos }
     : CAS_ENZYMES[selectedCas];
+
+  // ── FASTA upload ──
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result;
+      if (typeof content === 'string') {
+        // Strip FASTA headers (lines starting with >)
+        const cleanSeq = content
+          .split('\n')
+          .filter(line => !line.startsWith('>'))
+          .join('')
+          .replace(/\s/g, '');
+        setSequence(cleanSeq);
+        setError('');
+        setPamSites(null);
+        setAiExplanation('');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Export functions ──
+  const exportTXT = (detailed = false) => {
+    if (!pamSites) return;
+    let content = `CRISPR PAM Site Finder Results\n`;
+    content += `${'='.repeat(50)}\n\n`;
+    content += `Enzyme: ${casConfig.name}\n`;
+    content += `PAM Pattern: ${casConfig.pam}\n`;
+    content += `Sequence Length: ${pamSites.seqLen} bp\n`;
+    content += `Total PAM Sites: ${pamSites.total}\n`;
+    content += `Forward Strand: ${pamSites.forward}\n`;
+    content += `Reverse Strand: ${pamSites.reverse}\n\n`;
+
+    if (detailed && pamSites.sites.length > 0) {
+      content += `${'='.repeat(50)}\n`;
+      content += `DETAILED SITE INFORMATION\n`;
+      content += `${'='.repeat(50)}\n\n`;
+      pamSites.sites.forEach((site, i) => {
+        content += `Site ${i + 1}:\n`;
+        content += `  Position: ${site.position}-${site.positionEnd}\n`;
+        content += `  Strand: ${site.strand}\n`;
+        content += `  PAM Sequence: ${site.pamSequence}\n`;
+        content += `  Guide RNA: ${site.guideRNA}\n`;
+        content += `  GC Content: ${site.gcContent}%\n`;
+        content += `  Efficiency: ${site.efficiency}\n`;
+        content += `  Context: ${site.context}\n\n`;
+      });
+    }
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CRISPR_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const exportPDF = (detailed = false) => {
+    if (!pamSites) return;
+    let content = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>CRISPR PAM Site Finder Results</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #34D399; border-bottom: 3px solid #34D399; padding-bottom: 10px; }
+    h2 { color: #555; margin-top: 30px; }
+    table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+    th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+    th { background-color: #34D399; color: white; }
+    tr:nth-child(even) { background-color: #f9f9f9; }
+    .summary { background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0; }
+    .summary-item { margin: 10px 0; }
+    .label { font-weight: bold; color: #555; }
+    .site-detail { margin: 20px 0; padding: 15px; border-left: 4px solid #34D399; background: #f9f9f9; }
+    code { background: #e5e5e5; padding: 2px 6px; border-radius: 3px; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>CRISPR PAM Site Finder Results</h1>
+  
+  <div class="summary">
+    <div class="summary-item"><span class="label">Enzyme:</span> ${casConfig.name}</div>
+    <div class="summary-item"><span class="label">PAM Pattern:</span> ${casConfig.pam}</div>
+    <div class="summary-item"><span class="label">Sequence Length:</span> ${pamSites.seqLen} bp</div>
+    <div class="summary-item"><span class="label">Total PAM Sites:</span> ${pamSites.total}</div>
+    <div class="summary-item"><span class="label">Forward Strand:</span> ${pamSites.forward}</div>
+    <div class="summary-item"><span class="label">Reverse Strand:</span> ${pamSites.reverse}</div>
+    <div class="summary-item"><span class="label">Generated:</span> ${new Date().toLocaleString()}</div>
+  </div>`;
+
+    if (detailed && pamSites.sites.length > 0) {
+      content += `<h2>Detailed Site Information</h2>`;
+      pamSites.sites.forEach((site, i) => {
+        content += `
+  <div class="site-detail">
+    <h3>Site ${i + 1}</h3>
+    <p><span class="label">Position:</span> ${site.position}-${site.positionEnd}</p>
+    <p><span class="label">Strand:</span> ${site.strand}</p>
+    <p><span class="label">PAM Sequence:</span> <code>${site.pamSequence}</code></p>
+    <p><span class="label">Guide RNA:</span> <code>${site.guideRNA}</code></p>
+    <p><span class="label">GC Content:</span> ${site.gcContent}%</p>
+    <p><span class="label">Efficiency:</span> ${site.efficiency}</p>
+    <p><span class="label">Context:</span> <code>${site.context}</code></p>
+  </div>`;
+      });
+    }
+
+    content += `</body></html>`;
+
+    const blob = new Blob([content], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `CRISPR_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    // Open in new window for printing to PDF
+    const printWindow = window.open(url);
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => printWindow.print(), 250);
+      };
+    }
+    setShowExportMenu(false);
+  };
 
   // ── find sites ──
   const findPAMSites = (seq, cfg) => {
@@ -199,6 +342,29 @@ export default function CRISPRFinder() {
           cursor:pointer; transition:all .2s;
         }
         .btn-sample:hover { background:rgba(52,211,153,.18); border-color:rgba(52,211,153,.55); }
+
+        .btn-export {
+          display:inline-flex; align-items:center; gap:.35rem;
+          padding:.4rem .82rem; background:rgba(96,165,250,.1);
+          border:1px solid rgba(96,165,250,.28); border-radius:7px;
+          color:#60A5FA; font-family:'Sora',sans-serif; font-size:.78rem; font-weight:500;
+          cursor:pointer; transition:all .2s; position:relative;
+        }
+        .btn-export:hover { background:rgba(96,165,250,.18); border-color:rgba(96,165,250,.5); }
+
+        .export-menu {
+          position:absolute; top:calc(100% + .35rem); right:0;
+          background:#141720; border:1px solid #24272f; border-radius:10px;
+          box-shadow:0 12px 32px rgba(0,0,0,.45); padding:.55rem;
+          z-index:100; min-width:220px;
+        }
+        .export-item {
+          padding:.6rem .7rem; border-radius:7px; cursor:pointer;
+          border:1px solid transparent; margin-bottom:.28rem; transition:all .18s;
+          font-size:.82rem; color:#8a8f9e;
+        }
+        .export-item:hover { border-color:#60A5FA; background:rgba(96,165,250,.07); color:#60A5FA; }
+        .export-item:last-child { margin-bottom:0; }
 
         label.lbl {
           display:block; font-size:0.78rem; font-weight:600;
@@ -377,13 +543,19 @@ export default function CRISPRFinder() {
 
         {/* ── SEQUENCE INPUT ── */}
         <div className="card">
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.45rem' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.45rem', flexWrap:'wrap', gap:'.4rem' }}>
             <label className="lbl" style={{ margin:0 }}>DNA Sequence</label>
-            <button className="btn-sample" onClick={loadSample}>
-              <span>⚡</span> Load Sample Sequence
-            </button>
+            <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap' }}>
+              <label className="btn-sample" style={{ cursor:'pointer', margin:0 }}>
+                <span>📁</span> Upload FASTA
+                <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display:'none' }} />
+              </label>
+              <button className="btn-sample" onClick={loadSample}>
+                <span>⚡</span> Load Sample
+              </button>
+            </div>
           </div>
-          <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here…  (whitespace &amp; numbers are ignored)" />
+          <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file…  (whitespace &amp; numbers are ignored)" />
           {sequence && (
             <div style={{ marginTop:'.45rem', fontSize:'.7rem', color:'#4a4d5a', fontFamily:'"JetBrains Mono",monospace' }}>
               {sequence.toUpperCase().replace(/[^ATGC]/g,'').length} bp after cleaning
@@ -409,10 +581,38 @@ export default function CRISPRFinder() {
           <>
             {/* summary stats */}
             <div style={{ marginTop:'1.75rem' }}>
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.65rem' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.65rem', flexWrap:'wrap', gap:'.5rem' }}>
                 <span style={{ fontSize:'.78rem', fontWeight:600, color:'#6b7280', textTransform:'uppercase', letterSpacing:'.07em' }}>
                   Results — <span style={{ color:'#34D399' }}>{casConfig.name}</span> · PAM <span style={{ fontFamily:'"JetBrains Mono",monospace', color:'#FBBF24' }}>{casConfig.pam}</span>
                 </span>
+                <div style={{ position:'relative' }}>
+                  <button 
+                    className="btn-export" 
+                    onClick={(e) => { e.stopPropagation(); setShowExportMenu(v => !v); }}
+                  >
+                    <span>📥</span> Export Results <span style={{ fontSize:'.72rem', marginLeft:'.2rem' }}>▼</span>
+                  </button>
+                  {showExportMenu && (
+                    <div className="export-menu" onClick={(e) => e.stopPropagation()}>
+                      <div className="export-item" onClick={() => exportTXT(false)}>
+                        <strong>TXT - Summary Only</strong>
+                        <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Basic statistics</div>
+                      </div>
+                      <div className="export-item" onClick={() => exportTXT(true)}>
+                        <strong>TXT - Detailed</strong>
+                        <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>All PAM sites with sequences</div>
+                      </div>
+                      <div className="export-item" onClick={() => exportPDF(false)}>
+                        <strong>PDF - Summary Only</strong>
+                        <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Basic statistics</div>
+                      </div>
+                      <div className="export-item" onClick={() => exportPDF(true)}>
+                        <strong>PDF - Detailed</strong>
+                        <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>All PAM sites with sequences</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="stat-grid">

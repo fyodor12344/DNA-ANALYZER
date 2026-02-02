@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
@@ -93,12 +93,168 @@ export default function PrimerDesigner() {
   const [showInfo, setShowInfo]       = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI]     = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g,'').length;
 
   /* ── load sample ── */
   const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPrimers(null); setAiExplanation(''); };
+
+  /* ── close export menu on outside click ── */
+  useEffect(() => {
+    const close = () => setShowExportMenu(false);
+    if (showExportMenu) {
+      document.addEventListener('click', close);
+      return () => document.removeEventListener('click', close);
+    }
+  }, [showExportMenu]);
+
+  /* ── FASTA upload ── */
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const content = evt.target?.result;
+      if (typeof content === 'string') {
+        const cleanSeq = content
+          .split('\n')
+          .filter(line => !line.startsWith('>'))
+          .join('')
+          .replace(/\s/g, '');
+        setSequence(cleanSeq);
+        setError('');
+        setPrimers(null);
+        setAiExplanation('');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  /* ── Export functions ── */
+  const exportTXT = (detailed = false) => {
+    if (!primers) return;
+    let content = `PCR Primer Designer Results\n`;
+    content += `${'='.repeat(50)}\n\n`;
+    content += `Application Mode: ${mode.name}\n`;
+    content += `Product Size: ${primers.expected_product_size} bp\n`;
+    content += `Tm Difference: ${primers.tm_difference?.toFixed(1)} °C\n\n`;
+
+    if (primers.forward_primer) {
+      content += `FORWARD PRIMER:\n`;
+      content += `  Sequence: ${primers.forward_primer.sequence}\n`;
+      content += `  Length: ${primers.forward_primer.length} bp\n`;
+      content += `  Tm: ${primers.forward_primer.tm} °C\n`;
+      content += `  GC Content: ${primers.forward_primer.gc_content}%\n`;
+      content += `  Quality: ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)\n\n`;
+    }
+
+    if (primers.reverse_primer) {
+      content += `REVERSE PRIMER:\n`;
+      content += `  Sequence: ${primers.reverse_primer.sequence}\n`;
+      content += `  Length: ${primers.reverse_primer.length} bp\n`;
+      content += `  Tm: ${primers.reverse_primer.tm} °C\n`;
+      content += `  GC Content: ${primers.reverse_primer.gc_content}%\n`;
+      content += `  Quality: ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)\n\n`;
+    }
+
+    if (detailed && primers.pcr_protocol) {
+      content += `PCR PROTOCOL:\n`;
+      content += `  Annealing Temp: ${primers.pcr_protocol.annealing_temp} °C\n`;
+      content += `  Extension Time: ${primers.pcr_protocol.extension_time} s\n`;
+      content += `  Cycles: ${primers.pcr_protocol.cycles}\n`;
+      content += `  Polymerase: ${primers.pcr_protocol.polymerase}\n`;
+    }
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const exportPDF = (detailed = false) => {
+    if (!primers) return;
+    let content = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>PCR Primer Designer Results</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
+    h1 { color: #00FFC6; border-bottom: 3px solid #00FFC6; padding-bottom: 10px; }
+    .summary { background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0; }
+    .primer-box { margin: 20px 0; padding: 20px; border-left: 4px solid #00FFC6; background: #f9f9f9; }
+    code { background: #e5e5e5; padding: 4px 8px; border-radius: 3px; font-family: monospace; font-size: 1.1em; }
+    .label { font-weight: bold; color: #555; }
+  </style>
+</head>
+<body>
+  <h1>PCR Primer Designer Results</h1>
+  <div class="summary">
+    <p><span class="label">Mode:</span> ${mode.name}</p>
+    <p><span class="label">Product Size:</span> ${primers.expected_product_size} bp</p>
+    <p><span class="label">Tm Difference:</span> ${primers.tm_difference?.toFixed(1)} °C</p>
+    <p><span class="label">Generated:</span> ${new Date().toLocaleString()}</p>
+  </div>`;
+
+    if (primers.forward_primer) {
+      content += `
+  <div class="primer-box">
+    <h2>Forward Primer</h2>
+    <p><span class="label">Sequence:</span> <code>${primers.forward_primer.sequence}</code></p>
+    <p><span class="label">Length:</span> ${primers.forward_primer.length} bp</p>
+    <p><span class="label">Tm:</span> ${primers.forward_primer.tm} °C</p>
+    <p><span class="label">GC Content:</span> ${primers.forward_primer.gc_content}%</p>
+    <p><span class="label">Quality:</span> ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)</p>
+  </div>`;
+    }
+
+    if (primers.reverse_primer) {
+      content += `
+  <div class="primer-box">
+    <h2>Reverse Primer</h2>
+    <p><span class="label">Sequence:</span> <code>${primers.reverse_primer.sequence}</code></p>
+    <p><span class="label">Length:</span> ${primers.reverse_primer.length} bp</p>
+    <p><span class="label">Tm:</span> ${primers.reverse_primer.tm} °C</p>
+    <p><span class="label">GC Content:</span> ${primers.reverse_primer.gc_content}%</p>
+    <p><span class="label">Quality:</span> ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)</p>
+  </div>`;
+    }
+
+    if (detailed && primers.pcr_protocol) {
+      content += `
+  <div class="primer-box">
+    <h2>PCR Protocol</h2>
+    <p><span class="label">Annealing Temp:</span> ${primers.pcr_protocol.annealing_temp} °C</p>
+    <p><span class="label">Extension Time:</span> ${primers.pcr_protocol.extension_time} s</p>
+    <p><span class="label">Cycles:</span> ${primers.pcr_protocol.cycles}</p>
+    <p><span class="label">Polymerase:</span> ${primers.pcr_protocol.polymerase}</p>
+  </div>`;
+    }
+
+    content += `</body></html>`;
+
+    const blob = new Blob([content], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    const printWindow = window.open(url);
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => printWindow.print(), 250);
+      };
+    }
+    setShowExportMenu(false);
+  };
 
   /* ── submit ── */
   const handleDesign = async () => {
@@ -247,6 +403,29 @@ export default function PrimerDesigner() {
     }
     .btn-sample:hover{ background:rgba(0,255,198,.15); border-color:rgba(0,255,198,.5); }
 
+    .btn-export{
+      display:inline-flex; align-items:center; gap:.35rem;
+      padding:.4rem .82rem; background:rgba(96,165,250,.1);
+      border:1px solid rgba(96,165,250,.28); border-radius:7px;
+      color:#60A5FA; font-family:'Sora',sans-serif; font-size:.78rem; font-weight:500;
+      cursor:pointer; transition:all .2s; position:relative;
+    }
+    .btn-export:hover{ background:rgba(96,165,250,.18); border-color:rgba(96,165,250,.5); }
+
+    .export-menu{
+      position:absolute; top:calc(100% + .35rem); right:0;
+      background:#141720; border:1px solid #24272f; border-radius:10px;
+      box-shadow:0 12px 32px rgba(0,0,0,.45); padding:.55rem;
+      z-index:100; min-width:220px;
+    }
+    .export-item{
+      padding:.6rem .7rem; border-radius:7px; cursor:pointer;
+      border:1px solid transparent; margin-bottom:.28rem; transition:all .18s;
+      font-size:.82rem; color:#8a8f9e;
+    }
+    .export-item:hover{ border-color:#60A5FA; background:rgba(96,165,250,.07); color:#60A5FA; }
+    .export-item:last-child{ margin-bottom:0; }
+
     .mode-card{
       background:#141720; border:1px solid #24272f; border-radius:11px;
       padding:1rem; cursor:pointer; transition:all .22s; position:relative;
@@ -391,9 +570,15 @@ export default function PrimerDesigner() {
     <div className="pc">
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.42rem', flexWrap:'wrap', gap:'.4rem' }}>
         <label className="lbl" style={{ margin:0 }}>Target DNA Sequence</label>
-        <button className="btn-sample" onClick={loadSample}>Load Sample</button>
+        <div style={{ display:'flex', gap:'.4rem', flexWrap:'wrap' }}>
+          <label className="btn-sample" style={{ cursor:'pointer', margin:0 }}>
+            Upload FASTA
+            <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display:'none' }} />
+          </label>
+          <button className="btn-sample" onClick={loadSample}>Load Sample</button>
+        </div>
       </div>
-      <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here… (whitespace &amp; numbers are ignored)" />
+      <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
       {sequence && (
         <div style={{ marginTop:'.42rem', fontSize:'.8rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', alignItems:'center', gap:'.7rem', flexWrap:'wrap' }}>
           <span>{bpCount} bp after cleaning</span>
@@ -420,9 +605,39 @@ export default function PrimerDesigner() {
 
       {/* STATS */}
       <div style={{ marginTop:'1.5rem' }}>
-        <span style={{ fontSize:'.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.07em' }}>
-          Results — <span style={{ color:'#00FFC6' }}>{mode.name}</span>
-        </span>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.5rem', flexWrap:'wrap', gap:'.5rem' }}>
+          <span style={{ fontSize:'.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'.07em' }}>
+            Results — <span style={{ color:'#00FFC6' }}>{mode.name}</span>
+          </span>
+          <div style={{ position:'relative' }}>
+            <button 
+              className="btn-export" 
+              onClick={(e) => { e.stopPropagation(); setShowExportMenu(v => !v); }}
+            >
+              Export Results <span style={{ fontSize:'.72rem', marginLeft:'.2rem' }}>▼</span>
+            </button>
+            {showExportMenu && (
+              <div className="export-menu" onClick={(e) => e.stopPropagation()}>
+                <div className="export-item" onClick={() => exportTXT(false)}>
+                  <strong>TXT - Summary Only</strong>
+                  <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Basic primer info</div>
+                </div>
+                <div className="export-item" onClick={() => exportTXT(true)}>
+                  <strong>TXT - Detailed</strong>
+                  <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Includes PCR protocol</div>
+                </div>
+                <div className="export-item" onClick={() => exportPDF(false)}>
+                  <strong>PDF - Summary Only</strong>
+                  <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Basic primer info</div>
+                </div>
+                <div className="export-item" onClick={() => exportPDF(true)}>
+                  <strong>PDF - Detailed</strong>
+                  <div style={{ fontSize:'.72rem', color:'#6b7080', marginTop:'.15rem' }}>Includes PCR protocol</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
         <div className="stat-grid" style={{ marginTop:'.5rem' }}>
           {[
             { l:'Product Size',  v:`${primers.expected_product_size} bp`,                                     c:'#fff' },
