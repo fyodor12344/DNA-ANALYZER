@@ -147,7 +147,7 @@ const SequenceAlignment = () => {
     
     if (similarity >= 90 && gapFrequency < 5) {
       confidence = 'High';
-      confidenceColor = '#22C55E';
+      confidenceColor = '#10B981';
       confidenceReason = 'Excellent sequence similarity with minimal gaps';
     } else if (similarity >= 70 && gapFrequency < 15) {
       confidence = 'Moderate';
@@ -647,39 +647,58 @@ ${'='.repeat(80)}
           marginBottom: 0;
         }
 
-        .badge {
-          display: inline-block;
-          padding: 4px 10px;
-          background: #DC2626;
-          color: #FEE2E2;
+        /* Custom scrollbar styling */
+        *::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+
+        *::-webkit-scrollbar-track {
+          background: #0F172A;
           borderRadius: 4px;
-          fontSize: 11px;
-          fontWeight: 700;
-          textTransform: uppercase;
-          letterSpacing: 0.5px;
+        }
+
+        *::-webkit-scrollbar-thumb {
+          background: #475569;
+          borderRadius: 4px;
+        }
+
+        *::-webkit-scrollbar-thumb:hover {
+          background: #64748B;
+        }
+
+        /* Firefox scrollbar */
+        * {
+          scrollbar-width: thin;
+          scrollbar-color: #475569 #0F172A;
         }
       `}</style>
       
       {/* Header */}
       <div style={{
-        background: '#1E293B',
-        borderRadius: '12px',
-        padding: '32px',
-        marginBottom: '24px',
-        border: '1px solid #334155'
+        marginBottom: '32px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px' }}>
-          <span style={{ fontSize: '32px' }}>🧬</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
           <h1 style={{ 
             margin: 0, 
-            fontSize: '32px', 
+            fontSize: 'clamp(24px, 5vw, 36px)', 
             fontWeight: '700', 
             color: '#F8FAFC'
           }}>
             Sequence Alignment
           </h1>
+          <span className="badge" style={{
+            background: '#10B981',
+            color: '#D1FAE5',
+            padding: '6px 12px',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: '700',
+            textTransform: 'uppercase',
+            letterSpacing: '0.5px'
+          }}>RESEARCH GRADE</span>
         </div>
-        <p style={{ margin: 0, color: '#94A3B8', fontSize: '16px', fontWeight: '400' }}>
+        <p style={{ margin: 0, color: '#94A3B8', fontSize: 'clamp(14px, 3vw, 16px)', fontWeight: '400' }}>
           Compare DNA sequences using global or local alignment algorithms
         </p>
       </div>
@@ -691,24 +710,22 @@ ${'='.repeat(80)}
           style={{
             width: '100%',
             padding: '16px 20px',
-            background: '#1E293B',
+            background: 'transparent',
             border: '1px solid #334155',
             borderRadius: '8px',
-            color: '#FDE047',
+            color: '#94A3B8',
             fontSize: '14px',
             fontWeight: '500',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            textAlign: 'left'
+            textAlign: 'left',
+            transition: 'border-color 0.2s'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ fontSize: '18px' }}>💡</span>
-            <span>Why This Tool Matters & How to Use It</span>
-          </div>
-          <span style={{ fontSize: '18px' }}>{showWhyMatters ? '▼' : '▶'}</span>
+          <span>Why This Tool Matters & How to Use It</span>
+          <span style={{ fontSize: '14px' }}>{showWhyMatters ? '▼' : '▶'}</span>
         </button>
 
         {showWhyMatters && (
@@ -762,12 +779,12 @@ ${'='.repeat(80)}
               setShowSampleMenu(!showSampleMenu);
             }}
             style={{
-              padding: '14px 24px',
-              background: '#7C3AED',
+              padding: '12px 24px',
+              background: '#10B981',
               border: 'none',
-              borderRadius: '8px',
-              color: '#fff',
-              fontSize: '15px',
+              borderRadius: '6px',
+              color: '#052E16',
+              fontSize: '14px',
               fontWeight: '600',
               cursor: 'pointer',
               display: 'flex',
@@ -776,8 +793,7 @@ ${'='.repeat(80)}
               transition: 'background 0.2s'
             }}
           >
-            <span style={{ fontSize: '18px' }}>📋</span>
-            <span>Load Sample Alignments</span>
+            <span>Load Sample</span>
             <span style={{ fontSize: '12px' }}>▼</span>
           </button>
 
@@ -1013,12 +1029,12 @@ ${'='.repeat(80)}
           disabled={loading}
           style={{
             width: '100%',
-            padding: '16px',
-            background: loading ? '#475569' : '#22C55E',
+            padding: '14px',
+            background: loading ? '#475569' : '#10B981',
             border: 'none',
             borderRadius: '6px',
             color: loading ? '#94A3B8' : '#052E16',
-            fontSize: '15px',
+            fontSize: '14px',
             fontWeight: '600',
             cursor: loading ? 'not-allowed' : 'pointer',
             display: 'flex',
@@ -1041,15 +1057,10 @@ ${'='.repeat(80)}
           padding: '16px',
           marginBottom: '24px',
           color: '#FCA5A5',
-          fontSize: '14px',
-          display: 'flex',
-          gap: '12px'
+          fontSize: '14px'
         }}>
-          <span>⚠️</span>
-          <div>
-            <strong style={{ display: 'block', marginBottom: '4px' }}>Error:</strong>
-            {error}
-          </div>
+          <strong style={{ display: 'block', marginBottom: '4px' }}>Error:</strong>
+          {error}
         </div>
       )}
 
@@ -1061,7 +1072,12 @@ ${'='.repeat(80)}
           padding: '24px',
           border: '1px solid #334155'
         }}>
-          <h2 style={{ color: '#F8FAFC', margin: '0 0 20px 0', fontSize: '24px', fontWeight: '600' }}>
+          <h2 style={{ 
+            color: '#F8FAFC', 
+            margin: '0 0 20px 0', 
+            fontSize: 'clamp(18px, 4vw, 24px)', 
+            fontWeight: '600' 
+          }}>
             Alignment Results
           </h2>
           
@@ -1191,7 +1207,12 @@ ${'='.repeat(80)}
             padding: '24px',
             marginBottom: '24px'
           }}>
-            <h3 style={{ color: '#E2E8F0', marginBottom: '20px', fontSize: '18px', fontWeight: '600' }}>
+            <h3 style={{ 
+              color: '#E2E8F0', 
+              marginBottom: '20px', 
+              fontSize: 'clamp(16px, 3.5vw, 18px)', 
+              fontWeight: '600' 
+            }}>
               Biological Interpretation
             </h3>
 
@@ -1299,12 +1320,12 @@ ${'='.repeat(80)}
               disabled={loadingAI}
               style={{
                 width: '100%',
-                padding: '16px',
-                background: loadingAI ? '#475569' : '#7C3AED',
-                border: 'none',
+                padding: '14px',
+                background: loadingAI ? '#475569' : 'rgba(109, 40, 217, 0.2)',
+                border: '1px solid rgba(109, 40, 217, 0.4)',
                 borderRadius: '6px',
-                color: '#fff',
-                fontSize: '15px',
+                color: loadingAI ? '#94A3B8' : '#C4B5FD',
+                fontSize: '14px',
                 fontWeight: '600',
                 cursor: loadingAI ? 'not-allowed' : 'pointer',
                 display: 'flex',
@@ -1321,20 +1342,28 @@ ${'='.repeat(80)}
           {/* AI Explanation */}
           {aiExplanation && (
             <div style={{
-              background: '#0F172A',
-              border: '1px solid #5B21B6',
+              background: 'rgba(109, 40, 217, 0.1)',
+              border: '1px solid rgba(109, 40, 217, 0.3)',
               borderRadius: '8px',
               padding: '20px',
               marginBottom: '24px'
             }}>
-              <h3 style={{ color: '#DDD6FE', marginBottom: '16px', fontSize: '16px', fontWeight: '600' }}>
+              <h3 style={{ 
+                color: '#C4B5FD', 
+                marginBottom: '16px', 
+                fontSize: 'clamp(14px, 3vw, 16px)', 
+                fontWeight: '600' 
+              }}>
                 AI Analysis
               </h3>
               <div style={{ 
                 color: '#E2E8F0',
                 lineHeight: '1.8', 
                 whiteSpace: 'pre-wrap',
-                fontSize: '14px'
+                fontSize: 'clamp(13px, 2.5vw, 14px)',
+                maxHeight: '400px',
+                overflowY: 'auto',
+                paddingRight: '8px'
               }}>
                 {aiExplanation}
               </div>
@@ -1343,7 +1372,12 @@ ${'='.repeat(80)}
 
           {/* Alignment Visualization */}
           <div>
-            <h3 style={{ color: '#E2E8F0', marginBottom: '16px', fontSize: '18px', fontWeight: '600' }}>
+            <h3 style={{ 
+              color: '#E2E8F0', 
+              marginBottom: '16px', 
+              fontSize: 'clamp(16px, 3.5vw, 18px)', 
+              fontWeight: '600' 
+            }}>
               Alignment Visualization
             </h3>
             {renderAlignment()}

@@ -31,8 +31,8 @@ const SAMPLE_SEQUENCES = {
 };
 
 function App() {
+  // Input state
   const [dna, setDna] = useState("");
-  const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(false);
@@ -40,6 +40,20 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   const darkMode = true; // Always dark mode
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+
+  // ============================================================
+  // CENTRALIZED STATE MANAGEMENT FOR ALL TOOL RESULTS
+  // ============================================================
+  // This is the key architectural change: all tool results are now
+  // stored at the App level instead of within individual components.
+  // This ensures results persist when switching between tools.
+  // ============================================================
+  
+  const [overviewResult, setOverviewResult] = useState(null);
+  const [mutationResult, setMutationResult] = useState(null);
+  const [alignmentResult, setAlignmentResult] = useState(null);
+  const [crisprResult, setCrisprResult] = useState(null);
+  const [primerResult, setPrimerResult] = useState(null);
 
   // Close sample menu when clicking outside
   useEffect(() => {
@@ -76,7 +90,7 @@ function App() {
     try {
       setTimeout(() => {
        const res = summary(cleaned);
-        setResult(res);
+        setOverviewResult(res); // Store in centralized state
         setActiveTab("overview");
         setLoading(false);
         setShowSuccessMessage(true);
@@ -108,26 +122,55 @@ function App() {
     setShowSampleMenu(false);
   };
 
+  // ============================================================
+  // CLEAR FUNCTIONS - Updated to clear all results
+  // ============================================================
   const clearSequence = () => {
     setDna("");
-    setResult(null);
+    setOverviewResult(null);
+    setMutationResult(null);
+    setAlignmentResult(null);
+    setCrisprResult(null);
+    setPrimerResult(null);
     setError("");
     setActiveTab("overview");
   };
 
-  const copySequence = (e) => {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(dna).then(() => {
-      const btn = e.target;
-      const originalText = btn.textContent;
-      btn.textContent = "Copied!";
-      setTimeout(() => {
-        btn.textContent = originalText;
-      }, 2000);
-    });
-  }
-};
+  // Individual tool clear functions (optional - for per-tool clearing)
+  const clearToolResult = (toolName) => {
+    switch(toolName) {
+      case 'overview':
+        setOverviewResult(null);
+        break;
+      case 'mutations':
+        setMutationResult(null);
+        break;
+      case 'alignment':
+        setAlignmentResult(null);
+        break;
+      case 'crispr':
+        setCrisprResult(null);
+        break;
+      case 'primers':
+        setPrimerResult(null);
+        break;
+      default:
+        break;
+    }
+  };
 
+  const copySequence = (e) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(dna).then(() => {
+        const btn = e.target;
+        const originalText = btn.textContent;
+        btn.textContent = "Copied!";
+        setTimeout(() => {
+          btn.textContent = originalText;
+        }, 2000);
+      });
+    }
+  };
 
   const downloadSequence = () => {
     const blob = new Blob([dna], { type: 'text/plain' });
@@ -579,10 +622,10 @@ function App() {
                 <button 
                   onClick={clearSequence}
                   className="quick-action-btn"
-                  title="Clear sequence"
+                  title="Clear sequence and all results"
                   style={{ color: '#EF4444' }}
                 >
-                  Clear
+                  Clear All
                 </button>
               </>
             )}
@@ -609,7 +652,7 @@ function App() {
             <button
               onClick={() => setActiveTab("overview")}
               className={`tab-btn ${activeTab === "overview" ? "active" : ""}`}
-              disabled={!result}
+              disabled={!overviewResult}
             >
               Overview
             </button>
@@ -639,9 +682,20 @@ function App() {
             </button>
           </div>
 
+          {/* ============================================================ */}
+          {/* PERSISTENT RESULT RENDERING */}
+          {/* All tool components receive their result state and setter */}
+          {/* as props. This ensures results persist across tab switches. */}
+          {/* ============================================================ */}
           <div className="tab-content">
-            {activeTab === "overview" && result && <OverviewTab result={result} originalSequence={dna} />}
-            {activeTab === "overview" && !result && (
+            {activeTab === "overview" && overviewResult && (
+              <OverviewTab 
+                result={overviewResult} 
+                originalSequence={dna}
+                onClear={() => clearToolResult('overview')}
+              />
+            )}
+            {activeTab === "overview" && !overviewResult && (
               <div style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>
                 <p style={{ fontSize: '1.1rem', marginBottom: '0.5rem' }}>
                   Analyze a DNA sequence to view overview
@@ -651,10 +705,34 @@ function App() {
                 </p>
               </div>
             )}
-            {activeTab === "mutations" && <MutationFinder />}
-            {activeTab === "alignment" && <SequenceAlignment />}
-            {activeTab === "crispr" && <CRISPRFinder />}
-            {activeTab === "primers" && <PrimerDesigner />}
+            {activeTab === "mutations" && (
+              <MutationFinder 
+                result={mutationResult}
+                setResult={setMutationResult}
+                onClear={() => clearToolResult('mutations')}
+              />
+            )}
+            {activeTab === "alignment" && (
+              <SequenceAlignment 
+                result={alignmentResult}
+                setResult={setAlignmentResult}
+                onClear={() => clearToolResult('alignment')}
+              />
+            )}
+            {activeTab === "crispr" && (
+              <CRISPRFinder 
+                result={crisprResult}
+                setResult={setCrisprResult}
+                onClear={() => clearToolResult('crispr')}
+              />
+            )}
+            {activeTab === "primers" && (
+              <PrimerDesigner 
+                result={primerResult}
+                setResult={setPrimerResult}
+                onClear={() => clearToolResult('primers')}
+              />
+            )}
           </div>
         </div>
 
@@ -698,11 +776,12 @@ function App() {
                 <ul style={{ marginLeft: '1.5rem' }}>
                   <li>Use "Load Sample" to quickly test with example sequences (100bp, 300bp, 500bp)</li>
                   <li>Upload FASTA files (.fasta, .fa) or text files for easy sequence input</li>
-                  <li>Each tool works independently - switch between tabs anytime without re-analyzing</li>
+                  <li><strong>✨ NEW:</strong> Tool results now persist when switching tabs - your work is never lost!</li>
                   <li>Click "Get AI Analysis" in any tool for detailed biological insights and recommendations</li>
                   <li>Download comprehensive reports as TXT or PDF for documentation and sharing</li>
                   <li>Use "Copy" button to quickly copy sequences to clipboard</li>
                   <li>Real-time sequence statistics update as you type (A, T, G, C counts)</li>
+                  <li>Use "Clear All" to reset all sequences and results at once</li>
                 </ul>
                 
                 <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
