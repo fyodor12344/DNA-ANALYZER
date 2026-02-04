@@ -69,7 +69,6 @@ const SequenceAlignment = () => {
   // Sample loading
   const [showSampleMenu, setShowSampleMenu] = useState(false);
   const [currentSample, setCurrentSample] = useState(null);
-  const [showWhyMatters, setShowWhyMatters] = useState(false);
 
   // Load sample function
   const loadSample = (sampleKey) => {
@@ -605,6 +604,55 @@ ${'='.repeat(80)}
           to { transform: rotate(360deg); }
         }
         
+        @keyframes fadeInUp {
+          from {
+            opacity: 0;
+            transform: translateY(20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(-20px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+
+        @keyframes pulse {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.7;
+          }
+        }
+
+        .animate-fade-in {
+          animation: fadeInUp 0.6s ease-out;
+        }
+
+        .animate-slide-in {
+          animation: slideIn 0.5s ease-out;
+        }
+
+        .workflow-step {
+          animation: fadeInUp 0.6s ease-out;
+          animation-fill-mode: both;
+        }
+
+        .workflow-step:nth-child(1) { animation-delay: 0.1s; }
+        .workflow-step:nth-child(2) { animation-delay: 0.2s; }
+        .workflow-step:nth-child(3) { animation-delay: 0.3s; }
+        .workflow-step:nth-child(4) { animation-delay: 0.4s; }
+        
         .loading-spinner {
           display: inline-block;
           width: 16px;
@@ -627,13 +675,14 @@ ${'='.repeat(80)}
           zIndex: 100;
           minWidth: 280px;
           marginTop: 8px;
+          animation: fadeInUp 0.3s ease-out;
         }
 
         .sample-menu-item {
           padding: 12px 16px;
           cursor: pointer;
           borderRadius: 6px;
-          transition: background 0.2s ease;
+          transition: all 0.2s ease;
           fontSize: 14px;
           color: #E2E8F0;
           marginBottom: 4px;
@@ -641,10 +690,28 @@ ${'='.repeat(80)}
 
         .sample-menu-item:hover {
           background: #334155;
+          transform: translateX(4px);
         }
 
         .sample-menu-item:last-child {
           marginBottom: 0;
+        }
+
+        .step-number {
+          transition: all 0.3s ease;
+        }
+
+        .workflow-step:hover .step-number {
+          transform: scale(1.1);
+          box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
+        }
+
+        .highlight-text {
+          background: linear-gradient(120deg, #10B981 0%, #059669 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+          font-weight: 700;
         }
 
         /* Custom scrollbar styling */
@@ -672,98 +739,282 @@ ${'='.repeat(80)}
           scrollbar-width: thin;
           scrollbar-color: #475569 #0F172A;
         }
+
+        @media (max-width: 768px) {
+          .workflow-step {
+            animation-delay: 0s !important;
+          }
+        }
       `}</style>
       
       {/* Header */}
       <div style={{
-        marginBottom: '32px'
-      }}>
+        marginBottom: '40px'
+      }} className="animate-fade-in">
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '12px', flexWrap: 'wrap' }}>
           <h1 style={{ 
             margin: 0, 
-            fontSize: 'clamp(24px, 5vw, 36px)', 
-            fontWeight: '700', 
-            color: '#F8FAFC'
+            fontSize: 'clamp(28px, 6vw, 42px)', 
+            fontWeight: '800', 
+            color: '#F8FAFC',
+            letterSpacing: '-0.02em'
           }}>
             Sequence Alignment
           </h1>
           <span className="badge" style={{
-            background: '#10B981',
-            color: '#D1FAE5',
-            padding: '6px 12px',
-            borderRadius: '6px',
+            background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
+            color: '#fff',
+            padding: '8px 16px',
+            borderRadius: '8px',
             fontSize: '11px',
             fontWeight: '700',
             textTransform: 'uppercase',
-            letterSpacing: '0.5px'
+            letterSpacing: '0.5px',
+            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)'
           }}>RESEARCH GRADE</span>
         </div>
-        <p style={{ margin: 0, color: '#94A3B8', fontSize: 'clamp(14px, 3vw, 16px)', fontWeight: '400' }}>
+        <p style={{ margin: 0, color: '#94A3B8', fontSize: 'clamp(14px, 3vw, 17px)', fontWeight: '400', lineHeight: '1.6' }}>
           Compare DNA sequences using global or local alignment algorithms
         </p>
       </div>
 
-      {/* Why This Tool Matters */}
-      <div style={{ marginBottom: '24px' }}>
-        <button
-          onClick={() => setShowWhyMatters(!showWhyMatters)}
-          style={{
-            width: '100%',
-            padding: '16px 20px',
-            background: 'transparent',
-            border: '1px solid #334155',
-            borderRadius: '8px',
-            color: '#94A3B8',
-            fontSize: '14px',
-            fontWeight: '500',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            textAlign: 'left',
-            transition: 'border-color 0.2s'
-          }}
-        >
-          <span>Why This Tool Matters & How to Use It</span>
-          <span style={{ fontSize: '14px' }}>{showWhyMatters ? '▼' : '▶'}</span>
-        </button>
+      {/* Why This Tool Matters Section */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)',
+        borderRadius: '16px',
+        padding: '32px',
+        marginBottom: '32px',
+        border: '1px solid #334155',
+        position: 'relative',
+        overflow: 'hidden'
+      }} className="animate-fade-in">
+        <div style={{
+          position: 'absolute',
+          top: '-50%',
+          right: '-10%',
+          width: '400px',
+          height: '400px',
+          background: 'radial-gradient(circle, rgba(16, 185, 129, 0.1) 0%, transparent 70%)',
+          borderRadius: '50%',
+          pointerEvents: 'none'
+        }}></div>
 
-        {showWhyMatters && (
+        <h2 style={{
+          color: '#10B981',
+          fontSize: 'clamp(18px, 4vw, 22px)',
+          fontWeight: '700',
+          marginBottom: '24px',
+          letterSpacing: '-0.01em',
+          textTransform: 'uppercase',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <span style={{
+            width: '4px',
+            height: '24px',
+            background: 'linear-gradient(180deg, #10B981 0%, #059669 100%)',
+            borderRadius: '2px'
+          }}></span>
+          Why This Tool Matters
+        </h2>
+
+        <p style={{
+          color: '#CBD5E1',
+          fontSize: 'clamp(14px, 2.8vw, 16px)',
+          lineHeight: '1.8',
+          marginBottom: '24px',
+          position: 'relative',
+          zIndex: 1
+        }}>
+          Designing primers by hand is slow and error-prone. A single mismatch at the <span className="highlight-text">3' end</span> can silently kill your entire PCR run. This tool automates every critical check — <span className="highlight-text">melting temperature</span>, <span className="highlight-text">GC content</span>, <span className="highlight-text">hairpin & dimer risk</span>, and <span className="highlight-text">3' GC-clamp stability</span> — so you get a reliable, optimised primer pair in seconds. Each application mode enforces the exact parameter windows that matter most for that specific workflow.
+        </p>
+
+        <div style={{
+          background: 'rgba(16, 185, 129, 0.05)',
+          border: '1px solid rgba(16, 185, 129, 0.2)',
+          borderRadius: '12px',
+          padding: '20px',
+          position: 'relative',
+          zIndex: 1
+        }}>
           <div style={{
-            marginTop: '12px',
-            background: '#1E293B',
-            border: '1px solid #334155',
-            borderRadius: '8px',
-            padding: '24px'
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '16px'
           }}>
-            <p style={{ color: '#CBD5E1', lineHeight: '1.7', margin: '0 0 16px 0', fontSize: '14px' }}>
-              DNA sequence alignment is fundamental to bioinformatics and molecular biology. It allows researchers to:
-            </p>
-            <ul style={{ color: '#CBD5E1', lineHeight: '1.8', margin: '0 0 16px 0', paddingLeft: '24px', fontSize: '14px' }}>
-              <li>Identify conserved regions that are functionally important</li>
-              <li>Detect mutations, SNPs, and structural variations</li>
-              <li>Compare genes across different species to study evolution</li>
-              <li>Find similar sequences in databases for annotation</li>
-              <li>Understand genetic relationships and phylogeny</li>
-            </ul>
-            <div style={{ 
-              background: '#0F172A', 
-              padding: '16px', 
-              borderRadius: '6px',
-              border: '1px solid #1E293B'
-            }}>
-              <p style={{ color: '#94A3B8', margin: '0 0 12px 0', fontSize: '13px', fontWeight: '600' }}>
-                How to use:
-              </p>
-              <ol style={{ color: '#CBD5E1', lineHeight: '1.7', margin: 0, paddingLeft: '24px', fontSize: '13px' }}>
-                <li>Enter or load two DNA sequences you want to compare</li>
-                <li>Choose Global alignment (Needleman-Wunsch) for end-to-end comparison or Local alignment (Smith-Waterman) to find similar regions</li>
-                <li>Click "Align Sequences" to see results with detailed statistics and biological interpretation</li>
-                <li>Use AI explanation for deeper insights into your alignment results</li>
-              </ol>
-            </div>
+            {[
+              { label: 'Melting Temperature', icon: '🌡️' },
+              { label: 'GC Content', icon: '🧬' },
+              { label: 'Hairpin & Dimer Risk', icon: '🔗' },
+              { label: "3' GC-Clamp Stability", icon: '🎯' }
+            ].map((item, idx) => (
+              <div key={idx} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                padding: '12px',
+                background: 'rgba(16, 185, 129, 0.08)',
+                borderRadius: '8px',
+                border: '1px solid rgba(16, 185, 129, 0.15)',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateX(4px)';
+                e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateX(0)';
+                e.currentTarget.style.borderColor = 'rgba(16, 185, 129, 0.15)';
+              }}>
+                <span style={{ fontSize: '24px' }}>{item.icon}</span>
+                <span style={{
+                  color: '#86EFAC',
+                  fontSize: 'clamp(12px, 2.5vw, 14px)',
+                  fontWeight: '600'
+                }}>
+                  {item.label}
+                </span>
+              </div>
+            ))}
           </div>
-        )}
+        </div>
+      </div>
+
+      {/* Workflow & Next Steps Section */}
+      <div style={{
+        background: 'linear-gradient(135deg, #1E293B 0%, #0F172A 100%)',
+        borderRadius: '16px',
+        padding: '32px',
+        marginBottom: '32px',
+        border: '1px solid #334155',
+        position: 'relative',
+        overflow: 'hidden'
+      }} className="animate-fade-in">
+        <div style={{
+          position: 'absolute',
+          top: '-30%',
+          left: '-10%',
+          width: '350px',
+          height: '350px',
+          background: 'radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 70%)',
+          borderRadius: '50%',
+          pointerEvents: 'none'
+        }}></div>
+
+        <h2 style={{
+          color: '#60A5FA',
+          fontSize: 'clamp(18px, 4vw, 22px)',
+          fontWeight: '700',
+          marginBottom: '28px',
+          letterSpacing: '-0.01em',
+          textTransform: 'uppercase',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <span style={{
+            width: '4px',
+            height: '24px',
+            background: 'linear-gradient(180deg, #60A5FA 0%, #3B82F6 100%)',
+            borderRadius: '2px'
+          }}></span>
+          Workflow & Next Steps
+        </h2>
+
+        <div style={{
+          display: 'grid',
+          gap: '20px',
+          position: 'relative',
+          zIndex: 1
+        }}>
+          {[
+            {
+              number: '1',
+              title: 'Pick Your Application',
+              description: 'Choose the PCR type below. Each mode pre-tunes amplicon size, Tm window, and strictness — Diagnostic is the broadest; qPCR is the tightest.',
+              color: '#10B981'
+            },
+            {
+              number: '2',
+              title: 'Paste Your Target Sequence',
+              description: 'Drop in your gene region (FASTA body or plain text). The tool strips headers, line-breaks, and numbers for you automatically.',
+              color: '#F59E0B'
+            },
+            {
+              number: '3',
+              title: 'Run the Analysis',
+              description: 'Hit Design Primers. The engine scores every candidate on Tm balance, GC%, hairpin ΔG, dimer risk, and 3\' clamp — then surfaces the best pair.',
+              color: '#8B5CF6'
+            },
+            {
+              number: '4',
+              title: 'Use the Results Downstream',
+              description: 'Copy the oligo sequences straight into a synthesis order or clone them into an expression vector. The protocol block gives you annealing temp, extension time, and cycle count ready to go.',
+              color: '#EC4899'
+            }
+          ].map((step, idx) => (
+            <div key={idx} className="workflow-step" style={{
+              display: 'flex',
+              gap: '20px',
+              alignItems: 'flex-start',
+              padding: '24px',
+              background: 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              transition: 'all 0.3s ease',
+              cursor: 'default'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+              e.currentTarget.style.borderColor = `${step.color}40`;
+              e.currentTarget.style.transform = 'translateX(8px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.02)';
+              e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.05)';
+              e.currentTarget.style.transform = 'translateX(0)';
+            }}>
+              <div className="step-number" style={{
+                minWidth: '48px',
+                width: '48px',
+                height: '48px',
+                borderRadius: '12px',
+                background: `linear-gradient(135deg, ${step.color} 0%, ${step.color}dd 100%)`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '20px',
+                fontWeight: '800',
+                color: '#fff',
+                boxShadow: `0 4px 16px ${step.color}40`,
+                flexShrink: 0
+              }}>
+                {step.number}
+              </div>
+
+              <div style={{ flex: 1 }}>
+                <h3 style={{
+                  color: '#F8FAFC',
+                  fontSize: 'clamp(15px, 3vw, 17px)',
+                  fontWeight: '700',
+                  marginBottom: '8px',
+                  letterSpacing: '-0.01em'
+                }}>
+                  {step.title}
+                </h3>
+                <p style={{
+                  color: '#94A3B8',
+                  fontSize: 'clamp(13px, 2.5vw, 15px)',
+                  lineHeight: '1.7',
+                  margin: 0
+                }}>
+                  {step.description}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Load Sample Button */}
@@ -771,7 +1022,7 @@ ${'='.repeat(80)}
         marginBottom: '24px',
         display: 'flex',
         justifyContent: 'center'
-      }}>
+      }} className="animate-fade-in">
         <div style={{ position: 'relative' }}>
           <button
             onClick={(e) => {
@@ -779,21 +1030,30 @@ ${'='.repeat(80)}
               setShowSampleMenu(!showSampleMenu);
             }}
             style={{
-              padding: '12px 24px',
-              background: '#10B981',
+              padding: '14px 28px',
+              background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
               border: 'none',
-              borderRadius: '6px',
-              color: '#052E16',
-              fontSize: '14px',
-              fontWeight: '600',
+              borderRadius: '10px',
+              color: '#fff',
+              fontSize: '15px',
+              fontWeight: '700',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '10px',
-              transition: 'background 0.2s'
+              transition: 'all 0.3s ease',
+              boxShadow: '0 4px 16px rgba(16, 185, 129, 0.3)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = '0 8px 24px rgba(16, 185, 129, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 4px 16px rgba(16, 185, 129, 0.3)';
             }}
           >
-            <span>Load Sample</span>
+            <span>📚 Load Sample</span>
             <span style={{ fontSize: '12px' }}>▼</span>
           </button>
 
@@ -826,7 +1086,7 @@ ${'='.repeat(80)}
           borderRadius: '8px',
           padding: '20px',
           marginBottom: '24px'
-        }}>
+        }} className="animate-fade-in">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
             <div>
               <h3 style={{ color: '#F8FAFC', margin: '0 0 8px 0', fontSize: '16px', fontWeight: '600' }}>
@@ -888,7 +1148,7 @@ ${'='.repeat(80)}
         padding: '24px',
         marginBottom: '24px',
         border: '1px solid #334155'
-      }}>
+      }} className="animate-fade-in">
         <div style={{ marginBottom: '20px' }}>
           <label style={{ 
             display: 'block', 
@@ -1030,17 +1290,19 @@ ${'='.repeat(80)}
           style={{
             width: '100%',
             padding: '14px',
-            background: loading ? '#475569' : '#10B981',
+            background: loading ? '#475569' : 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
             border: 'none',
             borderRadius: '6px',
-            color: loading ? '#94A3B8' : '#052E16',
+            color: '#fff',
             fontSize: '14px',
             fontWeight: '600',
             cursor: loading ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '10px'
+            gap: '10px',
+            boxShadow: loading ? 'none' : '0 4px 16px rgba(16, 185, 129, 0.3)',
+            transition: 'all 0.3s ease'
           }}
         >
           {loading && <span className="loading-spinner"></span>}
@@ -1058,7 +1320,7 @@ ${'='.repeat(80)}
           marginBottom: '24px',
           color: '#FCA5A5',
           fontSize: '14px'
-        }}>
+        }} className="animate-fade-in">
           <strong style={{ display: 'block', marginBottom: '4px' }}>Error:</strong>
           {error}
         </div>
@@ -1071,7 +1333,7 @@ ${'='.repeat(80)}
           borderRadius: '8px',
           padding: '24px',
           border: '1px solid #334155'
-        }}>
+        }} className="animate-fade-in">
           <h2 style={{ 
             color: '#F8FAFC', 
             margin: '0 0 20px 0', 
