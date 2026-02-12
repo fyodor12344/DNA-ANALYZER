@@ -93,25 +93,26 @@ const parseIntoCodons = (seq, frame) => {
   return codons;
 };
 
-/* ─── IMPROVED MUTATION DETECTION ────────────────────────────────────────── */
+/* ─── IMPROVED MUTATION DETECTION WITH PROPER ALIGNMENT ──────────────────── */
 /**
- * Detects mutations between two sequences with STRICT frameshift handling
+ * Performs sequence alignment and detects mutations accurately
  * 
- * CRITICAL BEHAVIOR:
- * - Detects FIRST frameshift event (indel where length % 3 !== 0)
- * - IMMEDIATELY STOPS scanning after frameshift detection
- * - Returns ONLY the single frameshift mutation
- * - Does NOT report downstream misalignments as separate mutations
+ * KEY IMPROVEMENTS:
+ * - Uses length-based indel detection (not first-mismatch heuristic)
+ * - Performs codon-by-codon comparison when lengths are equal
+ * - Only reports frameshift if actual length difference exists
+ * - Continues full analysis (does NOT stop after frameshift)
+ * - Validates sequence properties (start codon, divisibility by 3)
  * 
  * @param {string} ref - Reference sequence
  * @param {string} alt - Alternate sequence
  * @param {number} frame - Reading frame (1, 2, or 3)
  * @param {string} strand - Strand direction ('forward' or 'reverse')
- * @returns {object} - Mutation analysis results
+ * @returns {object} - Mutation analysis results with validation warnings
  */
 const detectMutationsImproved = (ref, alt, frame, strand) => {
   // ═══════════════════════════════════════════════════════════════════════
-  // STEP 1: Prepare sequences
+  // STEP 1: Prepare and validate sequences
   // ═══════════════════════════════════════════════════════════════════════
   let seq1 = ref.toUpperCase().replace(/\s/g, '');
   let seq2 = alt.toUpperCase().replace(/\s/g, '');
@@ -121,221 +122,233 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
     seq2 = revComp(seq2);
   }
 
+  const warnings = [];
+  
+  // Validation: Check start codon (warning only, not error)
+  if (!seq1.startsWith('ATG')) {
+    warnings.push({
+      type: 'missing_start_codon',
+      message: 'Reference sequence does not start with ATG (Met)',
+      severity: 'warning'
+    });
+  }
+  
+  // Validation: Check if divisible by 3 (warning only)
+  if (seq1.length % 3 !== 0) {
+    warnings.push({
+      type: 'incomplete_codons',
+      message: `Reference sequence length (${seq1.length} bp) is not divisible by 3`,
+      severity: 'warning'
+    });
+  }
+
   const mutations = [];
   const frameshiftEvents = [];
-  let frameshiftDetected = false;
-  let i = 0, j = 0;
+  const offset = parseInt(frame) - 1;
 
   // ═══════════════════════════════════════════════════════════════════════
-  // STEP 2: Scan sequences for mutations
+  // STEP 2: Determine mutation type based on LENGTH
   // ═══════════════════════════════════════════════════════════════════════
-  while ((i < seq1.length || j < seq2.length) && !frameshiftDetected) {
+  
+  const lengthDiff = seq2.length - seq1.length;
+  
+  if (lengthDiff === 0) {
+    // ───────────────────────────────────────────────────────────────────
+    // EQUAL LENGTH: Only SNPs possible (codon-by-codon comparison)
+    // ───────────────────────────────────────────────────────────────────
     
-    // Handle end-of-sequence cases
-    if (i >= seq1.length) {
-      // Remaining bases in seq2 = insertion at end
-      const inserted = seq2.substring(j);
-      const isFrameshift = inserted.length % 3 !== 0;
-      
-      mutations.push({
-        type: 'Insertion',
-        position: i,
-        inserted_sequence: inserted,
-        length: inserted.length,
-        is_frameshift: isFrameshift,
-        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
-        reference_codon: '---',
-        alternate_codon: inserted.substring(0, 3)
-      });
-      
-      if (isFrameshift) {
-        frameshiftDetected = true;
-        frameshiftEvents.push({
-          type: 'Insertion',
-          position: i,
-          length: inserted.length,
-          indel_length: inserted.length,
-          affected_region: `${i} to end`,
-          downstream_effect: 'Reading frame altered - all downstream codons shifted',
-          predicted_effect: 'Altered reading frame leading to premature stop codon',
-          stop_codon_prediction: true
-        });
+    for (let i = 0; i < seq1.length; i++) {
+      if (seq1[i] !== seq2[i]) {
+        // SNP detected at position i
+        // Determine which codon this belongs to
+        const codonIndex = Math.floor((i - offset) / 3);
+        const codonStart = codonIndex * 3 + offset;
+        
+        // Only process if this is a valid codon position
+        if (codonStart >= 0 && codonStart + 3 <= seq1.length) {
+          const refCodon = seq1.substring(codonStart, codonStart + 3);
+          const altCodon = seq2.substring(codonStart, codonStart + 3);
+          
+          if (refCodon.length === 3 && altCodon.length === 3) {
+            const refAA = translateCodon(refCodon);
+            const altAA = translateCodon(altCodon);
+            
+            // Determine mutation class
+            let mutClass = 'Missense';
+            if (refAA === altAA) mutClass = 'Silent';
+            else if (altAA === '*') mutClass = 'Nonsense';
+            
+            // Check if we already reported this codon
+            const alreadyReported = mutations.some(
+              m => m.type === 'SNP' && m.codon_position === codonStart
+            );
+            
+            if (!alreadyReported) {
+              mutations.push({
+                type: 'SNP',
+                position: i,
+                codon_position: codonStart,
+                reference: seq1[i],
+                alternate: seq2[i],
+                reference_codon: refCodon,
+                alternate_codon: altCodon,
+                reference_amino_acid: refAA,
+                alternate_amino_acid: altAA,
+                mutation_class: mutClass
+              });
+            }
+          }
+        }
       }
-      break;
     }
     
-    if (j >= seq2.length) {
-      // Remaining bases in seq1 = deletion at end
-      const deleted = seq1.substring(i);
-      const isFrameshift = deleted.length % 3 !== 0;
-      
-      mutations.push({
-        type: 'Deletion',
-        position: i,
-        deleted_sequence: deleted,
-        length: deleted.length,
-        is_frameshift: isFrameshift,
-        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
-        reference_codon: deleted.substring(0, 3),
-        alternate_codon: '---'
-      });
-      
-      if (isFrameshift) {
-        frameshiftDetected = true;
-        frameshiftEvents.push({
-          type: 'Deletion',
-          position: i,
-          length: deleted.length,
-          indel_length: deleted.length,
-          affected_region: `${i} to end`,
-          downstream_effect: 'Reading frame altered - all downstream codons shifted',
-          predicted_effect: 'Altered reading frame leading to premature stop codon',
-          stop_codon_prediction: true
-        });
-      }
-      break;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Bases match - continue
-    // ─────────────────────────────────────────────────────────────────────
-    if (seq1[i] === seq2[j]) {
-      i++;
-      j++;
-      continue;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
-    // Mismatch detected - check if it's an indel or SNP
-    // ─────────────────────────────────────────────────────────────────────
-    let foundIndel = false;
+  } else {
+    // ───────────────────────────────────────────────────────────────────
+    // UNEQUAL LENGTH: Insertion or Deletion present
+    // ───────────────────────────────────────────────────────────────────
     
-    // Check for DELETION (bases missing in seq2)
-    // Look ahead in seq1 to find where alignment resumes
-    for (let k = 1; k <= Math.min(20, seq1.length - i); k++) {
-      if (i + k < seq1.length && seq1[i + k] === seq2[j]) {
-        // Found deletion of k bases
-        const deleted = seq1.substring(i, i + k);
-        const isFrameshift = k % 3 !== 0;
+    // Perform simple alignment to find where indel occurs
+    const alignment = alignSequences(seq1, seq2);
+    
+    // Process alignment results
+    let i = 0, j = 0;
+    
+    while (i < alignment.ref.length || j < alignment.alt.length) {
+      const refBase = alignment.ref[i] || '';
+      const altBase = alignment.alt[j] || '';
+      
+      if (refBase === '-' && altBase !== '-') {
+        // ─────────────────────────────────────────────────────────────
+        // INSERTION detected
+        // ─────────────────────────────────────────────────────────────
+        let insertedSeq = altBase;
+        let k = j + 1;
+        
+        // Collect consecutive inserted bases
+        while (k < alignment.alt.length && alignment.ref[i + (k - j)] === '-') {
+          insertedSeq += alignment.alt[k];
+          k++;
+        }
+        
+        const insertLength = insertedSeq.length;
+        const isFrameshift = insertLength % 3 !== 0;
         
         mutations.push({
-          type: 'Deletion',
+          type: 'Insertion',
           position: i,
-          deleted_sequence: deleted,
-          length: k,
+          inserted_sequence: insertedSeq,
+          length: insertLength,
           is_frameshift: isFrameshift,
-          mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
-          reference_codon: seq1.substring(i, i + 3),
-          alternate_codon: '---'
+          mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
+          reference_codon: '---',
+          alternate_codon: insertedSeq.substring(0, 3)
         });
         
         if (isFrameshift) {
-          // ★★★ FRAMESHIFT DETECTED - STOP SCANNING ★★★
-          frameshiftDetected = true;
           frameshiftEvents.push({
-            type: 'Deletion',
+            type: 'Insertion',
             position: i,
-            length: k,
-            indel_length: k,
+            length: insertLength,
+            indel_length: insertLength,
             affected_region: `${i} to end`,
             downstream_effect: 'Reading frame altered - all downstream codons shifted',
             predicted_effect: 'Altered reading frame leading to premature stop codon',
             stop_codon_prediction: true
           });
-        } else {
-          // In-frame deletion - continue scanning
-          i += k;
         }
         
-        foundIndel = true;
-        break;
-      }
-    }
-    
-    // If frameshift was just detected, break immediately
-    if (frameshiftDetected) break;
-    
-    if (!foundIndel) {
-      // Check for INSERTION (extra bases in seq2)
-      // Look ahead in seq2 to find where alignment resumes
-      for (let k = 1; k <= Math.min(20, seq2.length - j); k++) {
-        if (j + k < seq2.length && seq1[i] === seq2[j + k]) {
-          // Found insertion of k bases
-          const inserted = seq2.substring(j, j + k);
-          const isFrameshift = k % 3 !== 0;
-          
-          mutations.push({
-            type: 'Insertion',
-            position: i,
-            inserted_sequence: inserted,
-            length: k,
-            is_frameshift: isFrameshift,
-            mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
-            reference_codon: '---',
-            alternate_codon: seq2.substring(j, j + 3)
-          });
-          
-          if (isFrameshift) {
-            // ★★★ FRAMESHIFT DETECTED - STOP SCANNING ★★★
-            frameshiftDetected = true;
-            frameshiftEvents.push({
-              type: 'Insertion',
-              position: i,
-              length: k,
-              indel_length: k,
-              affected_region: `${i} to end`,
-              downstream_effect: 'Reading frame altered - all downstream codons shifted',
-              predicted_effect: 'Altered reading frame leading to premature stop codon',
-              stop_codon_prediction: true
-            });
-          } else {
-            // In-frame insertion - continue scanning
-            j += k;
-          }
-          
-          foundIndel = true;
-          break;
-        }
-      }
-    }
-    
-    // If frameshift was just detected, break immediately
-    if (frameshiftDetected) break;
-    
-    if (!foundIndel) {
-      // ─────────────────────────────────────────────────────────────────
-      // Simple SNP (single nucleotide polymorphism)
-      // ─────────────────────────────────────────────────────────────────
-      const offset = parseInt(frame) - 1;
-      const codonStart1 = Math.floor((i - offset) / 3) * 3 + offset;
-      const codonStart2 = Math.floor((j - offset) / 3) * 3 + offset;
-      
-      const refCodon = seq1.substring(codonStart1, codonStart1 + 3);
-      const altCodon = seq2.substring(codonStart2, codonStart2 + 3);
-      
-      if (refCodon.length === 3 && altCodon.length === 3) {
-        const refAA = translateCodon(refCodon);
-        const altAA = translateCodon(altCodon);
+        j = k;
         
-        let mutClass = 'Missense';
-        if (refAA === altAA) mutClass = 'Silent';
-        else if (altAA === '*') mutClass = 'Nonsense';
+      } else if (refBase !== '-' && altBase === '-') {
+        // ─────────────────────────────────────────────────────────────
+        // DELETION detected
+        // ─────────────────────────────────────────────────────────────
+        let deletedSeq = refBase;
+        let k = i + 1;
+        
+        // Collect consecutive deleted bases
+        while (k < alignment.ref.length && alignment.alt[j + (k - i)] === '-') {
+          deletedSeq += alignment.ref[k];
+          k++;
+        }
+        
+        const deleteLength = deletedSeq.length;
+        const isFrameshift = deleteLength % 3 !== 0;
         
         mutations.push({
-          type: 'SNP',
+          type: 'Deletion',
           position: i,
-          reference: seq1[i],
-          alternate: seq2[j],
-          reference_codon: refCodon,
-          alternate_codon: altCodon,
-          reference_amino_acid: refAA,
-          alternate_amino_acid: altAA,
-          mutation_class: mutClass
+          deleted_sequence: deletedSeq,
+          length: deleteLength,
+          is_frameshift: isFrameshift,
+          mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
+          reference_codon: deletedSeq.substring(0, 3),
+          alternate_codon: '---'
         });
+        
+        if (isFrameshift) {
+          frameshiftEvents.push({
+            type: 'Deletion',
+            position: i,
+            length: deleteLength,
+            indel_length: deleteLength,
+            affected_region: `${i} to end`,
+            downstream_effect: 'Reading frame altered - all downstream codons shifted',
+            predicted_effect: 'Altered reading frame leading to premature stop codon',
+            stop_codon_prediction: true
+          });
+        }
+        
+        i = k;
+        
+      } else if (refBase !== '-' && altBase !== '-' && refBase !== altBase) {
+        // ─────────────────────────────────────────────────────────────
+        // SNP detected in aligned region
+        // ─────────────────────────────────────────────────────────────
+        const codonIndex = Math.floor((i - offset) / 3);
+        const codonStart = codonIndex * 3 + offset;
+        
+        if (codonStart >= 0 && codonStart + 3 <= seq1.length) {
+          const refCodon = seq1.substring(codonStart, codonStart + 3);
+          const altCodon = seq2.substring(codonStart, codonStart + 3);
+          
+          if (refCodon.length === 3 && altCodon.length === 3) {
+            const refAA = translateCodon(refCodon);
+            const altAA = translateCodon(altCodon);
+            
+            let mutClass = 'Missense';
+            if (refAA === altAA) mutClass = 'Silent';
+            else if (altAA === '*') mutClass = 'Nonsense';
+            
+            const alreadyReported = mutations.some(
+              m => m.type === 'SNP' && m.codon_position === codonStart
+            );
+            
+            if (!alreadyReported) {
+              mutations.push({
+                type: 'SNP',
+                position: i,
+                codon_position: codonStart,
+                reference: refBase,
+                alternate: altBase,
+                reference_codon: refCodon,
+                alternate_codon: altCodon,
+                reference_amino_acid: refAA,
+                alternate_amino_acid: altAA,
+                mutation_class: mutClass
+              });
+            }
+          }
+        }
+        
+        i++;
+        j++;
+        
+      } else {
+        // Match - both bases same
+        i++;
+        j++;
       }
-      
-      i++;
-      j++;
     }
   }
 
@@ -343,9 +356,9 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
   // STEP 3: Find first stop codon after frameshift (if detected)
   // ═══════════════════════════════════════════════════════════════════════
   let frameshiftStopInfo = null;
-  if (frameshiftDetected && frameshiftEvents.length > 0) {
+  
+  if (frameshiftEvents.length > 0) {
     const frameshiftPos = frameshiftEvents[0].position;
-    const offset = parseInt(frame) - 1;
     
     // Search for first stop codon in shifted frame
     for (let pos = frameshiftPos + offset; pos < seq2.length; pos += 3) {
@@ -360,7 +373,7 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
       }
     }
     
-    // If no stop codon found, indicate run-through
+    // If no stop codon found
     if (!frameshiftStopInfo) {
       frameshiftStopInfo = {
         position: null,
@@ -386,20 +399,101 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
   };
 
   // ═══════════════════════════════════════════════════════════════════════
-  // STEP 5: Return structured results
+  // STEP 5: Return structured results with validation warnings
   // ═══════════════════════════════════════════════════════════════════════
   return {
     mutations,
     summary,
-    frameshift_detected: frameshiftDetected,
+    frameshift_detected: frameshiftEvents.length > 0,
     frameshift_events: frameshiftEvents,
     frameshift_stop_info: frameshiftStopInfo,
     sequences: {
       reference: seq1,
       alternate: seq2,
+      reference_length: seq1.length,
+      alternate_length: seq2.length,
+      length_difference: lengthDiff,
       reading_frame: frame,
       strand: strand
+    },
+    validation: {
+      warnings: warnings,
+      has_warnings: warnings.length > 0
     }
+  };
+};
+
+/* ─── SEQUENCE ALIGNMENT HELPER ──────────────────────────────────────────── */
+/**
+ * Simple global sequence alignment using Needleman-Wunsch algorithm
+ * 
+ * This ensures proper gap placement for accurate indel detection
+ * 
+ * @param {string} seq1 - Reference sequence
+ * @param {string} seq2 - Alternate sequence
+ * @returns {object} - Aligned sequences with gaps marked as '-'
+ */
+const alignSequences = (seq1, seq2) => {
+  const len1 = seq1.length;
+  const len2 = seq2.length;
+  
+  // Simple case: if lengths are equal, no alignment needed
+  if (len1 === len2) {
+    return { ref: seq1, alt: seq2 };
+  }
+  
+  // Scoring parameters
+  const MATCH = 2;
+  const MISMATCH = -1;
+  const GAP = -2;
+  
+  // Initialize scoring matrix
+  const matrix = Array(len1 + 1).fill(null).map(() => Array(len2 + 1).fill(0));
+  
+  // Initialize first row and column
+  for (let i = 0; i <= len1; i++) matrix[i][0] = i * GAP;
+  for (let j = 0; j <= len2; j++) matrix[0][j] = j * GAP;
+  
+  // Fill matrix
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const match = matrix[i-1][j-1] + (seq1[i-1] === seq2[j-1] ? MATCH : MISMATCH);
+      const deleteGap = matrix[i-1][j] + GAP;
+      const insertGap = matrix[i][j-1] + GAP;
+      
+      matrix[i][j] = Math.max(match, deleteGap, insertGap);
+    }
+  }
+  
+  // Traceback to build alignment
+  let alignedRef = '';
+  let alignedAlt = '';
+  let i = len1;
+  let j = len2;
+  
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && matrix[i][j] === matrix[i-1][j-1] + (seq1[i-1] === seq2[j-1] ? MATCH : MISMATCH)) {
+      // Match or mismatch
+      alignedRef = seq1[i-1] + alignedRef;
+      alignedAlt = seq2[j-1] + alignedAlt;
+      i--;
+      j--;
+    } else if (i > 0 && matrix[i][j] === matrix[i-1][j] + GAP) {
+      // Deletion (gap in seq2)
+      alignedRef = seq1[i-1] + alignedRef;
+      alignedAlt = '-' + alignedAlt;
+      i--;
+    } else {
+      // Insertion (gap in seq1)
+      alignedRef = '-' + alignedRef;
+      alignedAlt = seq2[j-1] + alignedAlt;
+      j--;
+    }
+  }
+  
+  return {
+    ref: alignedRef,
+    alt: alignedAlt
   };
 };
 
@@ -1066,6 +1160,17 @@ export default function MutationFinder() {
           <span style={{ fontSize:'.95rem', color:'#67E8F9', fontWeight:600 }}>📋 Analysis Parameters</span>
           <span style={{ fontSize:'.97rem', color:'#8a8f9e' }}>Frame: <strong style={{ color:'#67E8F9' }}>+{readingFrame}</strong></span>
           <span style={{ fontSize:'.97rem', color:'#8a8f9e' }}>Strand: <strong style={{ color:'#67E8F9' }}>{strand.charAt(0).toUpperCase()+strand.slice(1)}</strong></span>
+          {mutations.sequences && (
+            <>
+              <span style={{ fontSize:'.97rem', color:'#8a8f9e' }}>Ref Length: <strong style={{ color:'#67E8F9' }}>{mutations.sequences.reference_length} bp</strong></span>
+              <span style={{ fontSize:'.97rem', color:'#8a8f9e' }}>Alt Length: <strong style={{ color:'#67E8F9' }}>{mutations.sequences.alternate_length} bp</strong></span>
+              {mutations.sequences.length_difference !== 0 && (
+                <span style={{ fontSize:'.97rem', color:'#8a8f9e' }}>Δ Length: <strong style={{ color: mutations.sequences.length_difference > 0 ? '#10B981' : '#EF4444' }}>
+                  {mutations.sequences.length_difference > 0 ? '+' : ''}{mutations.sequences.length_difference} bp
+                </strong></span>
+              )}
+            </>
+          )}
         </div>
       </div>
 
@@ -1116,6 +1221,32 @@ export default function MutationFinder() {
                 <div className="stat-l">{s.l}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* VALIDATION WARNINGS */}
+      {mutations.validation && mutations.validation.has_warnings && (
+        <div className="pc" style={{ marginTop:'.7rem', borderColor:'rgba(251,191,36,.3)', background:'rgba(251,191,36,.04)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.45rem', marginBottom:'.65rem' }}>
+            <span style={{ fontSize:'1.05rem' }}>⚠️</span>
+            <span style={{ fontSize:'1rem', fontWeight:600, color:'#FBBF24' }}>Validation Warnings</span>
+          </div>
+          {mutations.validation.warnings.map((warning, idx) => (
+            <div key={idx} style={{ background:'rgba(251,191,36,.1)', border:'1px solid rgba(251,191,36,.25)', borderRadius:8, padding:'.7rem .9rem', marginBottom:'.5rem', display:'flex', alignItems:'start', gap:'.5rem' }}>
+              <span style={{ fontSize:'1.1rem', flexShrink:0 }}>ℹ️</span>
+              <div style={{ flex:1 }}>
+                <div style={{ fontSize:'.95rem', color:'#FBBF24', fontWeight:600, marginBottom:'.15rem', textTransform:'capitalize' }}>
+                  {warning.type.replace(/_/g, ' ')}
+                </div>
+                <div style={{ fontSize:'.92rem', color:'#8a8f9e', lineHeight:1.5 }}>
+                  {warning.message}
+                </div>
+              </div>
+            </div>
+          ))}
+          <div style={{ marginTop:'.5rem', fontSize:'.88rem', color:'#8a8f9e', fontStyle:'italic' }}>
+            💡 These are informational warnings and do not prevent analysis. They indicate potential issues with the input sequences.
           </div>
         </div>
       )}
