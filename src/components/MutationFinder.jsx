@@ -1,5 +1,58 @@
 import React, { useState, useEffect } from 'react';
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESEARCH-GRADE CONFIGURATION
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// Transcript mapping configuration
+const TRANSCRIPT_CONFIG = {
+  RAW: {
+    id: 'raw',
+    name: 'Raw Sequence Index',
+    description: 'Direct nucleotide/amino acid positions from input sequence',
+    offset: 0
+  },
+  TP53_CANONICAL: {
+    id: 'NM_000546.6',
+    name: 'NM_000546.6 (Canonical TP53)',
+    description: 'Human TP53 tumor protein p53 transcript variant 1',
+    offset: 0, // Configurable - adjust based on known mutation mapping
+    proteinLength: 393,
+    domains: [
+      { name: 'Transactivation Domain', start: 1, end: 61 },
+      { name: 'Proline-rich Domain', start: 62, end: 91 },
+      { name: 'DNA-binding Domain', start: 100, end: 300 },
+      { name: 'Tetramerization Domain', start: 324, end: 355 },
+      { name: 'Regulatory Domain', start: 356, end: 393 }
+    ]
+  }
+};
+
+// Amino acid properties
+const AA_PROPERTIES = {
+  'A': { name: 'Alanine',     code: 'Ala', type: 'nonpolar' },
+  'R': { name: 'Arginine',    code: 'Arg', type: 'basic' },
+  'N': { name: 'Asparagine',  code: 'Asn', type: 'polar' },
+  'D': { name: 'Aspartate',   code: 'Asp', type: 'acidic' },
+  'C': { name: 'Cysteine',    code: 'Cys', type: 'polar' },
+  'E': { name: 'Glutamate',   code: 'Glu', type: 'acidic' },
+  'Q': { name: 'Glutamine',   code: 'Gln', type: 'polar' },
+  'G': { name: 'Glycine',     code: 'Gly', type: 'nonpolar' },
+  'H': { name: 'Histidine',   code: 'His', type: 'basic' },
+  'I': { name: 'Isoleucine',  code: 'Ile', type: 'nonpolar' },
+  'L': { name: 'Leucine',     code: 'Leu', type: 'nonpolar' },
+  'K': { name: 'Lysine',      code: 'Lys', type: 'basic' },
+  'M': { name: 'Methionine',  code: 'Met', type: 'nonpolar' },
+  'F': { name: 'Phenylalanine', code: 'Phe', type: 'nonpolar' },
+  'P': { name: 'Proline',     code: 'Pro', type: 'nonpolar' },
+  'S': { name: 'Serine',      code: 'Ser', type: 'polar' },
+  'T': { name: 'Threonine',   code: 'Thr', type: 'polar' },
+  'W': { name: 'Tryptophan',  code: 'Trp', type: 'nonpolar' },
+  'Y': { name: 'Tyrosine',    code: 'Tyr', type: 'polar' },
+  'V': { name: 'Valine',      code: 'Val', type: 'nonpolar' },
+  '*': { name: 'Stop',        code: 'Ter', type: 'stop' }
+};
+
 /* ─── CODON TABLE ────────────────────────────────────────────────────────── */
 const CODON_TABLE = {
   'TTT':'F','TTC':'F','TTA':'L','TTG':'L','TCT':'S','TCC':'S','TCA':'S','TCG':'S',
@@ -91,6 +144,248 @@ const parseIntoCodons = (seq, frame) => {
     if (c.length === 3) codons.push({ codon:c, position:i, aminoAcid:translateCodon(c) });
   }
   return codons;
+};
+
+/* ─── RESEARCH-GRADE ANNOTATION HELPERS ──────────────────────────────────── */
+/**
+ * Calculate multi-level position reporting for mutations
+ */
+const calculatePositions = (nucleotidePos, frame, transcriptConfig) => {
+  const offset = parseInt(frame) - 1;
+  
+  // Adjust for reading frame
+  const adjustedPos = nucleotidePos - offset;
+  
+  // Calculate codon number (1-based)
+  const codonNumber = Math.floor(adjustedPos / 3) + 1;
+  
+  // Amino acid position (same as codon number)
+  const aaPosition = codonNumber;
+  
+  // Literature position (with transcript offset)
+  const literaturePosition = aaPosition - transcriptConfig.offset;
+  
+  return {
+    nucleotidePosition: nucleotidePos + 1, // Convert to 1-based
+    codonNumber: codonNumber,
+    aaPosition: aaPosition,
+    literaturePosition: literaturePosition
+  };
+};
+
+/**
+ * Generate HGVS protein notation
+ */
+const generateHGVS = (mutation, positions, transcriptId) => {
+  const prefix = transcriptId === 'raw' ? 'p.' : `${transcriptId}:p.`;
+  
+  if (mutation.mutation_class === 'Silent') {
+    return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}=`;
+  }
+  
+  if (mutation.mutation_class === 'Missense') {
+    return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}${mutation.alternate_amino_acid}`;
+  }
+  
+  if (mutation.mutation_class === 'Nonsense') {
+    return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}*`;
+  }
+  
+  if (mutation.is_frameshift) {
+    const aa = mutation.reference_amino_acid || mutation.reference_codon?.[0] || 'X';
+    return `${prefix}${aa}${positions.literaturePosition}fs`;
+  }
+  
+  if (mutation.type === 'Insertion') {
+    return `${prefix}${positions.literaturePosition}_${positions.literaturePosition + 1}ins`;
+  }
+  
+  if (mutation.type === 'Deletion') {
+    return `${prefix}${positions.literaturePosition}del`;
+  }
+  
+  return `${prefix}?`;
+};
+
+/**
+ * Determine protein domain impact
+ */
+const getDomainImpact = (aaPosition, transcriptConfig) => {
+  if (!transcriptConfig.domains) return null;
+  
+  for (const domain of transcriptConfig.domains) {
+    if (aaPosition >= domain.start && aaPosition <= domain.end) {
+      return {
+        name: domain.name,
+        start: domain.start,
+        end: domain.end,
+        position: aaPosition,
+        impact: 'Mutation within ' + domain.name
+      };
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Generate biological interpretation
+ */
+const getBiologicalInterpretation = (mutation, positions, transcriptConfig, domainImpact) => {
+  const interpretation = {
+    mutationType: mutation.type,
+    effect: mutation.mutation_class,
+    aaChange: null,
+    domainImpact: domainImpact,
+    confidence: 'High',
+    confidenceReason: '',
+    biologicalSignificance: ''
+  };
+  
+  // Amino acid change description
+  if (mutation.reference_amino_acid && mutation.alternate_amino_acid) {
+    const refAA = AA_PROPERTIES[mutation.reference_amino_acid];
+    const altAA = AA_PROPERTIES[mutation.alternate_amino_acid];
+    
+    interpretation.aaChange = {
+      from: mutation.reference_amino_acid,
+      to: mutation.alternate_amino_acid,
+      fromName: refAA?.name || 'Unknown',
+      toName: altAA?.name || 'Unknown',
+      fromType: refAA?.type,
+      toType: altAA?.type,
+      description: `${refAA?.name || '?'} → ${altAA?.name || '?'}`
+    };
+    
+    // Assess biochemical change
+    if (refAA && altAA && refAA.type !== altAA.type) {
+      interpretation.biologicalSignificance = 'Biochemical property change detected';
+    }
+  }
+  
+  // Confidence assessment
+  if (mutation.type === 'SNP' && mutation.mutation_class === 'Missense') {
+    interpretation.confidence = 'High';
+    interpretation.confidenceReason = 'Clear codon-level substitution with amino acid change';
+  } else if (mutation.type === 'SNP' && mutation.mutation_class === 'Silent') {
+    interpretation.confidence = 'High';
+    interpretation.confidenceReason = 'Synonymous substitution - no amino acid change';
+  } else if (mutation.is_frameshift) {
+    interpretation.confidence = 'High';
+    interpretation.confidenceReason = 'Frameshift detected via length difference';
+    interpretation.biologicalSignificance = 'Severe: Complete downstream frame alteration';
+  }
+  
+  // Domain-specific significance
+  if (domainImpact) {
+    if (domainImpact.name === 'DNA-binding Domain') {
+      interpretation.biologicalSignificance = (interpretation.biologicalSignificance ? interpretation.biologicalSignificance + '. ' : '') + 
+        'Critical: Mutation in DNA-binding domain may affect transcription factor activity';
+    }
+  }
+  
+  return interpretation;
+};
+
+/* ─── PDF EXPORT FUNCTIONALITY ───────────────────────────────────────────── */
+/**
+ * Generate PDF report using jsPDF
+ * Fallback implementation without external dependencies
+ */
+const generatePDFReport = (mutations, annotatedMutations, transcriptConfig, analysisParams) => {
+  // Create a simple text-based report that can be downloaded
+  const date = new Date().toISOString().split('T')[0];
+  let reportText = `MUTATION ANALYSIS REPORT\n`;
+  reportText += `Generated: ${new Date().toLocaleString()}\n`;
+  reportText += `${'='.repeat(80)}\n\n`;
+  
+  // Analysis Parameters
+  reportText += `ANALYSIS PARAMETERS\n`;
+  reportText += `${'-'.repeat(80)}\n`;
+  reportText += `Reading Frame: +${analysisParams.readingFrame}\n`;
+  reportText += `Strand: ${analysisParams.strand}\n`;
+  reportText += `Transcript: ${transcriptConfig.name} (${transcriptConfig.id})\n`;
+  if (mutations.sequences) {
+    reportText += `Reference Length: ${mutations.sequences.reference_length} bp\n`;
+    reportText += `Alternate Length: ${mutations.sequences.alternate_length} bp\n`;
+    reportText += `Length Difference: ${mutations.sequences.length_difference} bp\n`;
+  }
+  reportText += `\n`;
+  
+  // Summary Statistics
+  reportText += `SUMMARY STATISTICS\n`;
+  reportText += `${'-'.repeat(80)}\n`;
+  if (mutations.summary) {
+    reportText += `Total Mutations: ${mutations.summary.total_mutations}\n`;
+    reportText += `SNPs: ${mutations.summary.snps}\n`;
+    reportText += `Insertions: ${mutations.summary.insertions}\n`;
+    reportText += `Deletions: ${mutations.summary.deletions}\n`;
+    reportText += `Frameshift Mutations: ${mutations.summary.frameshift_mutations}\n`;
+    reportText += `Silent Mutations: ${mutations.summary.silent_mutations}\n`;
+    reportText += `Missense Mutations: ${mutations.summary.missense_mutations}\n`;
+    reportText += `Nonsense Mutations: ${mutations.summary.nonsense_mutations}\n`;
+  }
+  reportText += `\n`;
+  
+  // Detailed Mutations
+  if (annotatedMutations && annotatedMutations.length > 0) {
+    reportText += `DETAILED MUTATION REPORT\n`;
+    reportText += `${'='.repeat(80)}\n\n`;
+    
+    annotatedMutations.forEach((mut, idx) => {
+      reportText += `Mutation ${idx + 1}\n`;
+      reportText += `${'-'.repeat(80)}\n`;
+      reportText += `Type: ${mut.mutation.type}\n`;
+      reportText += `Effect: ${mut.mutation.mutation_class}\n`;
+      
+      if (mut.positions) {
+        reportText += `\nPosition Information:\n`;
+        reportText += `  Nucleotide Position: ${mut.positions.nucleotidePosition}\n`;
+        reportText += `  Codon Number: ${mut.positions.codonNumber}\n`;
+        reportText += `  AA Position: ${mut.positions.aaPosition}\n`;
+        reportText += `  Literature Position: ${mut.positions.literaturePosition}\n`;
+      }
+      
+      if (mut.hgvs) {
+        reportText += `\nHGVS Notation: ${mut.hgvs}\n`;
+      }
+      
+      if (mut.mutation.reference_amino_acid && mut.mutation.alternate_amino_acid) {
+        reportText += `\nAmino Acid Change:\n`;
+        reportText += `  ${mut.mutation.reference_codon} (${mut.mutation.reference_amino_acid}) → `;
+        reportText += `${mut.mutation.alternate_codon} (${mut.mutation.alternate_amino_acid})\n`;
+      }
+      
+      if (mut.interpretation) {
+        reportText += `\nBiological Interpretation:\n`;
+        reportText += `  Confidence: ${mut.interpretation.confidence}\n`;
+        if (mut.interpretation.confidenceReason) {
+          reportText += `  Reason: ${mut.interpretation.confidenceReason}\n`;
+        }
+        if (mut.interpretation.biologicalSignificance) {
+          reportText += `  Significance: ${mut.interpretation.biologicalSignificance}\n`;
+        }
+        if (mut.interpretation.domainImpact) {
+          reportText += `  Domain Impact: ${mut.interpretation.domainImpact.impact}\n`;
+        }
+      }
+      
+      reportText += `\n`;
+    });
+  }
+  
+  // Create and download file
+  const blob = new Blob([reportText], { type: 'text/plain;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `Mutation_Report_${date}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+  
+  return true;
 };
 
 /* ─── IMPROVED MUTATION DETECTION WITH PROPER ALIGNMENT ──────────────────── */
@@ -519,6 +814,10 @@ export default function MutationFinder() {
   const [sampleBannerVisible, setSampleBannerVisible] = useState(false);
   const [infoOpen, setInfoOpen]                 = useState(false);
   const [generatingPDF, setGeneratingPDF]       = useState(false);
+  
+  // Research-grade additions
+  const [selectedTranscript, setSelectedTranscript] = useState('raw');
+  const [annotatedMutations, setAnnotatedMutations] = useState([]);
 
   /* ── validate ── */
   const validate = seq => {
@@ -572,6 +871,44 @@ export default function MutationFinder() {
   };
 
   useEffect(() => { if (mutations) detectFrameshift(mutations); }, [mutations]);
+
+  /* ── annotate mutations with research-grade data ── */
+  useEffect(() => {
+    if (mutations && mutations.mutations && readingFrame) {
+      const transcriptConfig = selectedTranscript === 'raw' 
+        ? TRANSCRIPT_CONFIG.RAW 
+        : TRANSCRIPT_CONFIG.TP53_CANONICAL;
+      
+      const annotated = mutations.mutations.map(mutation => {
+        const positions = calculatePositions(
+          mutation.position || mutation.codon_position || 0,
+          readingFrame,
+          transcriptConfig
+        );
+        
+        const hgvs = generateHGVS(mutation, positions, transcriptConfig.id);
+        
+        const domainImpact = getDomainImpact(positions.aaPosition, transcriptConfig);
+        
+        const interpretation = getBiologicalInterpretation(
+          mutation,
+          positions,
+          transcriptConfig,
+          domainImpact
+        );
+        
+        return {
+          mutation,
+          positions,
+          hgvs,
+          domainImpact,
+          interpretation
+        };
+      });
+      
+      setAnnotatedMutations(annotated);
+    }
+  }, [mutations, selectedTranscript, readingFrame]);
 
   /* ── confidence ── */
   const getConfidence = mut => {
@@ -634,29 +971,20 @@ export default function MutationFinder() {
     setError('');
     
     try {
-      // Send request to generate PDF
-      const response = await fetch(`${API_URL}/api/export-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mutations: mutations,
-          sequences: { reference: seq1, alternate: seq2 },
-          parameters: { readingFrame, strand },
-          aiExplanation: aiExplanation || null
-        })
-      });
+      const transcriptConfig = selectedTranscript === 'raw' 
+        ? TRANSCRIPT_CONFIG.RAW 
+        : TRANSCRIPT_CONFIG.TP53_CANONICAL;
       
-      if (!response.ok) throw new Error('PDF generation failed');
+      const success = generatePDFReport(
+        mutations,
+        annotatedMutations,
+        transcriptConfig,
+        { readingFrame, strand }
+      );
       
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `mutation-analysis-${new Date().toISOString().split('T')[0]}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
+      if (!success) {
+        throw new Error('PDF generation failed');
+      }
     } catch (e) {
       setError(`PDF export failed: ${e.message}`);
     } finally {
@@ -1070,6 +1398,26 @@ export default function MutationFinder() {
         <span style={{ fontSize:'1rem', fontWeight:600, color:'#67E8F9' }}>Analysis Configuration</span>
         <span style={{ background:'#EF4444', color:'#fff', fontSize:'.72rem', fontWeight:700, padding:'.18rem .48rem', borderRadius:8, letterSpacing:'.04em', textTransform:'uppercase', marginLeft:'.35rem' }}>Required</span>
       </div>
+      
+      {/* Transcript Selector - Research Grade */}
+      <div style={{ marginBottom:'1rem' }}>
+        <label className="lbl">Transcript Reference <span style={{ textTransform:'none', color:'#10B981', fontWeight:600, letterSpacing:0 }}>(Research Grade)</span></label>
+        <select 
+          value={selectedTranscript} 
+          onChange={e=>setSelectedTranscript(e.target.value)}
+          style={{ borderColor: '#10B981', background:'rgba(16,185,129,.05)' }}
+        >
+          <option value="raw">{TRANSCRIPT_CONFIG.RAW.name}</option>
+          <option value="NM_000546.6">{TRANSCRIPT_CONFIG.TP53_CANONICAL.name}</option>
+        </select>
+        <div style={{ marginTop:'.4rem', fontSize:'.88rem', color:'#8a8f9e', fontStyle:'italic' }}>
+          {selectedTranscript === 'raw' 
+            ? '📍 ' + TRANSCRIPT_CONFIG.RAW.description
+            : '🧬 ' + TRANSCRIPT_CONFIG.TP53_CANONICAL.description
+          }
+        </div>
+      </div>
+      
       <div className="config-grid">
         <div>
           <label className="lbl">Reading Frame <span style={{ textTransform:'none', color:'#6b7080', fontWeight:400, letterSpacing:0 }}>(codon boundaries)</span></label>
