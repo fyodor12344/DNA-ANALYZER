@@ -95,7 +95,14 @@ const parseIntoCodons = (seq, frame) => {
 
 /* ─── IMPROVED MUTATION DETECTION ────────────────────────────────────────── */
 /**
- * Detects mutations between two sequences with proper frameshift handling
+ * Detects mutations between two sequences with STRICT frameshift handling
+ * 
+ * CRITICAL BEHAVIOR:
+ * - Detects FIRST frameshift event (indel where length % 3 !== 0)
+ * - IMMEDIATELY STOPS scanning after frameshift detection
+ * - Returns ONLY the single frameshift mutation
+ * - Does NOT report downstream misalignments as separate mutations
+ * 
  * @param {string} ref - Reference sequence
  * @param {string} alt - Alternate sequence
  * @param {number} frame - Reading frame (1, 2, or 3)
@@ -103,7 +110,9 @@ const parseIntoCodons = (seq, frame) => {
  * @returns {object} - Mutation analysis results
  */
 const detectMutationsImproved = (ref, alt, frame, strand) => {
-  // Prepare sequences
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 1: Prepare sequences
+  // ═══════════════════════════════════════════════════════════════════════
   let seq1 = ref.toUpperCase().replace(/\s/g, '');
   let seq2 = alt.toUpperCase().replace(/\s/g, '');
   
@@ -114,73 +123,96 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
 
   const mutations = [];
   const frameshiftEvents = [];
-  let frameshiftPosition = null;
+  let frameshiftDetected = false;
   let i = 0, j = 0;
 
-  // Step 1: Align sequences and detect indels first
-  while (i < seq1.length || j < seq2.length) {
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 2: Scan sequences for mutations
+  // ═══════════════════════════════════════════════════════════════════════
+  while ((i < seq1.length || j < seq2.length) && !frameshiftDetected) {
+    
+    // Handle end-of-sequence cases
     if (i >= seq1.length) {
-      // Insertion at end
+      // Remaining bases in seq2 = insertion at end
       const inserted = seq2.substring(j);
       const isFrameshift = inserted.length % 3 !== 0;
+      
       mutations.push({
         type: 'Insertion',
         position: i,
         inserted_sequence: inserted,
         length: inserted.length,
         is_frameshift: isFrameshift,
-        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion'
+        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
+        reference_codon: '---',
+        alternate_codon: inserted.substring(0, 3)
       });
-      if (isFrameshift && frameshiftPosition === null) {
-        frameshiftPosition = i;
+      
+      if (isFrameshift) {
+        frameshiftDetected = true;
         frameshiftEvents.push({
           type: 'Insertion',
           position: i,
           length: inserted.length,
+          indel_length: inserted.length,
           affected_region: `${i} to end`,
-          predicted_effect: 'Altered reading frame leading to premature stop codon'
+          downstream_effect: 'Reading frame altered - all downstream codons shifted',
+          predicted_effect: 'Altered reading frame leading to premature stop codon',
+          stop_codon_prediction: true
         });
       }
       break;
     }
     
     if (j >= seq2.length) {
-      // Deletion at end
+      // Remaining bases in seq1 = deletion at end
       const deleted = seq1.substring(i);
       const isFrameshift = deleted.length % 3 !== 0;
+      
       mutations.push({
         type: 'Deletion',
         position: i,
         deleted_sequence: deleted,
         length: deleted.length,
         is_frameshift: isFrameshift,
-        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion'
+        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
+        reference_codon: deleted.substring(0, 3),
+        alternate_codon: '---'
       });
-      if (isFrameshift && frameshiftPosition === null) {
-        frameshiftPosition = i;
+      
+      if (isFrameshift) {
+        frameshiftDetected = true;
         frameshiftEvents.push({
           type: 'Deletion',
           position: i,
           length: deleted.length,
+          indel_length: deleted.length,
           affected_region: `${i} to end`,
-          predicted_effect: 'Altered reading frame leading to premature stop codon'
+          downstream_effect: 'Reading frame altered - all downstream codons shifted',
+          predicted_effect: 'Altered reading frame leading to premature stop codon',
+          stop_codon_prediction: true
         });
       }
       break;
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Bases match - continue
+    // ─────────────────────────────────────────────────────────────────────
     if (seq1[i] === seq2[j]) {
-      // Match - continue
       i++;
       j++;
       continue;
     }
 
-    // Mismatch detected - determine if it's SNP or indel
+    // ─────────────────────────────────────────────────────────────────────
+    // Mismatch detected - check if it's an indel or SNP
+    // ─────────────────────────────────────────────────────────────────────
     let foundIndel = false;
     
-    // Check for deletion (gap in seq2)
-    for (let k = 1; k <= Math.min(10, seq1.length - i); k++) {
+    // Check for DELETION (bases missing in seq2)
+    // Look ahead in seq1 to find where alignment resumes
+    for (let k = 1; k <= Math.min(20, seq1.length - i); k++) {
       if (i + k < seq1.length && seq1[i + k] === seq2[j]) {
         // Found deletion of k bases
         const deleted = seq1.substring(i, i + k);
@@ -197,26 +229,36 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
           alternate_codon: '---'
         });
         
-        if (isFrameshift && frameshiftPosition === null) {
-          frameshiftPosition = i;
+        if (isFrameshift) {
+          // ★★★ FRAMESHIFT DETECTED - STOP SCANNING ★★★
+          frameshiftDetected = true;
           frameshiftEvents.push({
             type: 'Deletion',
             position: i,
             length: k,
+            indel_length: k,
             affected_region: `${i} to end`,
-            predicted_effect: 'Altered reading frame leading to premature stop codon'
+            downstream_effect: 'Reading frame altered - all downstream codons shifted',
+            predicted_effect: 'Altered reading frame leading to premature stop codon',
+            stop_codon_prediction: true
           });
+        } else {
+          // In-frame deletion - continue scanning
+          i += k;
         }
         
-        i += k;
         foundIndel = true;
         break;
       }
     }
     
+    // If frameshift was just detected, break immediately
+    if (frameshiftDetected) break;
+    
     if (!foundIndel) {
-      // Check for insertion (gap in seq1)
-      for (let k = 1; k <= Math.min(10, seq2.length - j); k++) {
+      // Check for INSERTION (extra bases in seq2)
+      // Look ahead in seq2 to find where alignment resumes
+      for (let k = 1; k <= Math.min(20, seq2.length - j); k++) {
         if (j + k < seq2.length && seq1[i] === seq2[j + k]) {
           // Found insertion of k bases
           const inserted = seq2.substring(j, j + k);
@@ -233,54 +275,63 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
             alternate_codon: seq2.substring(j, j + 3)
           });
           
-          if (isFrameshift && frameshiftPosition === null) {
-            frameshiftPosition = i;
+          if (isFrameshift) {
+            // ★★★ FRAMESHIFT DETECTED - STOP SCANNING ★★★
+            frameshiftDetected = true;
             frameshiftEvents.push({
               type: 'Insertion',
               position: i,
               length: k,
+              indel_length: k,
               affected_region: `${i} to end`,
-              predicted_effect: 'Altered reading frame leading to premature stop codon'
+              downstream_effect: 'Reading frame altered - all downstream codons shifted',
+              predicted_effect: 'Altered reading frame leading to premature stop codon',
+              stop_codon_prediction: true
             });
+          } else {
+            // In-frame insertion - continue scanning
+            j += k;
           }
           
-          j += k;
           foundIndel = true;
           break;
         }
       }
     }
     
+    // If frameshift was just detected, break immediately
+    if (frameshiftDetected) break;
+    
     if (!foundIndel) {
-      // Simple SNP - but only count if we haven't encountered a frameshift
-      if (frameshiftPosition === null || i < frameshiftPosition) {
-        const offset = parseInt(frame) - 1;
-        const codonStart1 = Math.floor((i - offset) / 3) * 3 + offset;
-        const codonStart2 = Math.floor((j - offset) / 3) * 3 + offset;
+      // ─────────────────────────────────────────────────────────────────
+      // Simple SNP (single nucleotide polymorphism)
+      // ─────────────────────────────────────────────────────────────────
+      const offset = parseInt(frame) - 1;
+      const codonStart1 = Math.floor((i - offset) / 3) * 3 + offset;
+      const codonStart2 = Math.floor((j - offset) / 3) * 3 + offset;
+      
+      const refCodon = seq1.substring(codonStart1, codonStart1 + 3);
+      const altCodon = seq2.substring(codonStart2, codonStart2 + 3);
+      
+      if (refCodon.length === 3 && altCodon.length === 3) {
+        const refAA = translateCodon(refCodon);
+        const altAA = translateCodon(altCodon);
         
-        const refCodon = seq1.substring(codonStart1, codonStart1 + 3);
-        const altCodon = seq2.substring(codonStart2, codonStart2 + 3);
+        let mutClass = 'Missense';
+        if (refAA === altAA) mutClass = 'Silent';
+        else if (altAA === '*') mutClass = 'Nonsense';
         
-        if (refCodon.length === 3 && altCodon.length === 3) {
-          const refAA = translateCodon(refCodon);
-          const altAA = translateCodon(altCodon);
-          
-          let mutClass = 'Missense';
-          if (refAA === altAA) mutClass = 'Silent';
-          else if (altAA === '*') mutClass = 'Nonsense';
-          
-          mutations.push({
-            type: 'SNP',
-            position: i,
-            reference: seq1[i],
-            alternate: seq2[j],
-            reference_codon: refCodon,
-            alternate_codon: altCodon,
-            reference_amino_acid: refAA,
-            alternate_amino_acid: altAA,
-            mutation_class: mutClass
-          });
-        }
+        mutations.push({
+          type: 'SNP',
+          position: i,
+          reference: seq1[i],
+          alternate: seq2[j],
+          reference_codon: refCodon,
+          alternate_codon: altCodon,
+          reference_amino_acid: refAA,
+          alternate_amino_acid: altAA,
+          mutation_class: mutClass
+        });
       }
       
       i++;
@@ -288,24 +339,41 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
     }
   }
 
-  // Step 2: If frameshift detected, find first stop codon in alternate sequence
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 3: Find first stop codon after frameshift (if detected)
+  // ═══════════════════════════════════════════════════════════════════════
   let frameshiftStopInfo = null;
-  if (frameshiftPosition !== null && frameshiftEvents.length > 0) {
+  if (frameshiftDetected && frameshiftEvents.length > 0) {
+    const frameshiftPos = frameshiftEvents[0].position;
     const offset = parseInt(frame) - 1;
-    for (let pos = frameshiftPosition + offset; pos < seq2.length; pos += 3) {
+    
+    // Search for first stop codon in shifted frame
+    for (let pos = frameshiftPos + offset; pos < seq2.length; pos += 3) {
       const codon = seq2.substring(pos, pos + 3);
       if (codon.length === 3 && translateCodon(codon) === '*') {
         frameshiftStopInfo = {
           position: pos,
           codon: codon,
-          distance_from_frameshift: pos - frameshiftPosition
+          distance_from_frameshift: pos - frameshiftPos
         };
         break;
       }
     }
+    
+    // If no stop codon found, indicate run-through
+    if (!frameshiftStopInfo) {
+      frameshiftStopInfo = {
+        position: null,
+        codon: null,
+        distance_from_frameshift: null,
+        note: 'No stop codon found - frameshift continues to end of sequence'
+      };
+    }
   }
 
-  // Step 3: Calculate summary statistics
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 4: Calculate summary statistics
+  // ═══════════════════════════════════════════════════════════════════════
   const summary = {
     total_mutations: mutations.length,
     snps: mutations.filter(m => m.type === 'SNP').length,
@@ -317,10 +385,13 @@ const detectMutationsImproved = (ref, alt, frame, strand) => {
     nonsense_mutations: mutations.filter(m => m.mutation_class === 'Nonsense').length
   };
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // STEP 5: Return structured results
+  // ═══════════════════════════════════════════════════════════════════════
   return {
     mutations,
     summary,
-    frameshift_detected: frameshiftPosition !== null,
+    frameshift_detected: frameshiftDetected,
     frameshift_events: frameshiftEvents,
     frameshift_stop_info: frameshiftStopInfo,
     sequences: {
@@ -511,15 +582,16 @@ export default function MutationFinder() {
     ::-webkit-scrollbar-track{ background:#131518; }
     ::-webkit-scrollbar-thumb{ background:#2a2d3a; border-radius:3px; }
 
-    .pc{ background:#141720; border:1px solid #24272f; border-radius:12px; padding:1.5rem; margin-bottom:1.2rem; }
+    .pc{ background:#141720; border:1px solid #24272f; border-radius:12px; padding:1.5rem; margin-bottom:1.2rem; 
+         animation: fadeSlideIn 0.4s ease-out; }
     .lbl{ display:block; font-size:.95rem; font-weight:600; color:#6b7080; text-transform:uppercase; letter-spacing:.08em; margin-bottom:.5rem; }
 
     select, textarea{
       width:100%; background:#0f1117; border:1px solid #24272f; border-radius:8px;
       color:#e2e4e9; font-family:'Sora',sans-serif; font-size:1.05rem;
-      padding:.8rem .95rem; outline:none; transition:border-color .2s;
+      padding:.8rem .95rem; outline:none; transition:all .3s ease;
     }
-    select:focus, textarea:focus{ border-color:#06B6D4; }
+    select:focus, textarea:focus{ border-color:#06B6D4; box-shadow: 0 0 0 3px rgba(6,182,212,0.1); }
     textarea{ resize:vertical; font-family:'JetBrains Mono',monospace; font-size:.95rem; line-height:1.85; }
     textarea::placeholder{ color:#2e3145; }
     select option{ background:#0f1117; }
@@ -531,9 +603,17 @@ export default function MutationFinder() {
       background:linear-gradient(135deg,#06B6D4,#0891B2);
       border:none; border-radius:10px;
       color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:1.1rem;
-      cursor:pointer; transition:all .22s;
+      cursor:pointer; transition:all .3s ease;
+      position:relative; overflow:hidden;
     }
-    .btn-p:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 24px rgba(6,182,212,.35); }
+    .btn-p::before{
+      content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition:left 0.5s ease;
+    }
+    .btn-p:hover::before{ left:100%; }
+    .btn-p:hover{ filter:brightness(1.12); transform:translateY(-2px); box-shadow:0 8px 24px rgba(6,182,212,.4); }
+    .btn-p:active{ transform:translateY(0); }
     .btn-p:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
     .btn-ai{
@@ -542,9 +622,17 @@ export default function MutationFinder() {
       background:linear-gradient(135deg,#14B8A6,#0D9488);
       border:none; border-radius:10px;
       color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:1.05rem;
-      cursor:pointer; transition:all .22s;
+      cursor:pointer; transition:all .3s ease;
+      position:relative; overflow:hidden;
     }
-    .btn-ai:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 20px rgba(20,184,166,.35); }
+    .btn-ai::before{
+      content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition:left 0.5s ease;
+    }
+    .btn-ai:hover::before{ left:100%; }
+    .btn-ai:hover{ filter:brightness(1.12); transform:translateY(-2px); box-shadow:0 8px 24px rgba(20,184,166,.4); }
+    .btn-ai:active{ transform:translateY(0); }
     .btn-ai:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
     .btn-pdf{
@@ -553,9 +641,17 @@ export default function MutationFinder() {
       background:linear-gradient(135deg,#8B5CF6,#7C3AED);
       border:none; border-radius:10px;
       color:#fff; font-family:'Sora',sans-serif; font-weight:600; font-size:1.05rem;
-      cursor:pointer; transition:all .22s;
+      cursor:pointer; transition:all .3s ease;
+      position:relative; overflow:hidden;
     }
-    .btn-pdf:hover{ filter:brightness(1.12); transform:translateY(-1px); box-shadow:0 6px 20px rgba(139,92,246,.35); }
+    .btn-pdf::before{
+      content:''; position:absolute; top:0; left:-100%; width:100%; height:100%;
+      background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition:left 0.5s ease;
+    }
+    .btn-pdf:hover::before{ left:100%; }
+    .btn-pdf:hover{ filter:brightness(1.12); transform:translateY(-2px); box-shadow:0 8px 24px rgba(139,92,246,.4); }
+    .btn-pdf:active{ transform:translateY(0); }
     .btn-pdf:disabled{ filter:brightness(.5); cursor:not-allowed; transform:none; box-shadow:none; }
 
     .btn-g{
@@ -563,18 +659,18 @@ export default function MutationFinder() {
       padding:.52rem 1rem; background:transparent;
       border:1px solid #24272f; border-radius:7px;
       color:#8a8f9e; font-family:'Sora',sans-serif; font-size:.95rem; font-weight:500;
-      cursor:pointer; transition:all .2s;
+      cursor:pointer; transition:all .25s ease;
     }
-    .btn-g:hover{ border-color:#06B6D4; color:#06B6D4; background:rgba(6,182,212,.06); }
+    .btn-g:hover{ border-color:#06B6D4; color:#06B6D4; background:rgba(6,182,212,.06); transform:translateY(-1px); }
 
     .btn-sample{
       display:inline-flex; align-items:center; gap:.42rem;
       padding:.5rem 1rem; background:rgba(6,182,212,.1);
       border:1px solid rgba(6,182,212,.3); border-radius:7px;
       color:#67E8F9; font-family:'Sora',sans-serif; font-size:.95rem; font-weight:500;
-      cursor:pointer; transition:all .2s; position:relative;
+      cursor:pointer; transition:all .25s ease; position:relative;
     }
-    .btn-sample:hover{ background:rgba(6,182,212,.18); border-color:rgba(6,182,212,.55); }
+    .btn-sample:hover{ background:rgba(6,182,212,.18); border-color:rgba(6,182,212,.55); transform:translateY(-1px); }
 
     /* ── sample dropdown ── */
     .sample-menu{
@@ -582,12 +678,13 @@ export default function MutationFinder() {
       background:#141720; border:1px solid #24272f; border-radius:10px;
       box-shadow:0 12px 32px rgba(0,0,0,.45); padding:.6rem;
       z-index:100; min-width:280px; max-width:90vw;
+      animation: dropdownSlide 0.25s ease-out;
     }
     .sample-item{
       padding:.8rem .9rem; border-radius:8px; cursor:pointer;
-      border:1px solid transparent; margin-bottom:.32rem; transition:all .18s;
+      border:1px solid transparent; margin-bottom:.32rem; transition:all .2s ease;
     }
-    .sample-item:hover{ border-color:#06B6D4; background:rgba(6,182,212,.07); }
+    .sample-item:hover{ border-color:#06B6D4; background:rgba(6,182,212,.07); transform:translateX(4px); }
     .sample-item:last-child{ margin-bottom:0; }
 
     /* ── info panel ── */
@@ -596,37 +693,49 @@ export default function MutationFinder() {
     .info-wrap.open{ max-height:1200px; opacity:1; }
 
     /* ── step ── */
-    .step-row{ display:flex; gap:.6rem; align-items:flex-start; margin-bottom:.7rem; }
-    .step-num{ flex-shrink:0; width:28px; height:28px; border-radius:50%; background:#06B6D4; color:#fff; font-size:.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:.08rem; }
+    .step-row{ display:flex; gap:.6rem; align-items:flex-start; margin-bottom:.7rem; animation: fadeIn 0.3s ease-out; }
+    .step-num{ flex-shrink:0; width:28px; height:28px; border-radius:50%; background:#06B6D4; color:#fff; font-size:.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:.08rem;
+               animation: pulse 2s ease-in-out infinite; }
 
     /* ── stat ── */
-    .stat-b{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:.9rem .7rem; text-align:center; }
+    .stat-b{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:.9rem .7rem; text-align:center; 
+             transition:all .3s ease; animation: fadeIn 0.4s ease-out; }
+    .stat-b:hover{ transform:translateY(-3px); box-shadow:0 4px 12px rgba(6,182,212,.15); border-color:#06B6D4; }
     .stat-v{ font-size:1.6rem; font-weight:700; line-height:1.2; }
     .stat-l{ font-size:.85rem; color:#6b7080; text-transform:uppercase; letter-spacing:.06em; margin-top:.3rem; }
 
     /* ── codon alignment ── */
-    .align-box{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1.1rem 1.2rem; margin-top:.8rem; }
+    .align-box{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1.1rem 1.2rem; margin-top:.8rem; 
+                animation: fadeIn 0.3s ease-out; }
     .align-row{ display:flex; align-items:center; gap:.8rem; margin-bottom:.6rem; }
     .align-row:last-child{ margin-bottom:0; }
     .align-lbl{ width:80px; font-size:.95rem; font-weight:600; color:#8a8f9e; flex-shrink:0; }
     .codon-chip{
       font-family:'JetBrains Mono',monospace; font-size:1.05rem; font-weight:700;
       padding:.38rem .8rem; border-radius:7px; letter-spacing:2px;
+      transition:transform .2s ease;
     }
-    .aa-chip{ font-size:1rem; font-weight:700; padding:.32rem .7rem; border-radius:6px; }
+    .codon-chip:hover{ transform:scale(1.05); }
+    .aa-chip{ font-size:1rem; font-weight:700; padding:.32rem .7rem; border-radius:6px; 
+              transition:transform .2s ease; }
+    .aa-chip:hover{ transform:scale(1.05); }
 
     /* ── mutation card ── */
-    .mut-card{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1.25rem; margin-bottom:.8rem; }
+    .mut-card{ background:#0f1117; border:1px solid #1e2130; border-radius:10px; padding:1.25rem; margin-bottom:.8rem; 
+               animation: fadeSlideIn 0.3s ease-out; transition:all .3s ease; }
+    .mut-card:hover{ transform:translateX(4px); box-shadow:0 4px 16px rgba(6,182,212,.1); border-color:#24272f; }
 
     /* ── tip / consequence ── */
-    .consequence-box{ border-radius:9px; padding:.9rem; margin-top:.7rem; }
+    .consequence-box{ border-radius:9px; padding:.9rem; margin-top:.7rem; animation: fadeIn 0.4s ease-out; }
     .note-box{ background:rgba(100,116,139,.08); border-left:3px solid #24272f; border-radius:6px; padding:.7rem .8rem; margin-top:.6rem; font-style:italic; font-size:.92rem; color:#6b7080; line-height:1.6; }
 
     /* ── frameshift banner ── */
-    .fs-banner{ background:linear-gradient(135deg,#7f1d1d,#991B1B); border:1px solid #dc2626; border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; }
+    .fs-banner{ background:linear-gradient(135deg,#7f1d1d,#991B1B); border:1px solid #dc2626; border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; 
+                animation: warningPulse 0.6s ease-out, fadeSlideIn 0.4s ease-out; }
 
     /* ── AI box ── */
-    .ai-box{ background:rgba(6,182,212,.08); border:1px solid rgba(6,182,212,.3); border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; }
+    .ai-box{ background:rgba(6,182,212,.08); border:1px solid rgba(6,182,212,.3); border-radius:12px; padding:1.35rem; margin-bottom:1.1rem; 
+             animation: fadeSlideIn 0.4s ease-out; }
 
     /* ── grids / responsive ── */
     .stat-grid{ display:grid; grid-template-columns:repeat(4,1fr); gap:.6rem; }
@@ -647,9 +756,34 @@ export default function MutationFinder() {
       .summary-grid{ grid-template-columns:1fr 1fr; gap:.45rem; }
     }
 
-    /* ── spinner ── */
+    /* ── animations ── */
     @keyframes spin{ to{ transform:rotate(360deg); } }
     .spin{ display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:spin .5s linear infinite; }
+
+    @keyframes fadeIn {
+      from { opacity:0; }
+      to { opacity:1; }
+    }
+
+    @keyframes fadeSlideIn {
+      from { opacity:0; transform:translateY(10px); }
+      to { opacity:1; transform:translateY(0); }
+    }
+
+    @keyframes dropdownSlide {
+      from { opacity:0; transform:translateY(-10px); }
+      to { opacity:1; transform:translateY(0); }
+    }
+
+    @keyframes warningPulse {
+      0%, 100% { box-shadow:0 0 0 0 rgba(220,38,38,0.4); }
+      50% { box-shadow:0 0 0 10px rgba(220,38,38,0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform:scale(1); }
+      50% { transform:scale(1.05); }
+    }
   `}</style>
 
   {/* ═══ HEADER ═══ */}
@@ -794,21 +928,24 @@ export default function MutationFinder() {
         <div style={{ display:'flex', alignItems:'center', gap:'.7rem', marginBottom:'.6rem' }}>
           <span style={{ fontSize:'1.5rem' }}>⚠️</span>
           <div>
-            <div style={{ fontSize:'1.05rem', fontWeight:700, color:'#FEF2F2' }}>Frameshift Mutation Detected!</div>
+            <div style={{ fontSize:'1.05rem', fontWeight:700, color:'#FEF2F2' }}>Critical: Frameshift Mutation Detected!</div>
             <div style={{ fontSize:'.95rem', color:'#FCA5A5', marginTop:'.1rem' }}>
-              {frameshiftInfo.events[0].type} of {frameshiftInfo.events[0].length} base(s) at position {frameshiftInfo.events[0].position}
+              {frameshiftInfo.events[0].type} of {frameshiftInfo.events[0].indel_length} base(s) at position {frameshiftInfo.events[0].position}
             </div>
           </div>
         </div>
         <div style={{ background:'rgba(0,0,0,.35)', borderRadius:8, padding:'.85rem', border:'1px solid rgba(254,202,202,.2)' }}>
           <div style={{ fontSize:'.97rem', color:'#FEF2F2', lineHeight:1.75 }}>
+            <div style={{ marginBottom:'.5rem', padding:'.6rem', background:'rgba(254,202,202,.15)', borderRadius:6, borderLeft:'3px solid #FCA5A5' }}>
+              <strong>🛑 Analysis Stopped:</strong> Downstream sequence scanning halted to prevent false mutation reporting due to frame misalignment.
+            </div>
             <div style={{ marginBottom:'.4rem' }}>
               <strong>📍 Affected Region: </strong>
               <span style={{ fontFamily:'"JetBrains Mono",monospace', background:'rgba(254,202,202,.2)', padding:'.25rem .6rem', borderRadius:5, fontSize:'1.02rem', fontWeight:700, marginLeft:'.45rem' }}>
                 {frameshiftInfo.events[0].affected_region}
               </span>
             </div>
-            {frameshiftInfo.stop_info && (
+            {frameshiftInfo.stop_info && frameshiftInfo.stop_info.position && (
               <div style={{ marginBottom:'.4rem' }}>
                 <strong>🛑 First premature stop at position {frameshiftInfo.stop_info.position}: </strong>
                 <span style={{ fontFamily:'"JetBrains Mono",monospace', background:'rgba(254,202,202,.2)', padding:'.25rem .6rem', borderRadius:5, fontSize:'1.02rem', fontWeight:700, letterSpacing:'2px', marginLeft:'.45rem' }}>
@@ -819,8 +956,13 @@ export default function MutationFinder() {
                 </span>
               </div>
             )}
+            {frameshiftInfo.stop_info && frameshiftInfo.stop_info.note && (
+              <div style={{ marginBottom:'.4rem', color:'#FCA5A5', fontStyle:'italic' }}>
+                ℹ️ {frameshiftInfo.stop_info.note}
+              </div>
+            )}
             <div style={{ fontSize:'.95rem', color:'#FCA5A5', fontStyle:'italic', borderTop:'1px solid rgba(254,202,202,.2)', paddingTop:'.5rem', marginTop:'.35rem' }}>
-              💡 <strong>Impact:</strong> {frameshiftInfo.events[0].predicted_effect}
+              💡 <strong>Biological Impact:</strong> {frameshiftInfo.events[0].downstream_effect}. This typically results in a non-functional protein due to premature termination or completely altered amino acid sequence.
             </div>
           </div>
         </div>
