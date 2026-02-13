@@ -287,103 +287,7 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
 };
 
 /* ─── SEQUENCE LENGTH GUARD ───────────────────────────────────────────────── */
-// Hard cap to prevent browser OOM crash. The old full N×M Needleman-Wunsch
-// matrix allocated (len1+1)*(len2+1) cells — a 10 000 bp pair = 100 M cells
-// (~800 MB) which crashes the tab immediately.
 const MAX_SEQ_LENGTH = 5000;
-
-/* ─── SEQUENCE ALIGNMENT (memory-safe) ───────────────────────────────────── */
-// Replaces the full N×M Needleman-Wunsch matrix with a lightweight linear
-// scan that handles the most common biological cases without allocating a
-// giant matrix:
-//
-//  • Equal-length sequences  → direct base-by-base compare (O(n), O(1) memory)
-//  • Single contiguous indel → find shared prefix/suffix, place one gap block
-//  • Multiple / complex indels that fall outside the above → bounded N-W on
-//    the *differing region only* (max MAX_NW_REGION bases), so the matrix
-//    stays tiny even for long sequences.
-//
-const MAX_NW_REGION = 500; // max bases fed into the bounded N-W fallback
-
-const alignSequences = (seq1, seq2) => {
-  const len1 = seq1.length;
-  const len2 = seq2.length;
-
-  if (len1 === len2) {
-    // No indels – caller handles SNP scan directly, nothing to align.
-    return { ref: seq1, alt: seq2 };
-  }
-
-  // ── Step 1: trim matching prefix ──────────────────────────────────────────
-  let prefixLen = 0;
-  const minLen = Math.min(len1, len2);
-  while (prefixLen < minLen && seq1[prefixLen] === seq2[prefixLen]) prefixLen++;
-
-  // ── Step 2: trim matching suffix ──────────────────────────────────────────
-  let suffix1 = len1 - 1;
-  let suffix2 = len2 - 1;
-  while (suffix1 > prefixLen && suffix2 > prefixLen && seq1[suffix1] === seq2[suffix2]) {
-    suffix1--;
-    suffix2--;
-  }
-
-  // The differing regions (may be empty if the change is a pure indel)
-  const diff1 = seq1.slice(prefixLen, suffix1 + 1); // ref  middle
-  const diff2 = seq2.slice(prefixLen, suffix2 + 1); // alt middle
-  const prefix = seq1.slice(0, prefixLen);
-  const suffix = seq1.slice(suffix1 + 1);
-
-  // ── Step 3: if either diff region is empty → pure insertion or deletion ───
-  if (diff1.length === 0 || diff2.length === 0) {
-    // Pure indel: one side contributes dashes, the other the inserted/deleted bases
-    const gapsForRef = '-'.repeat(diff2.length);
-    const gapsForAlt = '-'.repeat(diff1.length);
-    return {
-      ref: prefix + diff1 + gapsForRef + suffix,
-      alt: prefix + gapsForAlt + diff2 + suffix
-    };
-  }
-
-  // ── Step 4: bounded N-W on the differing region only ─────────────────────
-  // Truncate to MAX_NW_REGION so the matrix stays ≤ 500×500 = 250 K cells
-  const r = diff1.slice(0, MAX_NW_REGION);
-  const a = diff2.slice(0, MAX_NW_REGION);
-  const rLen = r.length;
-  const aLen = a.length;
-
-  const MATCH = 2, MISMATCH = -1, GAP = -2;
-
-  // Two-row rolling array instead of full matrix (O(n) memory)
-  // We still need the full matrix for traceback, but only for the capped region
-  const mat = Array(rLen + 1).fill(null).map(() => new Int16Array(aLen + 1));
-  for (let i = 0; i <= rLen; i++) mat[i][0] = i * GAP;
-  for (let j = 0; j <= aLen; j++) mat[0][j] = j * GAP;
-  for (let i = 1; i <= rLen; i++) {
-    for (let j = 1; j <= aLen; j++) {
-      const m = mat[i-1][j-1] + (r[i-1] === a[j-1] ? MATCH : MISMATCH);
-      const d = mat[i-1][j] + GAP;
-      const ins = mat[i][j-1] + GAP;
-      mat[i][j] = Math.max(m, d, ins);
-    }
-  }
-
-  let alignR = '', alignA = '';
-  let i = rLen, j = aLen;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && mat[i][j] === mat[i-1][j-1] + (r[i-1] === a[j-1] ? MATCH : MISMATCH)) {
-      alignR = r[i-1] + alignR; alignA = a[j-1] + alignA; i--; j--;
-    } else if (i > 0 && mat[i][j] === mat[i-1][j] + GAP) {
-      alignR = r[i-1] + alignR; alignA = '-' + alignA; i--;
-    } else {
-      alignR = '-' + alignR; alignA = a[j-1] + alignA; j--;
-    }
-  }
-
-  return {
-    ref: prefix + alignR + diff1.slice(MAX_NW_REGION) + suffix,
-    alt: prefix + alignA + diff2.slice(MAX_NW_REGION) + suffix
-  };
-};
 
 /* ─── MUTATION DETECTION ──────────────────────────────────────────────────── */
 const stripWhitespace = str => {
@@ -468,101 +372,80 @@ const detectMutations = (ref, alt, frame, strand) => {
       }
     }
   } else {
-    // Unequal length - perform alignment
-    const alignment = alignSequences(seq1, seq2);
-    let i = 0, j = 0;
-    
-    while (i < alignment.ref.length || j < alignment.alt.length) {
-      const refBase = alignment.ref[i] || '';
-      const altBase = alignment.alt[j] || '';
-      
-      if (refBase === '-' && altBase !== '-') {
-        // Insertion
-        let insertedSeq = altBase;
-        let k = j + 1;
-        while (k < alignment.alt.length && alignment.ref[i + (k - j)] === '-') {
-          insertedSeq += alignment.alt[k];
-          k++;
-        }
-        
-        const insertLength = insertedSeq.length;
-        const isFrameshift = insertLength % 3 !== 0;
-        
+    // Unequal length — locate the indel by finding shared prefix and suffix.
+    // This avoids any alignment matrix and is O(n) with no risk of infinite loop.
+
+    // Find how many bases match at the start
+    let pLen = 0;
+    const minLen = Math.min(seq1.length, seq2.length);
+    while (pLen < minLen && seq1[pLen] === seq2[pLen]) pLen++;
+
+    // Find how many bases match at the end (don't overlap the prefix)
+    let e1 = seq1.length - 1;
+    let e2 = seq2.length - 1;
+    while (e1 > pLen && e2 > pLen && seq1[e1] === seq2[e2]) { e1--; e2--; }
+
+    // middle1 = changed region in ref, middle2 = changed region in alt
+    const middle1 = seq1.slice(pLen, e1 + 1);
+    const middle2 = seq2.slice(pLen, e2 + 1);
+
+    if (middle1.length === 0) {
+      // Pure insertion into ref
+      const isFrameshift = middle2.length % 3 !== 0;
+      mutations.push({
+        type: 'Insertion',
+        position: pLen,
+        codon_position: pLen,
+        inserted_sequence: middle2,
+        length: middle2.length,
+        is_frameshift: isFrameshift,
+        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
+        reference_codon: '---',
+        alternate_codon: middle2.substring(0, 3)
+      });
+    } else if (middle2.length === 0) {
+      // Pure deletion from ref
+      const isFrameshift = middle1.length % 3 !== 0;
+      mutations.push({
+        type: 'Deletion',
+        position: pLen,
+        codon_position: pLen,
+        deleted_sequence: middle1,
+        length: middle1.length,
+        is_frameshift: isFrameshift,
+        mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
+        reference_codon: middle1.substring(0, 3),
+        alternate_codon: '---'
+      });
+    } else {
+      // Complex variant: substitution with net size change — report as indel
+      const netDiff = middle2.length - middle1.length;
+      if (netDiff > 0) {
+        const isFrameshift = netDiff % 3 !== 0;
         mutations.push({
           type: 'Insertion',
-          position: i,
-          inserted_sequence: insertedSeq,
-          length: insertLength,
+          position: pLen,
+          codon_position: pLen,
+          inserted_sequence: middle2,
+          length: netDiff,
           is_frameshift: isFrameshift,
           mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Insertion',
-          reference_codon: '---',
-          alternate_codon: insertedSeq.substring(0, 3)
+          reference_codon: middle1.substring(0, 3),
+          alternate_codon: middle2.substring(0, 3)
         });
-        
-        j = k;
-      } else if (refBase !== '-' && altBase === '-') {
-        // Deletion
-        let deletedSeq = refBase;
-        let k = i + 1;
-        while (k < alignment.ref.length && alignment.alt[j + (k - i)] === '-') {
-          deletedSeq += alignment.ref[k];
-          k++;
-        }
-        
-        const deleteLength = deletedSeq.length;
-        const isFrameshift = deleteLength % 3 !== 0;
-        
+      } else {
+        const isFrameshift = Math.abs(netDiff) % 3 !== 0;
         mutations.push({
           type: 'Deletion',
-          position: i,
-          deleted_sequence: deletedSeq,
-          length: deleteLength,
+          position: pLen,
+          codon_position: pLen,
+          deleted_sequence: middle1,
+          length: Math.abs(netDiff),
           is_frameshift: isFrameshift,
           mutation_class: isFrameshift ? 'Frameshift' : 'In-frame Deletion',
-          reference_codon: deletedSeq.substring(0, 3),
-          alternate_codon: '---'
+          reference_codon: middle1.substring(0, 3),
+          alternate_codon: middle2.substring(0, 3)
         });
-        
-        i = k;
-      } else if (refBase !== '-' && altBase !== '-' && refBase !== altBase) {
-        // SNP in aligned region
-        const codonIndex = Math.floor((i - offset) / 3);
-        const codonStart = codonIndex * 3 + offset;
-        
-        if (codonStart >= 0 && codonStart + 3 <= seq1.length) {
-          const refCodon = seq1.substring(codonStart, codonStart + 3);
-          const altCodon = seq2.substring(codonStart, codonStart + 3);
-          
-          if (refCodon.length === 3 && altCodon.length === 3) {
-            const refAA = translateCodon(refCodon);
-            const altAA = translateCodon(altCodon);
-            
-            // Determine mutation class
-            let mutClass = 'Missense';
-            if (refAA === altAA) mutClass = 'Silent';
-            else if (altAA === '*') mutClass = 'Nonsense';
-            
-            const alreadyReported = mutations.some(m => m.codon_position === codonStart);
-            
-            if (!alreadyReported) {
-              mutations.push({
-                type: 'SNP',
-                position: i,
-                codon_position: codonStart,
-                reference: refBase,
-                alternate: altBase,
-                reference_codon: refCodon,
-                alternate_codon: altCodon,
-                reference_amino_acid: refAA,
-                alternate_amino_acid: altAA,
-                mutation_class: mutClass
-              });
-            }
-          }
-        }
-        i++; j++;
-      } else {
-        i++; j++;
       }
     }
   }
