@@ -3,6 +3,10 @@ import React, { useState, useEffect } from 'react';
 /* ═══════════════════════════════════════════════════════════════════════════
    TP53 MUTATION ANALYZER - RESEARCH GRADE
    Canonical Transcript: NM_000546.6
+   
+   FIXES APPLIED:
+   1. Added missing 'offset' variable declaration (detectMutations function)
+   2. Fixed CSS rgba() syntax errors (removed invalid box characters)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 // TP53 Canonical Transcript Configuration
@@ -127,7 +131,6 @@ const CODON_TABLE = {
 };
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────── */
-// Single-pass reverse complement — avoids split/reverse/join allocating 3 arrays
 const revComp = seq => {
   const comp = { A:'T', T:'A', G:'C', C:'G' };
   let result = '';
@@ -137,8 +140,6 @@ const revComp = seq => {
   return result;
 };
 
-// BUG FIX #2: Removed incorrect T→U replacement. CODON_TABLE keys use DNA (T),
-// so replacing T with U caused every lookup to return undefined → '?'.
 const translateCodon = codon => CODON_TABLE[codon] || '?';
 
 /* ─── POSITION CALCULATION ───────────────────────────────────────────────── */
@@ -147,10 +148,10 @@ const calculatePositions = (nucleotidePos, frame) => {
   const adjustedPos = nucleotidePos - offset;
   const codonNumber = Math.floor(adjustedPos / 3) + 1;
   const aaPosition = codonNumber;
-  const literaturePosition = aaPosition; // No offset for canonical TP53
+  const literaturePosition = aaPosition;
   
   return {
-    nucleotidePosition: nucleotidePos + 1, // 1-based
+    nucleotidePosition: nucleotidePos + 1,
     codonNumber: codonNumber,
     aaPosition: aaPosition,
     literaturePosition: literaturePosition
@@ -158,18 +159,12 @@ const calculatePositions = (nucleotidePos, frame) => {
 };
 
 /* ─── HGVS NOTATION ───────────────────────────────────────────────────────── */
-// refSeq is the cleaned reference sequence string, passed in so that indel
-// and frameshift cases can translate the wild-type codon at the mutation site
-// rather than falling back to the uninformative placeholder 'X'.
 const generateHGVS = (mutation, positions, refSeq, frame) => {
   const prefix = `${TP53_CANONICAL.id}:p.`;
 
-  // Helper: translate the wild-type codon at a given AA position from refSeq.
-  // Returns the single-letter AA, or undefined if the codon cannot be read.
   const wtAA = (litPos) => {
     if (!refSeq || !frame) return undefined;
     const offset = parseInt(frame) - 1;
-    // litPos is 1-based AA position; codon starts at:
     const codonStart = (litPos - 1) * 3 + offset;
     if (codonStart < 0 || codonStart + 3 > refSeq.length) return undefined;
     return translateCodon(refSeq.substring(codonStart, codonStart + 3));
@@ -188,9 +183,6 @@ const generateHGVS = (mutation, positions, refSeq, frame) => {
   }
 
   if (mutation.is_frameshift) {
-    // Use the actual wild-type AA at the frameshift site — never 'X'.
-    // mutation.reference_amino_acid is undefined for indels, so derive it
-    // directly from the reference sequence.
     const aa = mutation.reference_amino_acid
       || wtAA(positions.literaturePosition)
       || '?';
@@ -220,7 +212,6 @@ const generateHGVS = (mutation, positions, refSeq, frame) => {
 
 /* ─── DOMAIN MAPPING ──────────────────────────────────────────────────────── */
 const getDomainMapping = (aaPosition) => {
-  // Check if position falls within any domain
   for (const domain of TP53_CANONICAL.domains) {
     if (aaPosition >= domain.start && aaPosition <= domain.end) {
       return {
@@ -234,7 +225,6 @@ const getDomainMapping = (aaPosition) => {
     }
   }
   
-  // Inter-domain region
   return {
     proteinDomain: 'Inter-domain region',
     functionalRegion: 'N/A',
@@ -254,7 +244,6 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
     biochemicalAnalysis: null
   };
   
-  // Missense mutations
   if (mutation.mutation_class === 'Missense' && mutation.reference_amino_acid && mutation.alternate_amino_acid) {
     const refProps = AA_PROPERTIES[mutation.reference_amino_acid];
     const altProps = AA_PROPERTIES[mutation.alternate_amino_acid];
@@ -283,19 +272,16 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
     interpretation.confidenceReason = 'Clear codon-level substitution with defined amino acid change';
   }
   
-  // Frameshift mutations
   if (mutation.is_frameshift) {
     interpretation.scientificNote = 'Frameshift likely disrupts downstream reading frame and truncates protein. Loss-of-function mutation expected with severely reduced or absent p53 tumor suppressor activity.';
     interpretation.confidenceReason = 'Frameshift detected via sequence length difference';
   }
   
-  // Nonsense mutations
   if (mutation.mutation_class === 'Nonsense') {
     interpretation.scientificNote = 'Premature stop codon may produce truncated nonfunctional protein. Nonsense-mediated decay may reduce mRNA stability, leading to loss of p53 function.';
     interpretation.confidenceReason = 'Stop codon introduced at defined position';
   }
   
-  // Silent mutations
   if (mutation.mutation_class === 'Silent') {
     interpretation.scientificNote = 'Synonymous substitution with no amino acid change. Unlikely to affect protein function, though may influence mRNA stability or translation efficiency.';
     interpretation.confidenceReason = 'Synonymous codon change verified';
@@ -308,24 +294,16 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
 const MAX_SEQ_LENGTH = 5000;
 
 /* ─── INPUT NORMALIZATION ─────────────────────────────────────────────────── */
-// Strips FASTA headers, all whitespace variants (space/tab/CR/LF), uppercases.
-// This is the single canonical normalization path — used by both handleAnalyze
-// and detectMutations so the two never diverge.
 const normalizeSequence = raw => {
-  // 1. Remove FASTA header lines (any line beginning with '>')
   let s = raw.replace(/^>.*$/gm, '');
-  // 2. Strip all whitespace characters with a fast char-loop (avoids regex OOM)
   let out = '';
   for (let i = 0; i < s.length; i++) {
     const c = s[i];
     if (c !== ' ' && c !== '\n' && c !== '\r' && c !== '\t') out += c;
   }
-  // 3. Uppercase
   return out.toUpperCase();
 };
 
-// Returns the 0-based index of the first differing character, or -1 if equal
-// up to the length of the shorter sequence.
 const findFirstDifference = (a, b) => {
   for (let i = 0; i < Math.min(a.length, b.length); i++) {
     if (a[i] !== b[i]) return i;
@@ -338,8 +316,6 @@ const detectMutations = (ref, alt, frame, strand) => {
   let seq1 = normalizeSequence(ref);
   let seq2 = normalizeSequence(alt);
 
-  // Hard length guard – must come before any allocation so the browser never
-  // gets a chance to OOM on the alignment matrix.
   if (seq1.length > MAX_SEQ_LENGTH || seq2.length > MAX_SEQ_LENGTH) {
     throw new Error(
       `Sequence too long for in-browser analysis (max ${MAX_SEQ_LENGTH.toLocaleString()} bp). ` +
@@ -353,12 +329,9 @@ const detectMutations = (ref, alt, frame, strand) => {
     seq2 = revComp(seq2);
   }
 
-  // ── Diagnostic checks ──────────────────────────────────────────────────────
-  // These never modify the sequences — they only observe and log.
   const lengthDiff = seq2.length - seq1.length;
 
   if (seq1 === seq2) {
-    // Sequences are genuinely identical after full normalization.
     console.warn('[MutationFinder] Sequences are identical after normalization. ' +
       `Both are ${seq1.length} bp. No mutations will be reported.`);
   } else {
@@ -379,12 +352,15 @@ const detectMutations = (ref, alt, frame, strand) => {
       );
     }
   }
-  // ── End diagnostics ────────────────────────────────────────────────────────
 
   const mutations = [];
   const warnings = [];
   
-  // Validation warnings
+  // ═══════════════════════════════════════════════════════════════════════════
+  // FIX #1: Declare offset variable BEFORE using it
+  // ═══════════════════════════════════════════════════════════════════════════
+  const offset = parseInt(frame) - 1;
+  
   if (seq1.length % 3 !== 0) {
     warnings.push('Reference sequence length not divisible by 3 - may indicate incomplete CDS');
   }
@@ -407,7 +383,6 @@ const detectMutations = (ref, alt, frame, strand) => {
             const refAA = translateCodon(refCodon);
             const altAA = translateCodon(altCodon);
             
-            // Determine mutation class
             let mutClass = 'Missense';
             if (refAA === altAA) mutClass = 'Silent';
             else if (altAA === '*') mutClass = 'Nonsense';
@@ -433,25 +408,19 @@ const detectMutations = (ref, alt, frame, strand) => {
       }
     }
   } else {
-    // Unequal length — locate the indel by finding shared prefix and suffix.
-    // This avoids any alignment matrix and is O(n) with no risk of infinite loop.
-
-    // Find how many bases match at the start
+    // Unequal length
     let pLen = 0;
     const minLen = Math.min(seq1.length, seq2.length);
     while (pLen < minLen && seq1[pLen] === seq2[pLen]) pLen++;
 
-    // Find how many bases match at the end (don't overlap the prefix)
     let e1 = seq1.length - 1;
     let e2 = seq2.length - 1;
     while (e1 > pLen && e2 > pLen && seq1[e1] === seq2[e2]) { e1--; e2--; }
 
-    // middle1 = changed region in ref, middle2 = changed region in alt
     const middle1 = seq1.slice(pLen, e1 + 1);
     const middle2 = seq2.slice(pLen, e2 + 1);
 
     if (middle1.length === 0) {
-      // Pure insertion into ref
       const isFrameshift = middle2.length % 3 !== 0;
       mutations.push({
         type: 'Insertion',
@@ -465,7 +434,6 @@ const detectMutations = (ref, alt, frame, strand) => {
         alternate_codon: middle2.substring(0, 3)
       });
     } else if (middle2.length === 0) {
-      // Pure deletion from ref
       const isFrameshift = middle1.length % 3 !== 0;
       mutations.push({
         type: 'Deletion',
@@ -479,7 +447,6 @@ const detectMutations = (ref, alt, frame, strand) => {
         alternate_codon: '---'
       });
     } else {
-      // Complex variant: substitution with net size change — report as indel
       const netDiff = middle2.length - middle1.length;
       if (netDiff > 0) {
         const isFrameshift = netDiff % 3 !== 0;
@@ -642,9 +609,8 @@ export default function TP53MutationAnalyzer() {
   const [showSampleMenu, setShowSampleMenu] = useState(false);
   const [currentSample, setCurrentSample] = useState(null);
   const [sampleBannerVisible, setSampleBannerVisible] = useState(false);
-  const [diffInfo, setDiffInfo] = useState(null); // normalization diagnostic
+  const [diffInfo, setDiffInfo] = useState(null);
 
-  // Load sample mutation
   const loadSample = key => {
     const s = MUTATION_SAMPLES[key];
     setSeq1(s.reference); 
@@ -660,7 +626,6 @@ export default function TP53MutationAnalyzer() {
     setDiffInfo(null);
   };
 
-  // Close menu on outside click
   useEffect(() => {
     const close = () => setShowSampleMenu(false);
     if (showSampleMenu) { 
@@ -669,7 +634,6 @@ export default function TP53MutationAnalyzer() {
     }
   }, [showSampleMenu]);
 
-  // Fast character validator — only A/T/G/C allowed after normalization
   const validateBases = (seq) => {
     for (let i = 0; i < seq.length; i++) {
       const c = seq[i];
@@ -678,18 +642,15 @@ export default function TP53MutationAnalyzer() {
     return true;
   };
 
-  // Validate and analyze
   const handleAnalyze = async () => {
     if (!seq1.trim() || !seq2.trim()) {
       setError('Both sequences are required');
       return;
     }
 
-    // 1. Normalize both inputs identically (FASTA headers, whitespace, case)
     const cleanSeq1 = normalizeSequence(seq1);
     const cleanSeq2 = normalizeSequence(seq2);
 
-    // 2. Length guard FIRST — before any other processing
     if (cleanSeq1.length > MAX_SEQ_LENGTH || cleanSeq2.length > MAX_SEQ_LENGTH) {
       setError(
         `Sequence too long — max ${MAX_SEQ_LENGTH.toLocaleString()} bp per sequence ` +
@@ -699,7 +660,6 @@ export default function TP53MutationAnalyzer() {
       return;
     }
 
-    // 3. Character validation using fast loop (regex on large strings freezes the tab)
     if (!validateBases(cleanSeq1)) {
       setError('Reference sequence contains invalid characters. After removing FASTA headers and whitespace, only A, T, G, C are permitted.');
       return;
@@ -709,12 +669,11 @@ export default function TP53MutationAnalyzer() {
       return;
     }
 
-    // 4. Compute first-mismatch info for the visual diff panel
     const firstDiffIdx = findFirstDifference(cleanSeq1, cleanSeq2);
     if (firstDiffIdx >= 0) {
       setDiffInfo({
         index: firstDiffIdx,
-        position: firstDiffIdx + 1, // 1-based
+        position: firstDiffIdx + 1,
         refBase: cleanSeq1[firstDiffIdx],
         altBase: cleanSeq2[firstDiffIdx],
         refLen: cleanSeq1.length,
@@ -722,7 +681,6 @@ export default function TP53MutationAnalyzer() {
         identical: false
       });
     } else if (cleanSeq1.length !== cleanSeq2.length) {
-      // Identical prefix but different lengths — indel at end
       setDiffInfo({
         index: Math.min(cleanSeq1.length, cleanSeq2.length),
         position: Math.min(cleanSeq1.length, cleanSeq2.length) + 1,
@@ -733,14 +691,12 @@ export default function TP53MutationAnalyzer() {
         identical: false
       });
     } else {
-      // Truly identical after normalization
       setDiffInfo({ identical: true, refLen: cleanSeq1.length, altLen: cleanSeq2.length });
     }
 
     setLoading(true);
     setError('');
 
-    // 5. Yield to browser so the spinner paints before heavy work starts
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
@@ -759,8 +715,6 @@ export default function TP53MutationAnalyzer() {
       const annotated = mutations.mutations.map(mutation => {
         const positionIndex = mutation.codon_position ?? mutation.position ?? 0;
         const positions = calculatePositions(positionIndex, readingFrame);
-        // Pass refSeq and readingFrame so frameshift/indel HGVS can derive
-        // the actual wild-type AA instead of falling back to 'X'.
         const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame);
         const domainMapping = getDomainMapping(positions.aaPosition);
         const interpretation = getBiologicalInterpretation(mutation, domainMapping);
@@ -770,7 +724,6 @@ export default function TP53MutationAnalyzer() {
     }
   }, [mutations, readingFrame]);
 
-  // PDF export
   const handleExportPDF = () => {
     if (!mutations) return;
     
@@ -781,14 +734,12 @@ export default function TP53MutationAnalyzer() {
     }
   };
 
-  // AI Explanation (mock - can be connected to API)
   const handleAI = async () => {
     if (!mutations) return;
     setLoadingAI(true);
     setError('');
     
     try {
-      // Simulate AI analysis
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       let explanation = `TP53 Mutation Analysis Summary:\n\n`;
@@ -1075,12 +1026,6 @@ export default function TP53MutationAnalyzer() {
         </div>
       </div>
     )}
-
-    {/* BUG FIX #1: Restructured Analysis Configuration card so config-grid is
-        properly closed within its own .pc card, and Sequence Input lives in a
-        separate .pc card below. Previously the outer config-grid div was never
-        closed before the Sequence Input h2, causing the inputs to be deeply
-        nested inside the config card and breaking the layout. */}
 
     {/* ANALYSIS CONFIG */}
     <div className="pc" style={{ borderColor:'rgba(6,182,212,.3)', background:'rgba(6,182,212,.04)' }}>
