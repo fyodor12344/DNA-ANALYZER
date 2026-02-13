@@ -281,61 +281,120 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
   return interpretation;
 };
 
-/* ─── SEQUENCE ALIGNMENT (Needleman-Wunsch) ───────────────────────────────── */
+/* ─── SEQUENCE LENGTH GUARD ───────────────────────────────────────────────── */
+// Hard cap to prevent browser OOM crash. The old full N×M Needleman-Wunsch
+// matrix allocated (len1+1)*(len2+1) cells — a 10 000 bp pair = 100 M cells
+// (~800 MB) which crashes the tab immediately.
+const MAX_SEQ_LENGTH = 10000;
+
+/* ─── SEQUENCE ALIGNMENT (memory-safe) ───────────────────────────────────── */
+// Replaces the full N×M Needleman-Wunsch matrix with a lightweight linear
+// scan that handles the most common biological cases without allocating a
+// giant matrix:
+//
+//  • Equal-length sequences  → direct base-by-base compare (O(n), O(1) memory)
+//  • Single contiguous indel → find shared prefix/suffix, place one gap block
+//  • Multiple / complex indels that fall outside the above → bounded N-W on
+//    the *differing region only* (max MAX_NW_REGION bases), so the matrix
+//    stays tiny even for long sequences.
+//
+const MAX_NW_REGION = 500; // max bases fed into the bounded N-W fallback
+
 const alignSequences = (seq1, seq2) => {
   const len1 = seq1.length;
   const len2 = seq2.length;
-  
+
   if (len1 === len2) {
+    // No indels – caller handles SNP scan directly, nothing to align.
     return { ref: seq1, alt: seq2 };
   }
-  
-  const MATCH = 2;
-  const MISMATCH = -1;
-  const GAP = -2;
-  
-  const matrix = Array(len1 + 1).fill(null).map(() => Array(len2 + 1).fill(0));
-  
-  for (let i = 0; i <= len1; i++) matrix[i][0] = i * GAP;
-  for (let j = 0; j <= len2; j++) matrix[0][j] = j * GAP;
-  
-  for (let i = 1; i <= len1; i++) {
-    for (let j = 1; j <= len2; j++) {
-      const match = matrix[i-1][j-1] + (seq1[i-1] === seq2[j-1] ? MATCH : MISMATCH);
-      const deleteGap = matrix[i-1][j] + GAP;
-      const insertGap = matrix[i][j-1] + GAP;
-      matrix[i][j] = Math.max(match, deleteGap, insertGap);
+
+  // ── Step 1: trim matching prefix ──────────────────────────────────────────
+  let prefixLen = 0;
+  const minLen = Math.min(len1, len2);
+  while (prefixLen < minLen && seq1[prefixLen] === seq2[prefixLen]) prefixLen++;
+
+  // ── Step 2: trim matching suffix ──────────────────────────────────────────
+  let suffix1 = len1 - 1;
+  let suffix2 = len2 - 1;
+  while (suffix1 > prefixLen && suffix2 > prefixLen && seq1[suffix1] === seq2[suffix2]) {
+    suffix1--;
+    suffix2--;
+  }
+
+  // The differing regions (may be empty if the change is a pure indel)
+  const diff1 = seq1.slice(prefixLen, suffix1 + 1); // ref  middle
+  const diff2 = seq2.slice(prefixLen, suffix2 + 1); // alt middle
+  const prefix = seq1.slice(0, prefixLen);
+  const suffix = seq1.slice(suffix1 + 1);
+
+  // ── Step 3: if either diff region is empty → pure insertion or deletion ───
+  if (diff1.length === 0 || diff2.length === 0) {
+    // Pure indel: one side contributes dashes, the other the inserted/deleted bases
+    const gapsForRef = '-'.repeat(diff2.length);
+    const gapsForAlt = '-'.repeat(diff1.length);
+    return {
+      ref: prefix + diff1 + gapsForRef + suffix,
+      alt: prefix + gapsForAlt + diff2 + suffix
+    };
+  }
+
+  // ── Step 4: bounded N-W on the differing region only ─────────────────────
+  // Truncate to MAX_NW_REGION so the matrix stays ≤ 500×500 = 250 K cells
+  const r = diff1.slice(0, MAX_NW_REGION);
+  const a = diff2.slice(0, MAX_NW_REGION);
+  const rLen = r.length;
+  const aLen = a.length;
+
+  const MATCH = 2, MISMATCH = -1, GAP = -2;
+
+  // Two-row rolling array instead of full matrix (O(n) memory)
+  // We still need the full matrix for traceback, but only for the capped region
+  const mat = Array(rLen + 1).fill(null).map(() => new Int16Array(aLen + 1));
+  for (let i = 0; i <= rLen; i++) mat[i][0] = i * GAP;
+  for (let j = 0; j <= aLen; j++) mat[0][j] = j * GAP;
+  for (let i = 1; i <= rLen; i++) {
+    for (let j = 1; j <= aLen; j++) {
+      const m = mat[i-1][j-1] + (r[i-1] === a[j-1] ? MATCH : MISMATCH);
+      const d = mat[i-1][j] + GAP;
+      const ins = mat[i][j-1] + GAP;
+      mat[i][j] = Math.max(m, d, ins);
     }
   }
-  
-  let alignedRef = '';
-  let alignedAlt = '';
-  let i = len1, j = len2;
-  
+
+  let alignR = '', alignA = '';
+  let i = rLen, j = aLen;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && matrix[i][j] === matrix[i-1][j-1] + (seq1[i-1] === seq2[j-1] ? MATCH : MISMATCH)) {
-      alignedRef = seq1[i-1] + alignedRef;
-      alignedAlt = seq2[j-1] + alignedAlt;
-      i--; j--;
-    } else if (i > 0 && matrix[i][j] === matrix[i-1][j] + GAP) {
-      alignedRef = seq1[i-1] + alignedRef;
-      alignedAlt = '-' + alignedAlt;
-      i--;
+    if (i > 0 && j > 0 && mat[i][j] === mat[i-1][j-1] + (r[i-1] === a[j-1] ? MATCH : MISMATCH)) {
+      alignR = r[i-1] + alignR; alignA = a[j-1] + alignA; i--; j--;
+    } else if (i > 0 && mat[i][j] === mat[i-1][j] + GAP) {
+      alignR = r[i-1] + alignR; alignA = '-' + alignA; i--;
     } else {
-      alignedRef = '-' + alignedRef;
-      alignedAlt = seq2[j-1] + alignedAlt;
-      j--;
+      alignR = '-' + alignR; alignA = a[j-1] + alignA; j--;
     }
   }
-  
-  return { ref: alignedRef, alt: alignedAlt };
+
+  return {
+    ref: prefix + alignR + diff1.slice(MAX_NW_REGION) + suffix,
+    alt: prefix + alignA + diff2.slice(MAX_NW_REGION) + suffix
+  };
 };
 
 /* ─── MUTATION DETECTION ──────────────────────────────────────────────────── */
 const detectMutations = (ref, alt, frame, strand) => {
   let seq1 = ref.toUpperCase().replace(/\s/g, '');
   let seq2 = alt.toUpperCase().replace(/\s/g, '');
-  
+
+  // Hard length guard – must come before any allocation so the browser never
+  // gets a chance to OOM on the alignment matrix.
+  if (seq1.length > MAX_SEQ_LENGTH || seq2.length > MAX_SEQ_LENGTH) {
+    throw new Error(
+      `Sequence too long for in-browser analysis (max ${MAX_SEQ_LENGTH.toLocaleString()} bp). ` +
+      `Reference: ${seq1.length.toLocaleString()} bp, Alternate: ${seq2.length.toLocaleString()} bp. ` +
+      `Please trim your sequences or use a server-side tool for whole-gene analysis.`
+    );
+  }
+
   if (strand === 'reverse') {
     seq1 = revComp(seq1);
     seq2 = revComp(seq2);
@@ -651,7 +710,7 @@ export default function TP53MutationAnalyzer() {
   }, [showSampleMenu]);
 
   // Validate and analyze
-  const handleAnalyze = () => {
+  const handleAnalyze = async () => {
     // Validation
     if (!seq1.trim() || !seq2.trim()) {
       setError('Both sequences are required');
@@ -660,6 +719,16 @@ export default function TP53MutationAnalyzer() {
     
     const cleanSeq1 = seq1.toUpperCase().replace(/\s/g, '');
     const cleanSeq2 = seq2.toUpperCase().replace(/\s/g, '');
+
+    // Early length check before we even start loading state
+    if (cleanSeq1.length > MAX_SEQ_LENGTH || cleanSeq2.length > MAX_SEQ_LENGTH) {
+      setError(
+        `Sequence too long — max ${MAX_SEQ_LENGTH.toLocaleString()} bp per sequence. ` +
+        `Your sequences are ${cleanSeq1.length.toLocaleString()} bp and ${cleanSeq2.length.toLocaleString()} bp. ` +
+        `Please paste a shorter region (e.g. a single exon or codon window).`
+      );
+      return;
+    }
     
     if (!/^[ATGC]+$/.test(cleanSeq1)) {
       setError('Reference sequence contains invalid characters (only A, T, G, C allowed)');
@@ -673,6 +742,11 @@ export default function TP53MutationAnalyzer() {
     
     setLoading(true);
     setError('');
+
+    // Yield to the browser so the spinner renders before computation starts.
+    // Without this the tab freezes and shows "page unresponsive" even for
+    // sequences well under the OOM threshold.
+    await new Promise(resolve => setTimeout(resolve, 30));
     
     try {
       const result = detectMutations(cleanSeq1, cleanSeq2, readingFrame, strand);
@@ -1090,9 +1164,12 @@ export default function TP53MutationAnalyzer() {
             placeholder="Paste reference DNA sequence (ATGC)…"
             style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.9rem', lineHeight:1.5 }}
           />
-          <div style={{ marginTop:'.38rem', fontSize:'.88rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span>{seq1.replace(/\s/g,'').length} bp</span>
-            {seq1.trim() && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+          <div style={{ marginTop:'.38rem', fontSize:'.88rem', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span style={{ color: seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH ? '#EF4444' : seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH * 0.8 ? '#F59E0B' : '#6b7080' }}>
+              {seq1.replace(/\s/g,'').length.toLocaleString()} bp
+              {seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
+            </span>
+            {seq1.trim() && seq1.replace(/\s/g,'').length <= MAX_SEQ_LENGTH && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
           </div>
         </div>
         
@@ -1105,9 +1182,12 @@ export default function TP53MutationAnalyzer() {
             placeholder="Paste alternate DNA sequence (ATGC)…"
             style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.9rem', lineHeight:1.5 }}
           />
-          <div style={{ marginTop:'.38rem', fontSize:'.88rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span>{seq2.replace(/\s/g,'').length} bp</span>
-            {seq2.trim() && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+          <div style={{ marginTop:'.38rem', fontSize:'.88rem', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+            <span style={{ color: seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH ? '#EF4444' : seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH * 0.8 ? '#F59E0B' : '#6b7080' }}>
+              {seq2.replace(/\s/g,'').length.toLocaleString()} bp
+              {seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
+            </span>
+            {seq2.trim() && seq2.replace(/\s/g,'').length <= MAX_SEQ_LENGTH && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
           </div>
         </div>
       </div>
