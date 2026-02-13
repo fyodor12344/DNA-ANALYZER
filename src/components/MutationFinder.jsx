@@ -127,9 +127,14 @@ const CODON_TABLE = {
 };
 
 /* ─── HELPERS ────────────────────────────────────────────────────────────── */
-const revComp = seq => { 
-  const m={A:'T',T:'A',G:'C',C:'G'}; 
-  return seq.split('').reverse().map(b=>m[b]||b).join(''); 
+// Single-pass reverse complement — avoids split/reverse/join allocating 3 arrays
+const revComp = seq => {
+  const comp = { A:'T', T:'A', G:'C', C:'G' };
+  let result = '';
+  for (let i = seq.length - 1; i >= 0; i--) {
+    result += comp[seq[i]] || seq[i];
+  }
+  return result;
 };
 
 // BUG FIX #2: Removed incorrect T→U replacement. CODON_TABLE keys use DNA (T),
@@ -285,7 +290,7 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
 // Hard cap to prevent browser OOM crash. The old full N×M Needleman-Wunsch
 // matrix allocated (len1+1)*(len2+1) cells — a 10 000 bp pair = 100 M cells
 // (~800 MB) which crashes the tab immediately.
-const MAX_SEQ_LENGTH = 10000;
+const MAX_SEQ_LENGTH = 5000;
 
 /* ─── SEQUENCE ALIGNMENT (memory-safe) ───────────────────────────────────── */
 // Replaces the full N×M Needleman-Wunsch matrix with a lightweight linear
@@ -381,9 +386,18 @@ const alignSequences = (seq1, seq2) => {
 };
 
 /* ─── MUTATION DETECTION ──────────────────────────────────────────────────── */
+const stripWhitespace = str => {
+  let out = '';
+  for (let i = 0; i < str.length; i++) {
+    const c = str[i];
+    if (c !== ' ' && c !== '\n' && c !== '\r' && c !== '\t') out += c;
+  }
+  return out;
+};
+
 const detectMutations = (ref, alt, frame, strand) => {
-  let seq1 = ref.toUpperCase().replace(/\s/g, '');
-  let seq2 = alt.toUpperCase().replace(/\s/g, '');
+  let seq1 = stripWhitespace(ref.toUpperCase());
+  let seq2 = stripWhitespace(alt.toUpperCase());
 
   // Hard length guard – must come before any allocation so the browser never
   // gets a chance to OOM on the alignment matrix.
@@ -709,45 +723,51 @@ export default function TP53MutationAnalyzer() {
     }
   }, [showSampleMenu]);
 
+  // Fast character validator — avoids regex on huge strings which itself freezes
+  const validateBases = (seq) => {
+    for (let i = 0; i < seq.length; i++) {
+      const c = seq[i];
+      if (c !== 'A' && c !== 'T' && c !== 'G' && c !== 'C') return false;
+    }
+    return true;
+  };
+
   // Validate and analyze
   const handleAnalyze = async () => {
-    // Validation
     if (!seq1.trim() || !seq2.trim()) {
       setError('Both sequences are required');
       return;
     }
-    
-    const cleanSeq1 = seq1.toUpperCase().replace(/\s/g, '');
-    const cleanSeq2 = seq2.toUpperCase().replace(/\s/g, '');
 
-    // Early length check before we even start loading state
+    const cleanSeq1 = stripWhitespace(seq1.toUpperCase());
+    const cleanSeq2 = stripWhitespace(seq2.toUpperCase());
+
+    // 1. Length guard FIRST — before any other processing including regex
     if (cleanSeq1.length > MAX_SEQ_LENGTH || cleanSeq2.length > MAX_SEQ_LENGTH) {
       setError(
-        `Sequence too long — max ${MAX_SEQ_LENGTH.toLocaleString()} bp per sequence. ` +
-        `Your sequences are ${cleanSeq1.length.toLocaleString()} bp and ${cleanSeq2.length.toLocaleString()} bp. ` +
-        `Please paste a shorter region (e.g. a single exon or codon window).`
+        `Sequence too long — max ${MAX_SEQ_LENGTH.toLocaleString()} bp per sequence ` +
+        `(ref: ${cleanSeq1.length.toLocaleString()} bp, alt: ${cleanSeq2.length.toLocaleString()} bp). ` +
+        `Please paste a shorter region such as a single exon.`
       );
       return;
     }
-    
-    if (!/^[ATGC]+$/.test(cleanSeq1)) {
+
+    // 2. Character validation using fast loop (not regex — regex on 50k chars freezes the tab)
+    if (!validateBases(cleanSeq1)) {
       setError('Reference sequence contains invalid characters (only A, T, G, C allowed)');
       return;
     }
-    
-    if (!/^[ATGC]+$/.test(cleanSeq2)) {
+    if (!validateBases(cleanSeq2)) {
       setError('Alternate sequence contains invalid characters (only A, T, G, C allowed)');
       return;
     }
-    
+
     setLoading(true);
     setError('');
 
-    // Yield to the browser so the spinner renders before computation starts.
-    // Without this the tab freezes and shows "page unresponsive" even for
-    // sequences well under the OOM threshold.
-    await new Promise(resolve => setTimeout(resolve, 30));
-    
+    // 3. Yield to browser so the spinner paints before heavy work starts
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     try {
       const result = detectMutations(cleanSeq1, cleanSeq2, readingFrame, strand);
       setMutations(result);
@@ -1165,11 +1185,12 @@ export default function TP53MutationAnalyzer() {
             style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.9rem', lineHeight:1.5 }}
           />
           <div style={{ marginTop:'.38rem', fontSize:'.88rem', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ color: seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH ? '#EF4444' : seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH * 0.8 ? '#F59E0B' : '#6b7080' }}>
-              {seq1.replace(/\s/g,'').length.toLocaleString()} bp
-              {seq1.replace(/\s/g,'').length > MAX_SEQ_LENGTH && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
-            </span>
-            {seq1.trim() && seq1.replace(/\s/g,'').length <= MAX_SEQ_LENGTH && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+            { (() => { const len = seq1.trim().length; const over = len > MAX_SEQ_LENGTH; const warn = len > MAX_SEQ_LENGTH * 0.8; return (<>
+              <span style={{ color: over ? '#EF4444' : warn ? '#F59E0B' : '#6b7080' }}>
+                {len.toLocaleString()} bp{over && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
+              </span>
+              {seq1.trim() && !over && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+            </>); })() }
           </div>
         </div>
         
@@ -1183,11 +1204,12 @@ export default function TP53MutationAnalyzer() {
             style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.9rem', lineHeight:1.5 }}
           />
           <div style={{ marginTop:'.38rem', fontSize:'.88rem', fontFamily:'"JetBrains Mono",monospace', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-            <span style={{ color: seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH ? '#EF4444' : seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH * 0.8 ? '#F59E0B' : '#6b7080' }}>
-              {seq2.replace(/\s/g,'').length.toLocaleString()} bp
-              {seq2.replace(/\s/g,'').length > MAX_SEQ_LENGTH && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
-            </span>
-            {seq2.trim() && seq2.replace(/\s/g,'').length <= MAX_SEQ_LENGTH && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+            { (() => { const len = seq2.trim().length; const over = len > MAX_SEQ_LENGTH; const warn = len > MAX_SEQ_LENGTH * 0.8; return (<>
+              <span style={{ color: over ? '#EF4444' : warn ? '#F59E0B' : '#6b7080' }}>
+                {len.toLocaleString()} bp{over && <span style={{marginLeft:'.4rem'}}>⚠ exceeds {MAX_SEQ_LENGTH.toLocaleString()} bp limit</span>}
+              </span>
+              {seq2.trim() && !over && <span style={{ color:'#10B981' }}>✓ Sequence provided</span>}
+            </>); })() }
           </div>
         </div>
       </div>
