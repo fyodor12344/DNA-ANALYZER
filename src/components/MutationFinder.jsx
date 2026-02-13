@@ -307,19 +307,36 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
 /* ─── SEQUENCE LENGTH GUARD ───────────────────────────────────────────────── */
 const MAX_SEQ_LENGTH = 5000;
 
-/* ─── MUTATION DETECTION ──────────────────────────────────────────────────── */
-const stripWhitespace = str => {
+/* ─── INPUT NORMALIZATION ─────────────────────────────────────────────────── */
+// Strips FASTA headers, all whitespace variants (space/tab/CR/LF), uppercases.
+// This is the single canonical normalization path — used by both handleAnalyze
+// and detectMutations so the two never diverge.
+const normalizeSequence = raw => {
+  // 1. Remove FASTA header lines (any line beginning with '>')
+  let s = raw.replace(/^>.*$/gm, '');
+  // 2. Strip all whitespace characters with a fast char-loop (avoids regex OOM)
   let out = '';
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
     if (c !== ' ' && c !== '\n' && c !== '\r' && c !== '\t') out += c;
   }
-  return out;
+  // 3. Uppercase
+  return out.toUpperCase();
 };
 
+// Returns the 0-based index of the first differing character, or -1 if equal
+// up to the length of the shorter sequence.
+const findFirstDifference = (a, b) => {
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    if (a[i] !== b[i]) return i;
+  }
+  return -1;
+};
+
+/* ─── MUTATION DETECTION ──────────────────────────────────────────────────── */
 const detectMutations = (ref, alt, frame, strand) => {
-  let seq1 = stripWhitespace(ref.toUpperCase());
-  let seq2 = stripWhitespace(alt.toUpperCase());
+  let seq1 = normalizeSequence(ref);
+  let seq2 = normalizeSequence(alt);
 
   // Hard length guard – must come before any allocation so the browser never
   // gets a chance to OOM on the alignment matrix.
@@ -336,10 +353,36 @@ const detectMutations = (ref, alt, frame, strand) => {
     seq2 = revComp(seq2);
   }
 
+  // ── Diagnostic checks ──────────────────────────────────────────────────────
+  // These never modify the sequences — they only observe and log.
+  const lengthDiff = seq2.length - seq1.length;
+
+  if (seq1 === seq2) {
+    // Sequences are genuinely identical after full normalization.
+    console.warn('[MutationFinder] Sequences are identical after normalization. ' +
+      `Both are ${seq1.length} bp. No mutations will be reported.`);
+  } else {
+    const firstDiff = findFirstDifference(seq1, seq2);
+    if (firstDiff >= 0) {
+      console.info(
+        `[MutationFinder] First mismatch at nucleotide index ${firstDiff} ` +
+        `(1-based: ${firstDiff + 1}). ` +
+        `Ref: ${seq1[firstDiff]}  Alt: ${seq2[firstDiff]}`
+      );
+    }
+    if (lengthDiff === 0) {
+      console.info('[MutationFinder] Lengths equal — classifying as substitution(s).');
+    } else {
+      console.info(
+        `[MutationFinder] Length difference: ${lengthDiff > 0 ? '+' : ''}${lengthDiff} bp — ` +
+        'classifying as potential insertion/deletion.'
+      );
+    }
+  }
+  // ── End diagnostics ────────────────────────────────────────────────────────
+
   const mutations = [];
   const warnings = [];
-  const offset = parseInt(frame) - 1;
-  const lengthDiff = seq2.length - seq1.length;
   
   // Validation warnings
   if (seq1.length % 3 !== 0) {
@@ -599,6 +642,7 @@ export default function TP53MutationAnalyzer() {
   const [showSampleMenu, setShowSampleMenu] = useState(false);
   const [currentSample, setCurrentSample] = useState(null);
   const [sampleBannerVisible, setSampleBannerVisible] = useState(false);
+  const [diffInfo, setDiffInfo] = useState(null); // normalization diagnostic
 
   // Load sample mutation
   const loadSample = key => {
@@ -613,6 +657,7 @@ export default function TP53MutationAnalyzer() {
     setMutations(null); 
     setError('');
     setAiExplanation('');
+    setDiffInfo(null);
   };
 
   // Close menu on outside click
@@ -624,7 +669,7 @@ export default function TP53MutationAnalyzer() {
     }
   }, [showSampleMenu]);
 
-  // Fast character validator — avoids regex on huge strings which itself freezes
+  // Fast character validator — only A/T/G/C allowed after normalization
   const validateBases = (seq) => {
     for (let i = 0; i < seq.length; i++) {
       const c = seq[i];
@@ -640,10 +685,11 @@ export default function TP53MutationAnalyzer() {
       return;
     }
 
-    const cleanSeq1 = stripWhitespace(seq1.toUpperCase());
-    const cleanSeq2 = stripWhitespace(seq2.toUpperCase());
+    // 1. Normalize both inputs identically (FASTA headers, whitespace, case)
+    const cleanSeq1 = normalizeSequence(seq1);
+    const cleanSeq2 = normalizeSequence(seq2);
 
-    // 1. Length guard FIRST — before any other processing including regex
+    // 2. Length guard FIRST — before any other processing
     if (cleanSeq1.length > MAX_SEQ_LENGTH || cleanSeq2.length > MAX_SEQ_LENGTH) {
       setError(
         `Sequence too long — max ${MAX_SEQ_LENGTH.toLocaleString()} bp per sequence ` +
@@ -653,20 +699,48 @@ export default function TP53MutationAnalyzer() {
       return;
     }
 
-    // 2. Character validation using fast loop (not regex — regex on 50k chars freezes the tab)
+    // 3. Character validation using fast loop (regex on large strings freezes the tab)
     if (!validateBases(cleanSeq1)) {
-      setError('Reference sequence contains invalid characters (only A, T, G, C allowed)');
+      setError('Reference sequence contains invalid characters. After removing FASTA headers and whitespace, only A, T, G, C are permitted.');
       return;
     }
     if (!validateBases(cleanSeq2)) {
-      setError('Alternate sequence contains invalid characters (only A, T, G, C allowed)');
+      setError('Alternate sequence contains invalid characters. After removing FASTA headers and whitespace, only A, T, G, C are permitted.');
       return;
+    }
+
+    // 4. Compute first-mismatch info for the visual diff panel
+    const firstDiffIdx = findFirstDifference(cleanSeq1, cleanSeq2);
+    if (firstDiffIdx >= 0) {
+      setDiffInfo({
+        index: firstDiffIdx,
+        position: firstDiffIdx + 1, // 1-based
+        refBase: cleanSeq1[firstDiffIdx],
+        altBase: cleanSeq2[firstDiffIdx],
+        refLen: cleanSeq1.length,
+        altLen: cleanSeq2.length,
+        identical: false
+      });
+    } else if (cleanSeq1.length !== cleanSeq2.length) {
+      // Identical prefix but different lengths — indel at end
+      setDiffInfo({
+        index: Math.min(cleanSeq1.length, cleanSeq2.length),
+        position: Math.min(cleanSeq1.length, cleanSeq2.length) + 1,
+        refBase: cleanSeq1[cleanSeq1.length - 1] ?? '-',
+        altBase: cleanSeq2[cleanSeq2.length - 1] ?? '-',
+        refLen: cleanSeq1.length,
+        altLen: cleanSeq2.length,
+        identical: false
+      });
+    } else {
+      // Truly identical after normalization
+      setDiffInfo({ identical: true, refLen: cleanSeq1.length, altLen: cleanSeq2.length });
     }
 
     setLoading(true);
     setError('');
 
-    // 3. Yield to browser so the spinner paints before heavy work starts
+    // 5. Yield to browser so the spinner paints before heavy work starts
     await new Promise(resolve => setTimeout(resolve, 50));
 
     try {
@@ -1325,11 +1399,65 @@ export default function TP53MutationAnalyzer() {
         </div>
       )}
 
+      {/* VISUAL DIFF / NORMALIZATION DIAGNOSTIC */}
+      {diffInfo && (
+        <div className="pc" style={{ borderColor: diffInfo.identical ? 'rgba(251,191,36,.35)' : 'rgba(6,182,212,.3)', background: diffInfo.identical ? 'rgba(251,191,36,.05)' : 'rgba(6,182,212,.04)', marginBottom:'.8rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'.75rem' }}>
+            <span style={{ fontSize:'1.1rem' }}>{diffInfo.identical ? '🔍' : '📍'}</span>
+            <span style={{ fontSize:'1rem', fontWeight:600, color: diffInfo.identical ? '#FBBF24' : '#67E8F9' }}>
+              Normalization Report
+            </span>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'.6rem', marginBottom:'.75rem' }}>
+            {[
+              { label:'Ref length (normalized)', value: diffInfo.refLen?.toLocaleString() + ' bp' },
+              { label:'Alt length (normalized)', value: diffInfo.altLen?.toLocaleString() + ' bp' },
+            ].map((s,i) => (
+              <div key={i} style={{ background:'#0f1117', border:'1px solid #1e2130', borderRadius:8, padding:'.65rem .8rem' }}>
+                <div style={{ fontSize:'.8rem', color:'#6b7080', textTransform:'uppercase', letterSpacing:'.06em' }}>{s.label}</div>
+                <div style={{ fontSize:'1rem', fontWeight:600, color:'#c8cad4', marginTop:'.2rem', fontFamily:'"JetBrains Mono",monospace' }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+          {diffInfo.identical ? (
+            <div style={{ background:'rgba(251,191,36,.1)', border:'1px solid rgba(251,191,36,.3)', borderRadius:8, padding:'.85rem 1rem' }}>
+              <div style={{ fontWeight:600, color:'#FBBF24', marginBottom:'.4rem' }}>⚠ No nucleotide differences detected after normalization</div>
+              <div style={{ fontSize:'.9rem', color:'#8a8f9e', lineHeight:1.7 }}>
+                Both sequences are identical once FASTA headers, whitespace, and line breaks are removed. Common causes:
+              </div>
+              <ul style={{ fontSize:'.9rem', color:'#8a8f9e', marginTop:'.4rem', paddingLeft:'1.4rem', lineHeight:1.8 }}>
+                <li>The mutation was not saved before copying the alternate sequence</li>
+                <li>The same sequence was pasted into both fields</li>
+                <li>The edit was made to a FASTA header line (which is stripped)</li>
+                <li>A copy-paste error introduced only whitespace differences</li>
+              </ul>
+            </div>
+          ) : (
+            <div style={{ background:'rgba(6,182,212,.08)', border:'1px solid rgba(6,182,212,.25)', borderRadius:8, padding:'.85rem 1rem' }}>
+              <div style={{ fontWeight:600, color:'#67E8F9', marginBottom:'.5rem' }}>📍 First mismatch detected</div>
+              <div style={{ display:'flex', gap:'1.5rem', flexWrap:'wrap', fontFamily:'"JetBrains Mono",monospace', fontSize:'.95rem' }}>
+                <span><span style={{ color:'#6b7080' }}>Position: </span><span style={{ color:'#fff', fontWeight:600 }}>{diffInfo.position?.toLocaleString()}</span></span>
+                <span><span style={{ color:'#6b7080' }}>Ref: </span><span style={{ color:'#60A5FA', fontWeight:700 }}>{diffInfo.refBase}</span></span>
+                <span><span style={{ color:'#6b7080' }}>Alt: </span><span style={{ color:'#FBBF24', fontWeight:700 }}>{diffInfo.altBase}</span></span>
+                {diffInfo.refLen !== diffInfo.altLen && (
+                  <span><span style={{ color:'#6b7080' }}>Length Δ: </span><span style={{ color:'#F59E0B', fontWeight:600 }}>{diffInfo.altLen - diffInfo.refLen > 0 ? '+' : ''}{diffInfo.altLen - diffInfo.refLen} bp</span></span>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* NO MUTATIONS */}
       {mutations.mutations?.length === 0 && (
         <div className="pc" style={{ textAlign:'center', padding:'2.2rem 1.65rem', borderColor:'rgba(16,185,129,.3)', background:'rgba(16,185,129,.06)' }}>
           <div style={{ fontSize:'1.85rem', marginBottom:'.4rem' }}>✅</div>
-          <div style={{ fontSize:'1.05rem', color:'#10B981', fontWeight:700 }}>No mutations detected — sequences are identical!</div>
+          <div style={{ fontSize:'1.05rem', color:'#10B981', fontWeight:700 }}>
+            No mutations detected — sequences are identical after normalization
+          </div>
+          <div style={{ fontSize:'.9rem', color:'#6b7080', marginTop:'.5rem' }}>
+            See the Normalization Report above for details on what was compared.
+          </div>
         </div>
       )}
     </>)}
