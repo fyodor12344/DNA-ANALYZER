@@ -158,45 +158,63 @@ const calculatePositions = (nucleotidePos, frame) => {
 };
 
 /* ─── HGVS NOTATION ───────────────────────────────────────────────────────── */
-const generateHGVS = (mutation, positions) => {
+// refSeq is the cleaned reference sequence string, passed in so that indel
+// and frameshift cases can translate the wild-type codon at the mutation site
+// rather than falling back to the uninformative placeholder 'X'.
+const generateHGVS = (mutation, positions, refSeq, frame) => {
   const prefix = `${TP53_CANONICAL.id}:p.`;
-  
+
+  // Helper: translate the wild-type codon at a given AA position from refSeq.
+  // Returns the single-letter AA, or undefined if the codon cannot be read.
+  const wtAA = (litPos) => {
+    if (!refSeq || !frame) return undefined;
+    const offset = parseInt(frame) - 1;
+    // litPos is 1-based AA position; codon starts at:
+    const codonStart = (litPos - 1) * 3 + offset;
+    if (codonStart < 0 || codonStart + 3 > refSeq.length) return undefined;
+    return translateCodon(refSeq.substring(codonStart, codonStart + 3));
+  };
+
   if (mutation.mutation_class === 'Silent') {
     return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}=`;
   }
-  
+
   if (mutation.mutation_class === 'Missense') {
     return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}${mutation.alternate_amino_acid}`;
   }
-  
+
   if (mutation.mutation_class === 'Nonsense') {
     return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}*`;
   }
-  
-  // BUG FIX #4: Check frameshift before insertion/deletion so both paths get
-  // a safe fallback for reference_amino_acid when it is undefined.
+
   if (mutation.is_frameshift) {
-    const aa = mutation.reference_amino_acid || 'X';
+    // Use the actual wild-type AA at the frameshift site — never 'X'.
+    // mutation.reference_amino_acid is undefined for indels, so derive it
+    // directly from the reference sequence.
+    const aa = mutation.reference_amino_acid
+      || wtAA(positions.literaturePosition)
+      || '?';
     return `${prefix}${aa}${positions.literaturePosition}fs`;
   }
-  
+
   if (mutation.type === 'Insertion') {
-    // Use reference_amino_acid when available; fall back to positional notation
-    const aa = mutation.reference_amino_acid;
+    const aa = mutation.reference_amino_acid
+      || wtAA(positions.literaturePosition);
     if (aa) {
       return `${prefix}${aa}${positions.literaturePosition}_${positions.literaturePosition + 1}ins`;
     }
     return `${prefix}${positions.literaturePosition}_${positions.literaturePosition + 1}ins`;
   }
-  
+
   if (mutation.type === 'Deletion') {
-    const aa = mutation.reference_amino_acid;
+    const aa = mutation.reference_amino_acid
+      || wtAA(positions.literaturePosition);
     if (aa) {
       return `${prefix}${aa}${positions.literaturePosition}del`;
     }
     return `${prefix}${positions.literaturePosition}del`;
   }
-  
+
   return `${prefix}?`;
 };
 
@@ -661,30 +679,19 @@ export default function TP53MutationAnalyzer() {
     }
   };
 
-  // BUG FIX #3: Use codon_position (codon start index) in preference to raw
-  // position (single-base index) when calling calculatePositions for SNPs.
-  // Previously `mutation.position || mutation.codon_position` always resolved
-  // to the raw base index for SNPs because position is always set, producing
-  // incorrect codon numbers and AA positions.
   useEffect(() => {
     if (mutations && mutations.mutations && readingFrame) {
+      const refSeq = mutations.sequences?.reference ?? '';
       const annotated = mutations.mutations.map(mutation => {
         const positionIndex = mutation.codon_position ?? mutation.position ?? 0;
-        
         const positions = calculatePositions(positionIndex, readingFrame);
-        const hgvs = generateHGVS(mutation, positions);
+        // Pass refSeq and readingFrame so frameshift/indel HGVS can derive
+        // the actual wild-type AA instead of falling back to 'X'.
+        const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame);
         const domainMapping = getDomainMapping(positions.aaPosition);
         const interpretation = getBiologicalInterpretation(mutation, domainMapping);
-        
-        return {
-          mutation,
-          positions,
-          hgvs,
-          domainMapping,
-          interpretation
-        };
+        return { mutation, positions, hgvs, domainMapping, interpretation };
       });
-      
       setAnnotatedMutations(annotated);
     }
   }, [mutations, readingFrame]);
