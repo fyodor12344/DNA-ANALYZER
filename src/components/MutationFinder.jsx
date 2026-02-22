@@ -1,30 +1,133 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   TP53 MUTATION ANALYZER - RESEARCH GRADE
-   Canonical Transcript: NM_000546.6
+   CANCER GENE MUTATION ANALYZER - RESEARCH GRADE
+   Multi-Gene Panel: TP53 · BRCA1 · KRAS · EGFR
    
    UPDATES:
    1. Added VCF file upload support (removes limitation #4)
    2. Parses standard VCF format: CHROM, POS, ID, REF, ALT columns
    3. Supports single & multi-variant VCF files
+   4. Multi-gene panel support — TP53, BRCA1, KRAS, EGFR (removes limitation #1)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-// TP53 Canonical Transcript Configuration
-const TP53_CANONICAL = {
-  id: 'NM_000546.6',
-  name: 'Human TP53 tumor protein p53 transcript variant 1',
-  type: 'Canonical',
-  proteinLength: 393,
-  domains: [
-    { name: 'Transactivation Domain', start: 1, end: 93, functionalRegion: 'Critical', description: 'Required for p53-mediated transcriptional activation' },
-    { name: 'Proline-Rich Domain', start: 64, end: 92, functionalRegion: 'Structural', description: 'Important for p53 apoptotic function' },
-    { name: 'DNA Binding Domain', start: 102, end: 292, functionalRegion: 'Critical', description: 'Essential for sequence-specific DNA binding and tumor suppression' },
-    { name: 'Nuclear Localization Signal', start: 316, end: 325, functionalRegion: 'Critical', description: 'Directs p53 to nucleus' },
-    { name: 'Oligomerization Domain', start: 323, end: 356, functionalRegion: 'Structural', description: 'Required for p53 tetramerization' },
-    { name: 'Regulatory Domain', start: 356, end: 393, functionalRegion: 'Regulatory', description: 'Negatively regulates p53 DNA binding' }
-  ]
+/* ─── MULTI-GENE PANEL REGISTRY ──────────────────────────────────────────────
+   Each gene has: transcript ID, protein length, domain map, clinical context,
+   cancer associations, and gene-specific biological note generator.
+   ─────────────────────────────────────────────────────────────────────────── */
+const GENE_PANEL = {
+  TP53: {
+    id: 'NM_000546.6',
+    symbol: 'TP53',
+    name: 'Tumor Protein p53',
+    fullName: 'Human TP53 tumor protein p53 transcript variant 1',
+    type: 'Tumor Suppressor',
+    chromosome: '17p13.1',
+    proteinLength: 393,
+    color: '#06B6D4',
+    icon: '🧬',
+    cancerAssociations: ['Lung cancer', 'Colorectal cancer', 'Breast cancer', 'Li-Fraumeni syndrome', 'Ovarian cancer', 'Leukemia'],
+    clinicalContext: 'Most frequently mutated gene in human cancers (~50% of all tumors). Loss of p53 function abrogates cell cycle arrest and apoptosis in response to DNA damage.',
+    domains: [
+      { name: 'Transactivation Domain', start: 1,   end: 93,  functionalRegion: 'Critical',    description: 'Required for p53-mediated transcriptional activation' },
+      { name: 'Proline-Rich Domain',    start: 64,  end: 92,  functionalRegion: 'Structural',  description: 'Important for p53 apoptotic function' },
+      { name: 'DNA Binding Domain',     start: 102, end: 292, functionalRegion: 'Critical',    description: 'Essential for sequence-specific DNA binding and tumor suppression' },
+      { name: 'Nuclear Localization Signal', start: 316, end: 325, functionalRegion: 'Critical', description: 'Directs p53 to nucleus' },
+      { name: 'Oligomerization Domain', start: 323, end: 356, functionalRegion: 'Structural',  description: 'Required for p53 tetramerization' },
+      { name: 'Regulatory Domain',      start: 356, end: 393, functionalRegion: 'Regulatory',  description: 'Negatively regulates p53 DNA binding' }
+    ],
+    getGeneNote: (mutClass, domainName) => {
+      if (mutClass === 'Missense') return `TP53 missense mutations in the ${domainName} are among the most oncogenic alterations in human cancer. Gain-of-function p53 mutants may actively promote tumor progression beyond simple loss-of-function.`;
+      if (mutClass === 'Nonsense' || mutClass === 'Frameshift') return 'Truncating TP53 mutations result in complete loss of tumor suppressor activity. Cells with these mutations fail to arrest the cell cycle or undergo apoptosis in response to DNA damage.';
+      return 'TP53 variants should be evaluated in the context of the full mutational landscape and patient clinical history.';
+    }
+  },
+
+  BRCA1: {
+    id: 'NM_007294.4',
+    symbol: 'BRCA1',
+    name: 'Breast Cancer Gene 1',
+    fullName: 'Human BRCA1 DNA repair associated transcript variant 1',
+    type: 'Tumor Suppressor',
+    chromosome: '17q21.31',
+    proteinLength: 1863,
+    color: '#EC4899',
+    icon: '🎀',
+    cancerAssociations: ['Hereditary breast cancer', 'Ovarian cancer', 'Fallopian tube cancer', 'Peritoneal cancer', 'Pancreatic cancer'],
+    clinicalContext: 'Germline BRCA1 mutations confer 57–65% lifetime risk of breast cancer and 39–46% risk of ovarian cancer. BRCA1 is essential for homologous recombination DNA repair.',
+    domains: [
+      { name: 'RING Domain',           start: 1,    end: 109,  functionalRegion: 'Critical',   description: 'E3 ubiquitin ligase activity; interacts with BARD1' },
+      { name: 'RING-NBD Linker',       start: 110,  end: 202,  functionalRegion: 'Structural', description: 'Connects RING domain to nuclear export signals' },
+      { name: 'Nuclear Export Signal', start: 22,   end: 30,   functionalRegion: 'Regulatory', description: 'Controls BRCA1 nuclear-cytoplasmic shuttling' },
+      { name: 'Coiled-Coil Domain',    start: 1364, end: 1437, functionalRegion: 'Structural', description: 'Mediates interaction with PALB2 for HR repair' },
+      { name: 'BRCT Domain 1',         start: 1642, end: 1736, functionalRegion: 'Critical',   description: 'Phosphoprotein binding; essential for DNA damage response' },
+      { name: 'BRCT Domain 2',         start: 1756, end: 1855, functionalRegion: 'Critical',   description: 'Tandem BRCT repeat; recruits repair factors to DSBs' }
+    ],
+    getGeneNote: (mutClass, domainName) => {
+      if (mutClass === 'Missense') return `BRCA1 missense mutations in the ${domainName} may disrupt homologous recombination repair, leading to genomic instability. BRCT domain missense variants are classified as pathogenic when they disrupt phosphopeptide binding.`;
+      if (mutClass === 'Nonsense' || mutClass === 'Frameshift') return 'Truncating BRCA1 mutations are the most common pathogenic variants and are strongly associated with hereditary breast and ovarian cancer syndrome (HBOC). These mutations abolish homologous recombination capacity.';
+      return 'BRCA1 variants require clinical classification using multifactorial likelihood models incorporating family history, co-occurrence data, and functional assay results.';
+    }
+  },
+
+  KRAS: {
+    id: 'NM_004985.5',
+    symbol: 'KRAS',
+    name: 'Kirsten RAS Proto-Oncogene',
+    fullName: 'Human KRAS proto-oncogene GTPase transcript variant b',
+    type: 'Oncogene',
+    chromosome: '12p12.1',
+    proteinLength: 189,
+    color: '#F59E0B',
+    icon: '⚡',
+    cancerAssociations: ['Pancreatic ductal adenocarcinoma (>90%)', 'Colorectal cancer', 'Non-small cell lung cancer', 'Thyroid cancer', 'Biliary tract cancer'],
+    clinicalContext: 'KRAS is the most commonly mutated oncogene in human cancer. Activating mutations lock KRAS in the GTP-bound active state, constitutively stimulating cell proliferation via RAF-MEK-ERK and PI3K-AKT pathways.',
+    domains: [
+      { name: 'P-loop (G1)',          start: 10,  end: 17,  functionalRegion: 'Critical',   description: 'GTP/GDP phosphate binding; hotspot for G12 and G13 mutations' },
+      { name: 'Switch I (G2)',        start: 30,  end: 40,  functionalRegion: 'Critical',   description: 'Effector binding region; changes conformation upon GTP hydrolysis' },
+      { name: 'Switch II (G3)',       start: 57,  end: 76,  functionalRegion: 'Critical',   description: 'GAP interaction site; Q61 is a major mutation hotspot' },
+      { name: 'G4 Motif',            start: 116, end: 119, functionalRegion: 'Structural', description: 'Guanine base recognition' },
+      { name: 'G5 Motif',            start: 145, end: 147, functionalRegion: 'Structural', description: 'Guanine base specificity' },
+      { name: 'Hypervariable Region',start: 167, end: 189, functionalRegion: 'Regulatory', description: 'Membrane anchoring; CAAX motif for farnesylation' }
+    ],
+    getGeneNote: (mutClass, domainName) => {
+      if (domainName.includes('P-loop')) return 'Mutations at KRAS G12 and G13 (P-loop) are the most clinically significant, impairing GAP-mediated GTP hydrolysis. G12C is targetable by sotorasib (AMG 510), the first approved KRAS inhibitor.';
+      if (domainName.includes('Switch')) return `KRAS ${domainName} mutations constitutively activate downstream RAS signaling. Q61 mutations (Switch II) are particularly resistant to current therapeutic approaches.`;
+      if (mutClass === 'Missense') return `KRAS missense mutations in the ${domainName} may constitutively activate RAS-MAPK signaling. Patients with KRAS-mutant tumors typically show resistance to anti-EGFR therapies.`;
+      return 'KRAS mutations predict resistance to EGFR-targeted therapies. Tumor mutational burden and co-occurring mutations (e.g., STK11, KEAP1) further modulate therapeutic response.';
+    }
+  },
+
+  EGFR: {
+    id: 'NM_005228.5',
+    symbol: 'EGFR',
+    name: 'Epidermal Growth Factor Receptor',
+    fullName: 'Human EGFR epidermal growth factor receptor transcript variant 1',
+    type: 'Oncogene',
+    chromosome: '7p11.2',
+    proteinLength: 1210,
+    color: '#8B5CF6',
+    icon: '🔬',
+    cancerAssociations: ['Non-small cell lung cancer (NSCLC)', 'Glioblastoma', 'Colorectal cancer', 'Head and neck squamous cell carcinoma'],
+    clinicalContext: 'Activating EGFR mutations are found in ~15% of NSCLC (higher in Asian populations: ~50%). These mutations predict sensitivity to EGFR tyrosine kinase inhibitors (gefitinib, erlotinib, osimertinib).',
+    domains: [
+      { name: 'Signal Peptide',         start: 1,    end: 24,   functionalRegion: 'Structural', description: 'Directs EGFR to cell membrane' },
+      { name: 'Extracellular Domain I', start: 25,   end: 310,  functionalRegion: 'Regulatory', description: 'Ligand binding domain; EGF interaction site' },
+      { name: 'Extracellular Domain II',start: 311,  end: 481,  functionalRegion: 'Structural', description: 'Dimerization arm; receptor activation interface' },
+      { name: 'Transmembrane Domain',   start: 646,  end: 667,  functionalRegion: 'Structural', description: 'Membrane spanning helix' },
+      { name: 'Kinase Domain',          start: 712,  end: 979,  functionalRegion: 'Critical',   description: 'ATP binding and catalytic activity; major mutation hotspot (exons 18-21)' },
+      { name: 'C-terminal Domain',      start: 980,  end: 1210, functionalRegion: 'Regulatory', description: 'Autophosphorylation sites; signal transduction scaffolding' }
+    ],
+    getGeneNote: (mutClass, domainName) => {
+      if (domainName.includes('Kinase')) return 'EGFR kinase domain mutations are the primary predictive biomarker for TKI therapy in NSCLC. Exon 19 deletions and L858R (exon 21) are sensitizing mutations; T790M (exon 20) is the most common resistance mutation, targetable by osimertinib.';
+      if (mutClass === 'Missense') return `EGFR missense mutations in the ${domainName} may alter receptor kinase activity. Sensitizing mutations result in constitutive EGFR activation independent of EGF ligand binding.`;
+      return 'EGFR mutation status is a mandatory biomarker test in newly diagnosed advanced NSCLC. Testing should include exons 18-21 for comprehensive assessment of TKI eligibility.';
+    }
+  }
 };
+
+// Keep backward-compatible alias
+const TP53_CANONICAL = GENE_PANEL.TP53;
 
 // Sample Mutations
 const MUTATION_SAMPLES = {
@@ -178,8 +281,9 @@ const calculatePositions = (nucleotidePos, frame) => {
 };
 
 /* ─── HGVS NOTATION ──────────────────────────────────────────────────────── */
-const generateHGVS = (mutation, positions, refSeq, frame) => {
-  const prefix = `${TP53_CANONICAL.id}:p.`;
+const generateHGVS = (mutation, positions, refSeq, frame, geneKey = 'TP53') => {
+  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
+  const prefix = `${gene.id}:p.`;
   const wtAA = (litPos) => {
     if (!refSeq || !frame) return undefined;
     const offset = parseInt(frame) - 1;
@@ -206,17 +310,19 @@ const generateHGVS = (mutation, positions, refSeq, frame) => {
 };
 
 /* ─── DOMAIN MAPPING ──────────────────────────────────────────────────────── */
-const getDomainMapping = (aaPosition) => {
-  for (const domain of TP53_CANONICAL.domains) {
+const getDomainMapping = (aaPosition, geneKey = 'TP53') => {
+  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
+  for (const domain of gene.domains) {
     if (aaPosition >= domain.start && aaPosition <= domain.end) {
       return { proteinDomain: domain.name, functionalRegion: domain.functionalRegion, interpretation: `Mutation occurs inside functional domain: ${domain.description}`, start: domain.start, end: domain.end, isInterDomain: false };
     }
   }
-  return { proteinDomain: 'Inter-domain region', functionalRegion: 'N/A', interpretation: 'Mutation in inter-domain linker region', isInterDomain: true };
+  return { proteinDomain: 'Inter-domain region', functionalRegion: 'N/A', interpretation: `Mutation in inter-domain linker region of ${gene.symbol}`, isInterDomain: true };
 };
 
 /* ─── BIOLOGICAL INTERPRETATION ──────────────────────────────────────────── */
-const getBiologicalInterpretation = (mutation, domainMapping) => {
+const getBiologicalInterpretation = (mutation, domainMapping, geneKey = 'TP53') => {
+  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
   let interpretation = { mutationType: mutation.type, functionalEffect: mutation.mutation_class, confidence: 'High', confidenceReason: '', scientificNote: '', biochemicalAnalysis: null };
   if (mutation.mutation_class === 'Missense' && mutation.reference_amino_acid && mutation.alternate_amino_acid) {
     const refProps = AA_PROPERTIES[mutation.reference_amino_acid];
@@ -227,13 +333,23 @@ const getBiologicalInterpretation = (mutation, domainMapping) => {
       if (refProps.charge !== altProps.charge) changes.push(`charge (${refProps.charge} → ${altProps.charge})`);
       if (refProps.polarity !== altProps.polarity) changes.push(`polarity (${refProps.polarity} → ${altProps.polarity})`);
       if (refProps.size !== altProps.size) changes.push(`size (${refProps.size} → ${altProps.size})`);
-      interpretation.scientificNote = changes.length > 0 ? `Substitution alters biochemical properties: ${changes.join(', ')}. This may affect protein stability or DNA-binding affinity, particularly within the ${domainMapping.proteinDomain}.` : 'Conservative substitution with similar biochemical properties. May have minimal structural impact, but functional effects depend on structural context.';
+      const biochemNote = changes.length > 0 ? `Substitution alters biochemical properties: ${changes.join(', ')}.` : 'Conservative substitution with similar biochemical properties.';
+      interpretation.scientificNote = `${biochemNote} ${gene.getGeneNote('Missense', domainMapping.proteinDomain)}`;
     }
     interpretation.confidenceReason = 'Clear codon-level substitution with defined amino acid change';
   }
-  if (mutation.is_frameshift) { interpretation.scientificNote = 'Frameshift likely disrupts downstream reading frame and truncates protein. Loss-of-function mutation expected with severely reduced or absent p53 tumor suppressor activity.'; interpretation.confidenceReason = 'Frameshift detected via sequence length difference'; }
-  if (mutation.mutation_class === 'Nonsense') { interpretation.scientificNote = 'Premature stop codon may produce truncated nonfunctional protein. Nonsense-mediated decay may reduce mRNA stability, leading to loss of p53 function.'; interpretation.confidenceReason = 'Stop codon introduced at defined position'; }
-  if (mutation.mutation_class === 'Silent') { interpretation.scientificNote = 'Synonymous substitution with no amino acid change. Unlikely to affect protein function, though may influence mRNA stability or translation efficiency.'; interpretation.confidenceReason = 'Synonymous codon change verified'; }
+  if (mutation.is_frameshift) {
+    interpretation.scientificNote = `Frameshift disrupts downstream reading frame and likely truncates ${gene.symbol} protein. ${gene.getGeneNote('Frameshift', domainMapping.proteinDomain)}`;
+    interpretation.confidenceReason = 'Frameshift detected via sequence length difference';
+  }
+  if (mutation.mutation_class === 'Nonsense') {
+    interpretation.scientificNote = `Premature stop codon produces truncated ${gene.symbol} protein. ${gene.getGeneNote('Nonsense', domainMapping.proteinDomain)}`;
+    interpretation.confidenceReason = 'Stop codon introduced at defined position';
+  }
+  if (mutation.mutation_class === 'Silent') {
+    interpretation.scientificNote = `Synonymous substitution with no amino acid change in ${gene.symbol}. Unlikely to affect protein function, though may influence mRNA stability or translation efficiency.`;
+    interpretation.confidenceReason = 'Synonymous codon change verified';
+  }
   return interpretation;
 };
 
@@ -328,15 +444,20 @@ const detectMutations = (ref, alt, frame, strand) => {
 };
 
 /* ─── PDF GENERATION ──────────────────────────────────────────────────────── */
-const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta) => {
+const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta, geneKey = 'TP53') => {
+  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
   const date = new Date().toISOString().split('T')[0];
   const timestamp = new Date().toLocaleString();
-  let pdf = `TP53 MUTATION ANALYSIS REPORT\n${'='.repeat(80)}\n\n`;
+  let pdf = `${gene.symbol} MUTATION ANALYSIS REPORT\n${'='.repeat(80)}\n\n`;
   pdf += `ANALYSIS PARAMETERS\n${'-'.repeat(80)}\n`;
-  pdf += `Transcript Reference: ${TP53_CANONICAL.id} - ${TP53_CANONICAL.name} (${TP53_CANONICAL.type})\n`;
+  pdf += `Gene: ${gene.symbol} — ${gene.name} (${gene.type})\n`;
+  pdf += `Transcript Reference: ${gene.id} — ${gene.fullName}\n`;
+  pdf += `Chromosome: ${gene.chromosome}  Protein Length: ${gene.proteinLength} aa\n`;
   pdf += `Reading Frame: +${analysisParams.readingFrame}\nStrand: ${analysisParams.strand}\n`;
   pdf += `Reference Length: ${analysisData.sequences.reference_length} bp\nAlternate Length: ${analysisData.sequences.alternate_length} bp\n`;
   pdf += `Length Difference: ${analysisData.sequences.length_difference} bp\nAnalysis Date: ${timestamp}\n`;
+  pdf += `\nCLINICAL CONTEXT\n${'-'.repeat(80)}\n${gene.clinicalContext}\n`;
+  pdf += `Cancer Associations: ${gene.cancerAssociations.join(', ')}\n`;
   if (vcfMeta) {
     pdf += `\nVCF SOURCE\n${'-'.repeat(80)}\n`;
     pdf += `Source: VCF File Upload (NGS Data)\n`;
@@ -372,7 +493,7 @@ const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta) 
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `TP53_Mutation_Report_${date}.txt`;
+  link.download = `${gene.symbol}_Mutation_Report_${date}.txt`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -400,16 +521,19 @@ export default function TP53MutationAnalyzer() {
   const [sampleBannerVisible, setSampleBannerVisible] = useState(false);
   const [diffInfo, setDiffInfo] = useState(null);
 
-  // ── VCF STATE ──────────────────────────────────────────────────────────────
-  const [vcfMode, setVcfMode] = useState(false);           // toggle VCF vs manual
-  const [vcfFile, setVcfFile] = useState(null);             // File object
-  const [vcfParsed, setVcfParsed] = useState(null);         // { variants, metaLines, errors }
-  const [vcfSelectedIdx, setVcfSelectedIdx] = useState(0);  // which variant to analyze
+  const [vcfMode, setVcfMode] = useState(false);
+  const [vcfFile, setVcfFile] = useState(null);
+  const [vcfParsed, setVcfParsed] = useState(null);
+  const [vcfSelectedIdx, setVcfSelectedIdx] = useState(0);
   const [vcfLoading, setVcfLoading] = useState(false);
   const [vcfError, setVcfError] = useState('');
-  const [vcfMeta, setVcfMeta] = useState(null);             // metadata for PDF
+  const [vcfMeta, setVcfMeta] = useState(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const vcfInputRef = useRef(null);
+
+  // ── GENE PANEL STATE ───────────────────────────────────────────────────────
+  const [selectedGene, setSelectedGene] = useState('TP53');
+  const activeGene = GENE_PANEL[selectedGene];
 
   const loadSample = key => {
     const s = MUTATION_SAMPLES[key];
@@ -508,17 +632,17 @@ export default function TP53MutationAnalyzer() {
       setAnnotatedMutations(mutations.mutations.map(mutation => {
         const positionIndex = mutation.codon_position ?? mutation.position ?? 0;
         const positions = calculatePositions(positionIndex, readingFrame);
-        const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame);
-        const domainMapping = getDomainMapping(positions.aaPosition);
-        const interpretation = getBiologicalInterpretation(mutation, domainMapping);
+        const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame, selectedGene);
+        const domainMapping = getDomainMapping(positions.aaPosition, selectedGene);
+        const interpretation = getBiologicalInterpretation(mutation, domainMapping, selectedGene);
         return { mutation, positions, hgvs, domainMapping, interpretation };
       }));
     }
-  }, [mutations, readingFrame]);
+  }, [mutations, readingFrame, selectedGene]);
 
   const handleExportPDF = () => {
     if (!mutations) return;
-    try { generatePDF(mutations, annotatedMutations, { readingFrame, strand }, vcfMeta); }
+    try { generatePDF(mutations, annotatedMutations, { readingFrame, strand }, vcfMeta, selectedGene); }
     catch (e) { setError(`PDF export failed: ${e.message}`); }
   };
 
@@ -527,14 +651,19 @@ export default function TP53MutationAnalyzer() {
     setLoadingAI(true); setError('');
     try {
       await new Promise(resolve => setTimeout(resolve, 1500));
-      let explanation = `TP53 Mutation Analysis Summary:\n\nDetected ${mutations.summary.total_mutations} mutation(s) in the provided sequences.\n\n`;
-      if (mutations.summary.missense_mutations > 0) explanation += `Missense Mutations: ${mutations.summary.missense_mutations} detected. These substitutions alter amino acid identity and may affect p53 protein stability, DNA-binding capacity, or transactivation potential.\n\n`;
-      if (mutations.summary.frameshift_mutations > 0) explanation += `Frameshift Mutations: ${mutations.summary.frameshift_mutations} detected. These indels disrupt the reading frame, likely producing truncated non-functional p53 protein.\n\n`;
-      if (mutations.summary.nonsense_mutations > 0) explanation += `Nonsense Mutations: ${mutations.summary.nonsense_mutations} detected. Premature stop codons result in truncated p53 protein, eliminating downstream functional domains.\n\n`;
+      const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
+      let explanation = `${gene.symbol} Mutation Analysis Summary\n`;
+      explanation += `Gene: ${gene.name} (${gene.type}) · ${gene.chromosome}\n`;
+      explanation += `Transcript: ${gene.id}\n\n`;
+      explanation += `Detected ${mutations.summary.total_mutations} mutation(s) in the provided sequences.\n\n`;
+      explanation += `Clinical Context:\n${gene.clinicalContext}\n\n`;
+      if (mutations.summary.missense_mutations > 0) explanation += `Missense Mutations: ${mutations.summary.missense_mutations} detected. These substitutions alter amino acid identity and may affect ${gene.symbol} protein function.\n\n`;
+      if (mutations.summary.frameshift_mutations > 0) explanation += `Frameshift Mutations: ${mutations.summary.frameshift_mutations} detected. These indels disrupt the reading frame, likely producing truncated non-functional ${gene.symbol} protein.\n\n`;
+      if (mutations.summary.nonsense_mutations > 0) explanation += `Nonsense Mutations: ${mutations.summary.nonsense_mutations} detected. Premature stop codons result in truncated ${gene.symbol} protein.\n\n`;
       const criticalDomain = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Critical');
-      if (criticalDomain.length > 0) explanation += `Critical Domain Alert: ${criticalDomain.length} mutation(s) detected in critical functional domains.\n\n`;
+      if (criticalDomain.length > 0) explanation += `Critical Domain Alert: ${criticalDomain.length} mutation(s) detected in critical functional domains of ${gene.symbol}. These have high likelihood of functional impairment.\n\n`;
       if (vcfMeta) explanation += `VCF Source: Variant ${vcfMeta.id} at ${vcfMeta.chrom}:${vcfMeta.pos} (${vcfMeta.ref} → ${vcfMeta.alt})\n\n`;
-      explanation += `Clinical Relevance: TP53 is the most frequently mutated gene in human cancers. Mutations in TP53 are associated with Li-Fraumeni syndrome, various solid tumors, and hematologic malignancies.`;
+      explanation += `Associated Cancers: ${gene.cancerAssociations.join(', ')}.`;
       setAiExplanation(explanation);
     } catch (e) { setError('AI analysis failed'); }
     finally { setLoadingAI(false); }
@@ -597,7 +726,7 @@ export default function TP53MutationAnalyzer() {
     .variant-row.selected{ border-color:#06B6D4; background:rgba(6,182,212,.08); }
     .variant-row:hover:not(.selected){ border-color:#3a3d4a; }
     .vcf-badge{ display:inline-flex; align-items:center; gap:.3rem; background:rgba(139,92,246,.15); border:1px solid rgba(139,92,246,.35); color:#A78BFA; font-size:.78rem; font-weight:600; padding:.2rem .55rem; border-radius:6px; letter-spacing:.04em; text-transform:uppercase; }
-    @media(max-width:768px){ .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; } .summary-grid{ grid-template-columns:repeat(2,1fr); } }
+    @media(max-width:768px){ .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; } .summary-grid{ grid-template-columns:repeat(2,1fr); } .gene-grid{ grid-template-columns:repeat(2,1fr) !important; } }
     @keyframes spin{ to{ transform:rotate(360deg); } }
     .spin{ display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:spin .5s linear infinite; }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
@@ -610,15 +739,64 @@ export default function TP53MutationAnalyzer() {
     {/* HEADER */}
     <div style={{ background:'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom:'1px solid #1e2130', padding:'1.65rem 1.3rem 1.3rem', margin:'-1.25rem -1.2rem 0', marginBottom:'1.25rem' }}>
       <div style={{ maxWidth:860, margin:'0 auto' }}>
-        <div style={{ background:'linear-gradient(135deg, #164E63 0%, #083344 100%)', border:'2px solid rgba(6, 182, 212, 0.3)', borderRadius:'14px', padding:'1.1rem 1.3rem', marginBottom:'.6rem', boxShadow:'0 8px 32px rgba(6, 182, 212, 0.15)' }}>
+        <div style={{ background:`linear-gradient(135deg, ${activeGene.color}22 0%, #083344 100%)`, border:`2px solid ${activeGene.color}55`, borderRadius:'14px', padding:'1.1rem 1.3rem', marginBottom:'.6rem', boxShadow:`0 8px 32px ${activeGene.color}25` }}>
           <div style={{ display:'flex', alignItems:'center', gap:'.75rem', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'1.75rem' }}>🧬</span>
-            <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.75rem', color:'#fff', margin:0 }}>Mutation Finder</h1>
+            <span style={{ fontSize:'1.75rem' }}>{activeGene.icon}</span>
+            <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.75rem', color:'#fff', margin:0 }}>Cancer Gene Mutation Analyzer</h1>
             <span style={{ background:'rgba(6,182,212,.2)', border:'1px solid rgba(6,182,212,.4)', color:'#67E8F9', fontSize:'.75rem', fontWeight:600, padding:'.25rem .6rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Research Grade</span>
             <span className="vcf-badge">VCF Support</span>
+            <span style={{ background:'rgba(16,185,129,.15)', border:'1px solid rgba(16,185,129,.35)', color:'#6EE7B7', fontSize:'.75rem', fontWeight:600, padding:'.25rem .6rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Multi-Gene Panel</span>
           </div>
         </div>
-        <p style={{ color:'#6b7080', fontSize:'1.05rem', lineHeight:1.6, maxWidth:560, margin:0 }}>Compare two DNA sequences or upload a VCF file to identify and classify SNPs, insertions, deletions, and frameshift mutations with codon-level resolution.</p>
+        <p style={{ color:'#6b7080', fontSize:'1.05rem', lineHeight:1.6, maxWidth:600, margin:0 }}>Analyze mutations across cancer-associated genes — TP53, BRCA1, KRAS, EGFR — with codon-level resolution, domain annotation, and VCF support.</p>
+      </div>
+    </div>
+
+    {/* ── GENE PANEL SELECTOR ───────────────────────────────────────────────── */}
+    <div className="pc" style={{ borderColor:'rgba(16,185,129,.3)', background:'rgba(16,185,129,.04)', marginBottom:'1.1rem' }}>
+      <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'1rem' }}>
+        <span style={{ fontSize:'1.05rem' }}>🧫</span>
+        <span style={{ fontSize:'1rem', fontWeight:600, color:'#6EE7B7' }}>Gene Panel Selection</span>
+        <span style={{ background:'rgba(16,185,129,.2)', border:'1px solid rgba(16,185,129,.4)', color:'#6EE7B7', fontSize:'.72rem', fontWeight:700, padding:'.18rem .48rem', borderRadius:8, textTransform:'uppercase', marginLeft:'.25rem' }}>Future Direction #1 — Implemented</span>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'.6rem' }}>
+        {Object.values(GENE_PANEL).map(gene => (
+          <button
+            key={gene.symbol}
+            onClick={() => { setSelectedGene(gene.symbol); setMutations(null); setAnnotatedMutations([]); setError(''); setAiExplanation(''); }}
+            style={{
+              display:'flex', flexDirection:'column', alignItems:'center', gap:'.3rem',
+              padding:'.85rem .5rem',
+              background: selectedGene === gene.symbol ? `${gene.color}18` : '#0f1117',
+              border: selectedGene === gene.symbol ? `2px solid ${gene.color}` : '1px solid #1e2130',
+              borderRadius:10, cursor:'pointer', transition:'all .25s ease',
+              boxShadow: selectedGene === gene.symbol ? `0 4px 16px ${gene.color}30` : 'none'
+            }}
+          >
+            <span style={{ fontSize:'1.4rem' }}>{gene.icon}</span>
+            <span style={{ fontFamily:'"JetBrains Mono",monospace', fontWeight:700, fontSize:'.95rem', color: selectedGene === gene.symbol ? gene.color : '#c8cad4' }}>{gene.symbol}</span>
+            <span style={{ fontSize:'.72rem', color:'#6b7080', textAlign:'center', lineHeight:1.3 }}>{gene.type}</span>
+            <span style={{ fontSize:'.7rem', color: selectedGene === gene.symbol ? gene.color+'cc' : '#3a3d4a', fontFamily:'"JetBrains Mono",monospace' }}>{gene.id.split('.')[0]}</span>
+          </button>
+        ))}
+      </div>
+      {/* Active gene info strip */}
+      <div style={{ marginTop:'1rem', padding:'.85rem 1rem', background:`${activeGene.color}0d`, border:`1px solid ${activeGene.color}30`, borderRadius:8 }}>
+        <div style={{ display:'flex', alignItems:'flex-start', gap:'1rem', flexWrap:'wrap' }}>
+          <div style={{ flex:1, minWidth:200 }}>
+            <div style={{ fontSize:'.85rem', fontWeight:600, color:activeGene.color, marginBottom:'.3rem' }}>{activeGene.icon} {activeGene.symbol} — {activeGene.name}</div>
+            <div style={{ fontSize:'.85rem', color:'#8a8f9e', lineHeight:1.6 }}>{activeGene.clinicalContext}</div>
+          </div>
+          <div style={{ minWidth:160 }}>
+            <div style={{ fontSize:'.8rem', color:'#6b7080', marginBottom:'.3rem', textTransform:'uppercase', letterSpacing:'.06em' }}>Cancer Associations</div>
+            <div style={{ display:'flex', flexDirection:'column', gap:'.2rem' }}>
+              {activeGene.cancerAssociations.slice(0, 3).map((c, i) => (
+                <span key={i} style={{ fontSize:'.78rem', color:'#8a8f9e', background:'#0f1117', border:'1px solid #1e2130', borderRadius:5, padding:'.15rem .4rem', display:'inline-block' }}>• {c}</span>
+              ))}
+              {activeGene.cancerAssociations.length > 3 && <span style={{ fontSize:'.78rem', color:'#6b7080' }}>+{activeGene.cancerAssociations.length - 3} more</span>}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -680,8 +858,9 @@ export default function TP53MutationAnalyzer() {
       </div>
       <div style={{ background:'rgba(16,185,129,.08)', border:'1px solid rgba(16,185,129,.25)', borderRadius:'8px', padding:'.9rem', marginBottom:'1rem' }}>
         <label className="lbl" style={{ color:'#10B981', marginBottom:'.5rem' }}>Transcript Reference</label>
-        <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.95rem', color:'#10B981', fontWeight:600 }}>{TP53_CANONICAL.id} (Canonical TP53)</div>
-        <div style={{ fontSize:'.88rem', color:'#8a8f9e', fontStyle:'italic' }}>🧬 {TP53_CANONICAL.name}</div>
+        <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'.95rem', color:activeGene.color, fontWeight:600 }}>{activeGene.id}</div>
+        <div style={{ fontSize:'.88rem', color:'#8a8f9e', fontStyle:'italic', marginTop:'.2rem' }}>{activeGene.icon} {activeGene.fullName}</div>
+        <div style={{ fontSize:'.82rem', color:'#6b7080', marginTop:'.25rem' }}>Chromosome: {activeGene.chromosome} · Protein: {activeGene.proteinLength} aa · {activeGene.type}</div>
       </div>
       <div className="config-grid">
         <div>
@@ -886,7 +1065,10 @@ export default function TP53MutationAnalyzer() {
       {/* SUMMARY */}
       <div className="pc">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'.65rem', flexWrap:'wrap', gap:'.5rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'.45rem' }}><span>📊</span><span style={{ fontSize:'1rem', fontWeight:600, color:'#c8cad4' }}>Summary Statistics</span></div>
+          <div style={{ display:'flex', alignItems:'center', gap:'.45rem' }}>
+            <span>{activeGene.icon}</span>
+            <span style={{ fontSize:'1rem', fontWeight:600, color:'#c8cad4' }}>{activeGene.symbol} — Summary Statistics</span>
+          </div>
           {vcfMeta && <span className="vcf-badge">From VCF · {vcfMeta.chrom}:{vcfMeta.pos}</span>}
         </div>
         <div className="summary-grid">
