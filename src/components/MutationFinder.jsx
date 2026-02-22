@@ -40,7 +40,8 @@ const GENE_PANEL = {
       if (mutClass === 'Missense') return `TP53 missense mutations in the ${domainName} are among the most oncogenic alterations in human cancer. Gain-of-function p53 mutants may actively promote tumor progression beyond simple loss-of-function.`;
       if (mutClass === 'Nonsense' || mutClass === 'Frameshift') return 'Truncating TP53 mutations result in complete loss of tumor suppressor activity. Cells with these mutations fail to arrest the cell cycle or undergo apoptosis in response to DNA damage.';
       return 'TP53 variants should be evaluated in the context of the full mutational landscape and patient clinical history.';
-    }
+    },
+    pdb: { id:'2OCJ', name:'p53 DNA-binding domain bound to DNA', url:'https://www.rcsb.org/3d-view/2OCJ', embedUrl:'https://www.rcsb.org/3d-view/2OCJ?preset=default', description:'Crystal structure of TP53 DBD tetramer bound to full-site DNA (2.05Å resolution)' }
   },
 
   BRCA1: {
@@ -67,7 +68,8 @@ const GENE_PANEL = {
       if (mutClass === 'Missense') return `BRCA1 missense mutations in the ${domainName} may disrupt homologous recombination repair, leading to genomic instability. BRCT domain missense variants are classified as pathogenic when they disrupt phosphopeptide binding.`;
       if (mutClass === 'Nonsense' || mutClass === 'Frameshift') return 'Truncating BRCA1 mutations are the most common pathogenic variants and are strongly associated with hereditary breast and ovarian cancer syndrome (HBOC). These mutations abolish homologous recombination capacity.';
       return 'BRCA1 variants require clinical classification using multifactorial likelihood models incorporating family history, co-occurrence data, and functional assay results.';
-    }
+    },
+    pdb: { id:'1JNX', name:'BRCA1 BRCT tandem domain', url:'https://www.rcsb.org/3d-view/1JNX', embedUrl:'https://www.rcsb.org/3d-view/1JNX?preset=default', description:'Crystal structure of BRCA1 tandem BRCT domains — the most clinically important mutation hotspot (1.85Å)' }
   },
 
   KRAS: {
@@ -95,7 +97,8 @@ const GENE_PANEL = {
       if (domainName.includes('Switch')) return `KRAS ${domainName} mutations constitutively activate downstream RAS signaling. Q61 mutations (Switch II) are particularly resistant to current therapeutic approaches.`;
       if (mutClass === 'Missense') return `KRAS missense mutations in the ${domainName} may constitutively activate RAS-MAPK signaling. Patients with KRAS-mutant tumors typically show resistance to anti-EGFR therapies.`;
       return 'KRAS mutations predict resistance to EGFR-targeted therapies. Tumor mutational burden and co-occurring mutations (e.g., STK11, KEAP1) further modulate therapeutic response.';
-    }
+    },
+    pdb: { id:'4OBE', name:'KRAS G12C mutant with GDP', url:'https://www.rcsb.org/3d-view/4OBE', embedUrl:'https://www.rcsb.org/3d-view/4OBE?preset=default', description:'Crystal structure of KRAS G12C bound to GDP — basis for sotorasib drug design (1.90Å)' }
   },
 
   EGFR: {
@@ -122,7 +125,8 @@ const GENE_PANEL = {
       if (domainName.includes('Kinase')) return 'EGFR kinase domain mutations are the primary predictive biomarker for TKI therapy in NSCLC. Exon 19 deletions and L858R (exon 21) are sensitizing mutations; T790M (exon 20) is the most common resistance mutation, targetable by osimertinib.';
       if (mutClass === 'Missense') return `EGFR missense mutations in the ${domainName} may alter receptor kinase activity. Sensitizing mutations result in constitutive EGFR activation independent of EGF ligand binding.`;
       return 'EGFR mutation status is a mandatory biomarker test in newly diagnosed advanced NSCLC. Testing should include exons 18-21 for comprehensive assessment of TKI eligibility.';
-    }
+    },
+    pdb: { id:'2ITX', name:'EGFR kinase domain with erlotinib', url:'https://www.rcsb.org/3d-view/2ITX', embedUrl:'https://www.rcsb.org/3d-view/2ITX?preset=default', description:'EGFR kinase domain (L858R mutant) bound to erlotinib — structural basis for TKI sensitivity (2.60Å)' }
   }
 };
 
@@ -351,6 +355,54 @@ const getBiologicalInterpretation = (mutation, domainMapping, geneKey = 'TP53') 
     interpretation.confidenceReason = 'Synonymous codon change verified';
   }
   return interpretation;
+};
+
+/* ─── PATHOGENICITY SCORER ────────────────────────────────────────────────────
+   Returns { level, label, color, bgClass, score, reasons[], shortLabel }
+   Levels: PATHOGENIC | LIKELY_PATHOGENIC | VUS | LIKELY_BENIGN | BENIGN
+   ─────────────────────────────────────────────────────────────────────────── */
+const scorePathogenicity = (mutation, domainMapping) => {
+  let score = 0;
+  const reasons = [];
+
+  if (mutation.is_frameshift) {
+    return { level:'PATHOGENIC', label:'Pathogenic', color:'#EF4444', bgClass:'path-pathogenic', score:95,
+      reasons:['Frameshift disrupts downstream reading frame','Truncated/nonfunctional protein expected','Loss-of-function mutation'], shortLabel:'P' };
+  }
+  if (mutation.mutation_class === 'Nonsense') {
+    return { level:'PATHOGENIC', label:'Pathogenic', color:'#EF4444', bgClass:'path-pathogenic', score:90,
+      reasons:['Premature stop codon introduced','Protein function likely abolished','Nonsense-mediated mRNA decay possible'], shortLabel:'P' };
+  }
+  if (mutation.mutation_class === 'Silent') {
+    return { level:'LIKELY_BENIGN', label:'Likely Benign', color:'#10B981', bgClass:'path-benign', score:8,
+      reasons:['Synonymous change — protein sequence unchanged','No amino acid alteration','May rarely affect splicing (low probability)'], shortLabel:'B' };
+  }
+  if (mutation.mutation_class === 'Missense') {
+    if (domainMapping.functionalRegion === 'Critical') { score += 35; reasons.push('In critical functional domain'); }
+    else if (domainMapping.functionalRegion === 'Structural') { score += 20; reasons.push('In structural domain'); }
+    else { score += 5; reasons.push('In inter-domain linker (lower risk)'); }
+    const refP = mutation.reference_amino_acid ? AA_PROPERTIES[mutation.reference_amino_acid] : null;
+    const altP = mutation.alternate_amino_acid ? AA_PROPERTIES[mutation.alternate_amino_acid] : null;
+    if (refP && altP) {
+      if (refP.charge !== altP.charge) { score += 25; reasons.push(`Charge change: ${refP.charge} → ${altP.charge}`); }
+      if (refP.polarity !== altP.polarity) { score += 15; reasons.push(`Polarity change: ${refP.polarity} → ${altP.polarity}`); }
+      if (refP.size !== altP.size) { score += 10; reasons.push(`Size change: ${refP.size} → ${altP.size}`); }
+      if (refP.charge === altP.charge && refP.polarity === altP.polarity && refP.size === altP.size) {
+        score -= 10; reasons.push('Conservative substitution (similar properties)');
+      }
+    }
+    if (mutation.alternate_amino_acid === 'P') { score += 10; reasons.push('Proline — known helix breaker'); }
+    score = Math.max(0, Math.min(100, score));
+    if (score >= 70) return { level:'PATHOGENIC', label:'Pathogenic', color:'#EF4444', bgClass:'path-pathogenic', score, reasons, shortLabel:'P' };
+    if (score >= 45) return { level:'LIKELY_PATHOGENIC', label:'Likely Pathogenic', color:'#F59E0B', bgClass:'path-likely', score, reasons, shortLabel:'LP' };
+    if (score >= 25) return { level:'VUS', label:'Uncertain Significance', color:'#818CF8', bgClass:'path-vus', score, reasons, shortLabel:'VUS' };
+    return { level:'LIKELY_BENIGN', label:'Likely Benign', color:'#10B981', bgClass:'path-benign', score, reasons, shortLabel:'LB' };
+  }
+  // In-frame indel
+  score = domainMapping.functionalRegion === 'Critical' ? 55 : 30;
+  reasons.push(domainMapping.functionalRegion === 'Critical' ? 'In-frame indel in critical domain' : 'In-frame indel — impact depends on position');
+  if (score >= 45) return { level:'LIKELY_PATHOGENIC', label:'Likely Pathogenic', color:'#F59E0B', bgClass:'path-likely', score, reasons, shortLabel:'LP' };
+  return { level:'VUS', label:'Uncertain Significance', color:'#818CF8', bgClass:'path-vus', score, reasons, shortLabel:'VUS' };
 };
 
 const MAX_SEQ_LENGTH = 5000;
@@ -650,21 +702,184 @@ export default function TP53MutationAnalyzer() {
     if (!mutations) return;
     setLoadingAI(true); setError('');
     try {
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 1800));
       const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
-      let explanation = `${gene.symbol} Mutation Analysis Summary\n`;
-      explanation += `Gene: ${gene.name} (${gene.type}) · ${gene.chromosome}\n`;
-      explanation += `Transcript: ${gene.id}\n\n`;
-      explanation += `Detected ${mutations.summary.total_mutations} mutation(s) in the provided sequences.\n\n`;
-      explanation += `Clinical Context:\n${gene.clinicalContext}\n\n`;
-      if (mutations.summary.missense_mutations > 0) explanation += `Missense Mutations: ${mutations.summary.missense_mutations} detected. These substitutions alter amino acid identity and may affect ${gene.symbol} protein function.\n\n`;
-      if (mutations.summary.frameshift_mutations > 0) explanation += `Frameshift Mutations: ${mutations.summary.frameshift_mutations} detected. These indels disrupt the reading frame, likely producing truncated non-functional ${gene.symbol} protein.\n\n`;
-      if (mutations.summary.nonsense_mutations > 0) explanation += `Nonsense Mutations: ${mutations.summary.nonsense_mutations} detected. Premature stop codons result in truncated ${gene.symbol} protein.\n\n`;
-      const criticalDomain = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Critical');
-      if (criticalDomain.length > 0) explanation += `Critical Domain Alert: ${criticalDomain.length} mutation(s) detected in critical functional domains of ${gene.symbol}. These have high likelihood of functional impairment.\n\n`;
-      if (vcfMeta) explanation += `VCF Source: Variant ${vcfMeta.id} at ${vcfMeta.chrom}:${vcfMeta.pos} (${vcfMeta.ref} → ${vcfMeta.alt})\n\n`;
-      explanation += `Associated Cancers: ${gene.cancerAssociations.join(', ')}.`;
-      setAiExplanation(explanation);
+      const totalMut = mutations.summary.total_mutations;
+      const criticalMuts = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Critical');
+      const structuralMuts = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Structural');
+      const missenseMuts = annotatedMutations.filter(am => am.mutation.mutation_class === 'Missense');
+      const frameshiftMuts = annotatedMutations.filter(am => am.mutation.is_frameshift);
+      const nonsenseMuts = annotatedMutations.filter(am => am.mutation.mutation_class === 'Nonsense');
+      const silentMuts = annotatedMutations.filter(am => am.mutation.mutation_class === 'Silent');
+
+      // Gene-specific deep context
+      const GENE_DEEP_CONTEXT = {
+        TP53: {
+          mechanism: `TP53 (tumor protein p53) functions as a sequence-specific transcription factor and master regulator of the cellular stress response. Under normal conditions, p53 protein levels are kept low through continuous ubiquitin-mediated proteasomal degradation, primarily driven by MDM2 — a direct transcriptional target of p53 itself, forming a critical autoregulatory feedback loop. Upon cellular stress (DNA damage, oncogene activation, hypoxia, ribonucleotide depletion), this feedback loop is disrupted: ATM/ATR kinases phosphorylate p53 at Ser15, preventing MDM2 binding and leading to rapid p53 protein stabilization and nuclear accumulation.`,
+          function: `Once activated, p53 binds to specific DNA response elements as a tetramer and transactivates a broad network of target genes governing cell fate decisions: CDKN1A (p21) for G1/S cell cycle arrest, GADD45 for G2/M arrest, BAX and PUMA for apoptosis induction, and TIGAR for metabolic reprogramming. The DNA Binding Domain (residues 102–292) is the most evolutionarily conserved region of p53 and contains the majority of cancer-associated hotspot mutations — particularly at codons 175, 245, 248, 249, 273, and 282, which together account for over 30% of all TP53 mutations in human cancers.`,
+          therapeutics: `Therapeutically, TP53 mutations present unique challenges. Unlike oncogenes where a single targeted inhibitor can block constitutive activity, restoring lost tumor suppressor function requires either: (1) small molecules that refold mutant p53 back to wild-type conformation (e.g., APR-246/Eprenetapopt, now in clinical trials for TP53-mutant AML and MDS), (2) MDM2 inhibitors (nutlins, idasanutlin) for tumors retaining wild-type TP53, or (3) synthetic lethality approaches exploiting the vulnerability of TP53-null cells to WEE1 or CHK1 inhibition. Gain-of-function TP53 mutants (R175H, R273H, R248W) pose additional complexity, as they acquire novel oncogenic activities independent of the wild-type tumor suppressor role.`,
+          indianContext: `In the Indian subcontinent, TP53 mutations are particularly relevant in the context of oral squamous cell carcinoma (OSCC), which has among the highest global incidence rates in regions with high tobacco and betel nut consumption — including Maharashtra. Studies of OSCC in Indian patients consistently show TP53 mutation rates exceeding 50-60%, with a distinct mutational spectrum influenced by tobacco-specific carcinogens (4-aminobiphenyl, NNK) that preferentially induce G→T transversions at specific codons.`
+        },
+        BRCA1: {
+          mechanism: `BRCA1 is a large multi-domain scaffold protein (1,863 amino acids) that orchestrates the cellular response to DNA double-strand breaks (DSBs) — the most cytotoxic form of DNA damage. Following DSB induction, BRCA1 is rapidly recruited to damage foci through two parallel pathways: the RNF8/RNF168-H2AK15ub axis, and direct interaction with RAP80 via its tandem BRCT domains. BRCA1 forms distinct protein complexes (BRCA1-A, BRCA1-B, BRCA1-C) that perform non-redundant functions in DSB repair pathway choice and DNA end resection.`,
+          function: `BRCA1's most critical tumor suppressive function is promoting homologous recombination (HR) repair — the high-fidelity mechanism that uses a sister chromatid template to accurately repair DSBs during S/G2 phase. This requires BRCA1 interaction with PALB2 (via coiled-coil domain) and subsequent recruitment of BRCA2-RAD51 to initiate strand invasion. Loss of BRCA1-mediated HR forces cells to rely on error-prone repair pathways (NHEJ, MMEJ, SSA), generating chromosomal instability, copy number alterations, and the characteristic "BRCAness" genomic scar — defined by elevated HRD score, telomeric allelic imbalance, and large-scale state transitions.`,
+          therapeutics: `BRCA1-deficient tumors exhibit exquisite sensitivity to PARP inhibitors (olaparib, niraparib, rucaparib, talazoparib) — a clinically validated synthetic lethal strategy. With BRCA1 HR-deficient cells already compromised in DSB repair, PARP inhibition traps PARP1/2 at single-strand breaks, generating DSBs that cannot be repaired, leading to catastrophic genomic instability and cell death. PARP inhibitors are now FDA-approved for BRCA1/2-mutant breast, ovarian, pancreatic, and prostate cancers. Platinum chemotherapy (cisplatin, carboplatin) also exploits BRCAness by generating interstrand crosslinks requiring HR for resolution.`,
+          indianContext: `BRCA1 mutation prevalence in India shows distinct founder effects compared to Western populations. Studies from Indian breast cancer cohorts report BRCA1/2 mutation rates of 5-15% in unselected cases and up to 30% in high-risk families with early-onset disease. Genetic counseling and BRCA testing remain significantly underutilized in India due to cost barriers, limited genetic counselor availability, and psychosocial concerns — making accessible genomic analysis tools particularly valuable in this context.`
+        },
+        KRAS: {
+          mechanism: `KRAS encodes a small GTPase that functions as a binary molecular switch, cycling between an active GTP-bound state and an inactive GDP-bound state. Wild-type KRAS has intrinsic GTPase activity that hydrolyzes GTP to GDP, terminating downstream signaling. This hydrolysis is dramatically accelerated by GTPase-activating proteins (GAPs), particularly NF1. Cancer-associated KRAS mutations — most commonly at codons 12 (G12D, G12V, G12C, G12R, G12A, G12S) and 61 (Q61H, Q61L, Q61R) — impair intrinsic and GAP-stimulated GTP hydrolysis, locking KRAS in the constitutively active GTP-bound conformation.`,
+          function: `Constitutively active KRAS drives sustained activation of multiple downstream effector pathways simultaneously: (1) RAF-MEK-ERK MAPK cascade promoting proliferation and survival; (2) PI3K-AKT-mTOR pathway supporting anabolic metabolism and resistance to apoptosis; (3) RAL-GDS signaling for invasion; (4) PLCε-PKC for cytoskeletal remodeling. The specific mutation at codon 12 (G12 variant) influences effector preference and downstream signaling bias — G12D preferentially activates PI3K, while G12V more potently activates RAF. This allele-specific signaling has important therapeutic implications.`,
+          therapeutics: `KRAS was historically considered "undruggable" due to the absence of deep hydrophobic pockets for small molecule binding and the picomolar affinity of KRAS for GTP. This changed fundamentally with the discovery of a cryptic Switch II pocket (S-IIP) on the GDP-bound form of KRAS G12C. Covalent inhibitors sotorasib (AMG 510, FDA-approved 2021) and adagrasib (MRTX849, FDA-approved 2022) irreversibly bind the G12C cysteine neoepitope, locking KRAS in the inactive GDP-bound state — representing a landmark in oncology drug development. G12D and G12V inhibitors are in advanced clinical development.`,
+          indianContext: `In India, KRAS mutations are clinically most significant in colorectal and pancreatic cancers. KRAS mutation testing is now standard of care before initiating anti-EGFR therapy (cetuximab, panitumumab) in colorectal cancer — KRAS-mutant patients are excluded from anti-EGFR treatment as they show no benefit and potential harm. Access to molecular testing and targeted therapies remains a critical equity issue in the Indian oncology context.`
+        },
+        EGFR: {
+          mechanism: `EGFR (ErbB1/HER1) is a receptor tyrosine kinase (RTK) of the ErbB family that spans the plasma membrane, with an extracellular ligand-binding domain, a single transmembrane helix, and an intracellular kinase domain. Ligand binding (EGF, TGFα, amphiregulin) induces receptor dimerization and conformational activation of the kinase domain, triggering trans-autophosphorylation of C-terminal tyrosine residues that serve as docking sites for SH2-domain adaptor proteins (GRB2, SHC) and downstream effectors including RAS-MAPK and PI3K-AKT pathways.`,
+          function: `Oncogenic EGFR mutations in NSCLC are predominantly found in exons 18-21 encoding the kinase domain. Exon 19 in-frame deletions (del19, e.g., delE746-A750) and the exon 21 L858R point mutation together account for approximately 85-90% of EGFR-activating mutations. These mutations stabilize the active conformation of the kinase domain and increase ATP-binding affinity, resulting in constitutive kinase activity independent of ligand stimulation. Exon 20 insertions represent a distinct class with different structural consequences and TKI sensitivity profiles.`,
+          therapeutics: `EGFR-mutant NSCLC is one of the most effectively targeted cancers in oncology. First-generation TKIs (gefitinib, erlotinib) showed dramatic initial responses but were limited by acquired resistance — most commonly the T790M gatekeeper mutation (exon 20, ~60% of resistant cases). Second-generation irreversible TKIs (afatinib, dacomitinib) broadened ErbB family coverage but with increased toxicity. Third-generation osimertinib (AZD9291), which covalently targets both sensitizing mutations and T790M, is now the FDA-approved first-line standard of care and has significantly improved progression-free and overall survival. Liquid biopsy for EGFR mutation detection enables non-invasive monitoring of treatment response and resistance evolution.`,
+          indianContext: `EGFR mutation frequency in Indian NSCLC patients (25-35%) is substantially higher than in Western populations (10-15%), more closely approaching East Asian frequencies. This difference likely reflects genetic background and smoking patterns — EGFR mutations are more prevalent in never-smokers and adenocarcinoma histology. India has a growing burden of EGFR-mutant NSCLC, and access to affordable EGFR TKI therapy through generic formulations has significantly expanded treatment access.`
+        }
+      };
+
+      const deepCtx = GENE_DEEP_CONTEXT[selectedGene] || GENE_DEEP_CONTEXT.TP53;
+
+      let exp = '';
+
+      // ── HEADER ──────────────────────────────────────────────────────────────
+      exp += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+      exp += `  ${gene.icon} ${gene.symbol} CLINICAL MUTATION ANALYSIS REPORT\n`;
+      exp += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      exp += `Gene:        ${gene.symbol} — ${gene.name}\n`;
+      exp += `Type:        ${gene.type}\n`;
+      exp += `Transcript:  ${gene.id}\n`;
+      exp += `Chromosome:  ${gene.chromosome}\n`;
+      exp += `Protein:     ${gene.proteinLength} amino acids\n`;
+      exp += `Mutations:   ${totalMut} detected\n`;
+      if (vcfMeta) exp += `VCF Source:  ${vcfMeta.id} at ${vcfMeta.chrom}:${vcfMeta.pos} (${vcfMeta.ref} → ${vcfMeta.alt})\n`;
+      exp += `\n`;
+
+      // ── MUTATION SUMMARY ────────────────────────────────────────────────────
+      exp += `▶ MUTATION DETECTION SUMMARY\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      if (totalMut === 0) {
+        exp += `No mutations detected. Both sequences are identical after normalization.\n`;
+        exp += `This may represent a wild-type allele or an error in sequence entry.\n\n`;
+      } else {
+        exp += `Total variants identified: ${totalMut}\n\n`;
+        if (mutations.summary.snps > 0) exp += `• SNPs: ${mutations.summary.snps} single nucleotide polymorphism(s)\n`;
+        if (mutations.summary.insertions > 0) exp += `• Insertions: ${mutations.summary.insertions} insertion event(s)\n`;
+        if (mutations.summary.deletions > 0) exp += `• Deletions: ${mutations.summary.deletions} deletion event(s)\n`;
+        if (mutations.summary.frameshift_mutations > 0) exp += `• Frameshift: ${mutations.summary.frameshift_mutations} frameshift mutation(s) — HIGH SEVERITY\n`;
+        if (mutations.summary.missense_mutations > 0) exp += `• Missense: ${mutations.summary.missense_mutations} amino acid substitution(s)\n`;
+        if (mutations.summary.nonsense_mutations > 0) exp += `• Nonsense: ${mutations.summary.nonsense_mutations} premature stop codon(s) — HIGH SEVERITY\n`;
+        if (mutations.summary.silent_mutations > 0) exp += `• Silent: ${mutations.summary.silent_mutations} synonymous change(s) — likely benign\n`;
+        exp += `\n`;
+      }
+
+      // ── DOMAIN IMPACT ────────────────────────────────────────────────────────
+      if (annotatedMutations.length > 0) {
+        exp += `▶ PROTEIN DOMAIN IMPACT ANALYSIS\n`;
+        exp += `${'─'.repeat(60)}\n`;
+        if (criticalMuts.length > 0) {
+          exp += `⚠ CRITICAL DOMAIN MUTATIONS (${criticalMuts.length}):\n`;
+          criticalMuts.forEach(am => {
+            exp += `  · ${am.hgvs} → ${am.domainMapping.proteinDomain}\n`;
+            exp += `    ${am.domainMapping.interpretation}\n`;
+          });
+          exp += `\n`;
+        }
+        if (structuralMuts.length > 0) {
+          exp += `◈ STRUCTURAL DOMAIN MUTATIONS (${structuralMuts.length}):\n`;
+          structuralMuts.forEach(am => {
+            exp += `  · ${am.hgvs} → ${am.domainMapping.proteinDomain}\n`;
+          });
+          exp += `\n`;
+        }
+      }
+
+      // ── PER-MUTATION DETAIL ──────────────────────────────────────────────────
+      if (annotatedMutations.length > 0) {
+        exp += `▶ INDIVIDUAL MUTATION DETAILS\n`;
+        exp += `${'─'.repeat(60)}\n`;
+        annotatedMutations.forEach((am, i) => {
+          exp += `Mutation ${i + 1}: ${am.hgvs}\n`;
+          exp += `  Type:           ${am.mutation.type} (${am.mutation.mutation_class})\n`;
+          exp += `  Nucleotide Pos: ${am.positions.nucleotidePosition}\n`;
+          exp += `  Codon Number:   ${am.positions.codonNumber}\n`;
+          exp += `  Literature Pos: ${am.positions.literaturePosition}\n`;
+          exp += `  Domain:         ${am.domainMapping.proteinDomain} (${am.domainMapping.functionalRegion})\n`;
+          if (am.mutation.reference_amino_acid && am.mutation.alternate_amino_acid) {
+            exp += `  AA Change:      ${am.mutation.reference_amino_acid} → ${am.mutation.alternate_amino_acid}\n`;
+          }
+          exp += `  Confidence:     ${am.interpretation.confidence}\n`;
+          exp += `  Interpretation: ${am.interpretation.scientificNote}\n\n`;
+        });
+      }
+
+      // ── GENE MECHANISM ───────────────────────────────────────────────────────
+      exp += `▶ ${gene.symbol} — MOLECULAR MECHANISM\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      exp += `${deepCtx.mechanism}\n\n`;
+
+      exp += `▶ ${gene.symbol} — NORMAL FUNCTION & CANCER ROLE\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      exp += `${deepCtx.function}\n\n`;
+
+      // ── THERAPEUTIC CONTEXT ──────────────────────────────────────────────────
+      exp += `▶ THERAPEUTIC IMPLICATIONS\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      exp += `${deepCtx.therapeutics}\n\n`;
+
+      // ── CLINICAL SEVERITY ────────────────────────────────────────────────────
+      if (totalMut > 0) {
+        exp += `▶ OVERALL CLINICAL SEVERITY ASSESSMENT\n`;
+        exp += `${'─'.repeat(60)}\n`;
+        const severity = frameshiftMuts.length > 0 || nonsenseMuts.length > 0
+          ? 'HIGH — Truncating mutation detected. Likely complete loss of function.'
+          : criticalMuts.length > 0
+            ? 'MODERATE-HIGH — Missense in critical functional domain. Likely functional impairment.'
+            : missenseMuts.length > 0
+              ? 'MODERATE — Missense mutation detected. Functional impact depends on biochemical change and structural context.'
+              : silentMuts.length > 0
+                ? 'LOW — Synonymous substitution only. Protein sequence unchanged.'
+                : 'UNDETERMINED — Insufficient data for severity classification.';
+        exp += `Severity: ${severity}\n\n`;
+        exp += `Recommended follow-up:\n`;
+        if (frameshiftMuts.length > 0 || nonsenseMuts.length > 0) {
+          exp += `  1. Confirm with Sanger sequencing or NGS panel\n`;
+          exp += `  2. Assess for loss of heterozygosity (LOH) at ${gene.chromosome}\n`;
+          exp += `  3. Consider germline vs. somatic classification\n`;
+          exp += `  4. Refer to genetic counseling if germline suspicion\n`;
+        } else if (missenseMuts.length > 0) {
+          exp += `  1. Cross-reference with ClinVar and IARC databases\n`;
+          exp += `  2. In silico pathogenicity prediction (SIFT, PolyPhen-2, CADD)\n`;
+          exp += `  3. Evaluate in context of full tumor mutational burden\n`;
+        } else {
+          exp += `  1. Continue standard monitoring\n`;
+          exp += `  2. Re-evaluate if new clinical symptoms arise\n`;
+        }
+        exp += `\n`;
+      }
+
+      // ── INDIAN / REGIONAL CONTEXT ────────────────────────────────────────────
+      exp += `▶ INDIAN HEALTHCARE CONTEXT\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      exp += `${deepCtx.indianContext}\n\n`;
+
+      // ── CANCER ASSOCIATIONS ──────────────────────────────────────────────────
+      exp += `▶ ASSOCIATED CANCER TYPES\n`;
+      exp += `${'─'.repeat(60)}\n`;
+      gene.cancerAssociations.forEach((c, i) => { exp += `  ${i + 1}. ${c}\n`; });
+      exp += `\n`;
+
+      // ── DISCLAIMER ───────────────────────────────────────────────────────────
+      exp += `${'─'.repeat(60)}\n`;
+      exp += `⚕ DISCLAIMER: This analysis is for research and educational use\n`;
+      exp += `only. It does not constitute clinical diagnosis or medical advice.\n`;
+      exp += `All findings should be validated by a certified clinical laboratory\n`;
+      exp += `and interpreted by a licensed genetic counselor or oncologist.\n`;
+      exp += `${'─'.repeat(60)}\n`;
+
+      setAiExplanation(exp);
     } catch (e) { setError('AI analysis failed'); }
     finally { setLoadingAI(false); }
   };
@@ -726,7 +941,39 @@ export default function TP53MutationAnalyzer() {
     .variant-row.selected{ border-color:#06B6D4; background:rgba(6,182,212,.08); }
     .variant-row:hover:not(.selected){ border-color:#3a3d4a; }
     .vcf-badge{ display:inline-flex; align-items:center; gap:.3rem; background:rgba(139,92,246,.15); border:1px solid rgba(139,92,246,.35); color:#A78BFA; font-size:.78rem; font-weight:600; padding:.2rem .55rem; border-radius:6px; letter-spacing:.04em; text-transform:uppercase; }
-    @media(max-width:768px){ .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; } .summary-grid{ grid-template-columns:repeat(2,1fr); } .gene-grid{ grid-template-columns:repeat(2,1fr) !important; } }
+    .path-pathogenic{ background:rgba(220,38,38,.15); border:1px solid rgba(220,38,38,.4); border-radius:8px; padding:.75rem .9rem; margin-top:.75rem; }
+    .path-likely{ background:rgba(245,158,11,.12); border:1px solid rgba(245,158,11,.35); border-radius:8px; padding:.75rem .9rem; margin-top:.75rem; }
+    .path-benign{ background:rgba(16,185,129,.1); border:1px solid rgba(16,185,129,.3); border-radius:8px; padding:.75rem .9rem; margin-top:.75rem; }
+    .path-vus{ background:rgba(99,102,241,.12); border:1px solid rgba(99,102,241,.35); border-radius:8px; padding:.75rem .9rem; margin-top:.75rem; }
+    .path-label{ font-size:.82rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin-bottom:.35rem; display:flex; align-items:center; gap:.4rem; }
+    .path-bar-wrap{ height:6px; background:#1e2130; border-radius:3px; overflow:hidden; margin:.45rem 0; }
+    .path-bar{ height:100%; border-radius:3px; transition:width .6s ease; }
+    /* ── MOBILE ── */
+    @media(max-width:640px){
+      .pc{ padding:1rem; }
+      h1{ font-size:1.3rem !important; }
+      .seq-input-grid{ grid-template-columns:1fr; }
+      .config-grid{ grid-template-columns:1fr; }
+      .summary-grid{ grid-template-columns:repeat(2,1fr); }
+      .gene-grid{ grid-template-columns:repeat(2,1fr) !important; }
+      .action-grid{ grid-template-columns:1fr !important; }
+      .mode-tab{ padding:.55rem .7rem; font-size:.85rem; }
+      .header-badges{ flex-wrap:wrap; gap:.4rem; }
+      table{ font-size:.78rem; }
+      th,td{ padding:.45rem .4rem; }
+      .mut-card{ padding:.9rem; }
+      .vcf-drop{ padding:1.5rem 1rem; }
+      .sample-menu{ min-width:240px; max-width:calc(100vw - 2rem); }
+      .ai-box pre, .ai-box div{ font-size:.85rem !important; }
+      select, textarea{ font-size:.95rem; padding:.7rem .8rem; }
+    }
+    @media(max-width:768px){
+      .seq-input-grid{ grid-template-columns:1fr; }
+      .config-grid{ grid-template-columns:1fr; }
+      .summary-grid{ grid-template-columns:repeat(2,1fr); }
+      .gene-grid{ grid-template-columns:repeat(2,1fr) !important; }
+      .action-grid{ grid-template-columns:1fr !important; }
+    }
     @keyframes spin{ to{ transform:rotate(360deg); } }
     .spin{ display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,.25); border-top-color:#fff; border-radius:50%; animation:spin .5s linear infinite; }
     @keyframes fadeIn { from { opacity:0; } to { opacity:1; } }
@@ -739,13 +986,12 @@ export default function TP53MutationAnalyzer() {
     {/* HEADER */}
     <div style={{ background:'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom:'1px solid #1e2130', padding:'1.65rem 1.3rem 1.3rem', margin:'-1.25rem -1.2rem 0', marginBottom:'1.25rem' }}>
       <div style={{ maxWidth:860, margin:'0 auto' }}>
-        <div style={{ background:`linear-gradient(135deg, ${activeGene.color}22 0%, #083344 100%)`, border:`2px solid ${activeGene.color}55`, borderRadius:'14px', padding:'1.1rem 1.3rem', marginBottom:'.6rem', boxShadow:`0 8px 32px ${activeGene.color}25` }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'.75rem', flexWrap:'wrap' }}>
-            <span style={{ fontSize:'1.75rem' }}>{activeGene.icon}</span>
-            <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.75rem', color:'#fff', margin:0 }}>Cancer Gene Mutation Analyzer</h1>
-            <span style={{ background:'rgba(6,182,212,.2)', border:'1px solid rgba(6,182,212,.4)', color:'#67E8F9', fontSize:'.75rem', fontWeight:600, padding:'.25rem .6rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Research Grade</span>
-            <span className="vcf-badge">VCF Support</span>
-            <span style={{ background:'rgba(16,185,129,.15)', border:'1px solid rgba(16,185,129,.35)', color:'#6EE7B7', fontSize:'.75rem', fontWeight:600, padding:'.25rem .6rem', borderRadius:20, letterSpacing:'.08em', textTransform:'uppercase' }}>Multi-Gene Panel</span>
+        <div style={{ background:`linear-gradient(135deg, ${activeGene.color}22 0%, #083344 100%)`, border:`2px solid ${activeGene.color}55`, borderRadius:'14px', padding:'1rem 1.1rem', marginBottom:'.6rem', boxShadow:`0 8px 32px ${activeGene.color}25` }}>
+          <div className="header-badges" style={{ display:'flex', alignItems:'center', gap:'.6rem', flexWrap:'wrap' }}>
+            <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'clamp(1.2rem,4vw,1.75rem)', color:'#fff', margin:0, lineHeight:1.2 }}>Cancer Gene Mutation Analyzer</h1>
+            <span style={{ background:'rgba(6,182,212,.2)', border:'1px solid rgba(6,182,212,.4)', color:'#67E8F9', fontSize:'.72rem', fontWeight:600, padding:'.2rem .5rem', borderRadius:20, letterSpacing:'.07em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Research Grade</span>
+            <span className="vcf-badge" style={{ whiteSpace:'nowrap' }}>VCF Support</span>
+            <span style={{ background:'rgba(16,185,129,.15)', border:'1px solid rgba(16,185,129,.35)', color:'#6EE7B7', fontSize:'.72rem', fontWeight:600, padding:'.2rem .5rem', borderRadius:20, letterSpacing:'.07em', textTransform:'uppercase', whiteSpace:'nowrap' }}>Multi-Gene Panel</span>
           </div>
         </div>
         <p style={{ color:'#6b7080', fontSize:'1.05rem', lineHeight:1.6, maxWidth:600, margin:0 }}>Analyze mutations across cancer-associated genes — TP53, BRCA1, KRAS, EGFR — with codon-level resolution, domain annotation, and VCF support.</p>
@@ -757,26 +1003,25 @@ export default function TP53MutationAnalyzer() {
       <div style={{ display:'flex', alignItems:'center', gap:'.5rem', marginBottom:'1rem' }}>
         <span style={{ fontSize:'1.05rem' }}>🧫</span>
         <span style={{ fontSize:'1rem', fontWeight:600, color:'#6EE7B7' }}>Gene Panel Selection</span>
-        <span style={{ background:'rgba(16,185,129,.2)', border:'1px solid rgba(16,185,129,.4)', color:'#6EE7B7', fontSize:'.72rem', fontWeight:700, padding:'.18rem .48rem', borderRadius:8, textTransform:'uppercase', marginLeft:'.25rem' }}>Future Direction #1 — Implemented</span>
+        <span style={{ background:'rgba(16,185,129,.12)', border:'1px solid rgba(16,185,129,.3)', color:'#6EE7B7', fontSize:'.72rem', fontWeight:600, padding:'.18rem .48rem', borderRadius:8, textTransform:'uppercase', marginLeft:'.25rem' }}>4 Genes · Research Grade</span>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'.6rem' }}>
+      <div className="gene-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'.5rem' }}>
         {Object.values(GENE_PANEL).map(gene => (
           <button
             key={gene.symbol}
             onClick={() => { setSelectedGene(gene.symbol); setMutations(null); setAnnotatedMutations([]); setError(''); setAiExplanation(''); }}
             style={{
-              display:'flex', flexDirection:'column', alignItems:'center', gap:'.3rem',
-              padding:'.85rem .5rem',
+              display:'flex', flexDirection:'column', alignItems:'center', gap:'.25rem',
+              padding:'.75rem .4rem',
               background: selectedGene === gene.symbol ? `${gene.color}18` : '#0f1117',
               border: selectedGene === gene.symbol ? `2px solid ${gene.color}` : '1px solid #1e2130',
               borderRadius:10, cursor:'pointer', transition:'all .25s ease',
               boxShadow: selectedGene === gene.symbol ? `0 4px 16px ${gene.color}30` : 'none'
             }}
           >
-            <span style={{ fontSize:'1.4rem' }}>{gene.icon}</span>
-            <span style={{ fontFamily:'"JetBrains Mono",monospace', fontWeight:700, fontSize:'.95rem', color: selectedGene === gene.symbol ? gene.color : '#c8cad4' }}>{gene.symbol}</span>
-            <span style={{ fontSize:'.72rem', color:'#6b7080', textAlign:'center', lineHeight:1.3 }}>{gene.type}</span>
-            <span style={{ fontSize:'.7rem', color: selectedGene === gene.symbol ? gene.color+'cc' : '#3a3d4a', fontFamily:'"JetBrains Mono",monospace' }}>{gene.id.split('.')[0]}</span>
+            <span style={{ fontFamily:'"JetBrains Mono",monospace', fontWeight:700, fontSize:'clamp(.85rem,.9rem,1rem)', color: selectedGene === gene.symbol ? gene.color : '#c8cad4' }}>{gene.symbol}</span>
+            <span style={{ fontSize:'.68rem', color:'#6b7080', textAlign:'center', lineHeight:1.3 }}>{gene.type}</span>
+            <span style={{ fontSize:'.65rem', color: selectedGene === gene.symbol ? gene.color+'bb' : '#3a3d4a', fontFamily:'"JetBrains Mono",monospace' }}>{gene.id.split('.')[0]}</span>
           </button>
         ))}
       </div>
@@ -808,10 +1053,12 @@ export default function TP53MutationAnalyzer() {
     <div className={`info-wrap ${infoOpen?'open':'closed'}`}>
       <div className="pc" style={{ padding:'1.45rem' }}>
         <div style={{ display:'flex', alignItems:'center', gap:'.45rem', marginBottom:'.55rem' }}><span>🎯</span><span style={{ fontSize:'.95rem', fontWeight:600, color:'#06B6D4', textTransform:'uppercase', letterSpacing:'.07em' }}>Why This Tool Matters</span></div>
-        <p style={{ fontSize:'1.05rem', color:'#8a8f9e', lineHeight:1.75, margin:0 }}>This research-grade TP53 mutation analyzer maps all mutations to the canonical transcript <strong style={{color:'#10B981'}}>NM_000546.6</strong>. It provides multi-level position reporting, HGVS notation, protein domain annotation, biochemical property analysis, and <strong style={{color:'#A78BFA'}}>VCF file upload for NGS data</strong> — essential for cancer genomics research and clinical interpretation.</p>
+        <p style={{ fontSize:'1.05rem', color:'#8a8f9e', lineHeight:1.75, margin:0 }}>
+          This research-grade cancer gene mutation analyzer maps all mutations to canonical transcripts for <strong style={{color:'#10B981'}}>TP53, BRCA1, KRAS, and EGFR</strong>. It provides multi-level position reporting, HGVS notation, protein domain annotation, biochemical property analysis, and <strong style={{color:'#A78BFA'}}>VCF file upload for NGS data</strong> — essential for cancer genomics research and clinical interpretation. Currently analyzing: <strong style={{color:activeGene.color}}>{activeGene.icon} {activeGene.symbol} — {activeGene.name}</strong>.
+        </p>
         <div style={{ borderTop:'1px solid #24272f', margin:'1.1rem 0' }}></div>
-        <div style={{ fontSize:'.9rem', color:'#8a8f9e', padding:'.8rem', background:'rgba(6,182,212,.04)', borderRadius:'6px', borderLeft:'3px solid #06B6D4' }}>
-          <strong style={{ color:'#67E8F9' }}>Transcript Reference:</strong> {TP53_CANONICAL.id} – {TP53_CANONICAL.name} ({TP53_CANONICAL.type})
+        <div style={{ fontSize:'.9rem', color:'#8a8f9e', padding:'.8rem', background:`${activeGene.color}08`, borderRadius:'6px', borderLeft:`3px solid ${activeGene.color}` }}>
+          <strong style={{ color:activeGene.color }}>Active Transcript:</strong> {activeGene.id} – {activeGene.fullName}
         </div>
       </div>
     </div>
@@ -1046,7 +1293,7 @@ export default function TP53MutationAnalyzer() {
         <div className="warning"><strong>⚠️ Validation Warnings:</strong><ul style={{ marginTop:'0.5rem', paddingLeft:'1.5rem' }}>{mutations.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></div>
       )}
 
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'.8rem', marginBottom:'.8rem' }}>
+      <div className="action-grid" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'.8rem', marginBottom:'.8rem' }}>
         <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
           {loadingAI ? <><span className="spin"></span>Generating AI Analysis…</> : <><span>🤖</span>Get AI Explanation</>}
         </button>
@@ -1108,6 +1355,219 @@ export default function TP53MutationAnalyzer() {
         </div>
       )}
 
+      {/* ── 3D / STRUCTURE VISUALIZATION ─────────────────────────────────────── */}
+      {(() => {
+        const [showRCSB, setShowRCSB] = React.useState(false);
+        const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
+        const totalLen = gene.proteinLength;
+
+        // Collect mutation positions for pins
+        const mutPins = annotatedMutations.map(am => ({
+          pos: am.positions.aaPosition,
+          hgvs: am.hgvs,
+          mutClass: am.mutation.mutation_class,
+          isFrameshift: am.mutation.is_frameshift,
+          color: am.mutation.is_frameshift ? '#EF4444'
+            : am.mutation.mutation_class === 'Missense' ? '#FBBF24'
+            : am.mutation.mutation_class === 'Nonsense' ? '#EF4444'
+            : '#10B981'
+        }));
+
+        const domainColors = {
+          'Critical':    ['#0E7490','#0891B2','#06B6D4','#22D3EE'],
+          'Structural':  ['#6D28D9','#7C3AED','#8B5CF6','#A78BFA'],
+          'Regulatory':  ['#065F46','#047857','#059669','#34D399'],
+        };
+        const domainColorMap = {};
+        const colorCounters = { Critical:0, Structural:0, Regulatory:0 };
+
+        return (
+          <div className="pc" style={{ borderColor:'rgba(99,102,241,.35)', background:'rgba(99,102,241,.04)' }}>
+            {/* Section header */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'1rem', flexWrap:'wrap', gap:'.5rem' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'.5rem' }}>
+                <span style={{ fontSize:'1.1rem' }}>🔬</span>
+                <span style={{ fontSize:'1rem', fontWeight:600, color:'#c8cad4' }}>Protein Structure Visualization</span>
+                <span style={{ background:'rgba(99,102,241,.2)', border:'1px solid rgba(99,102,241,.4)', color:'#A78BFA', fontSize:'.72rem', fontWeight:600, padding:'.15rem .45rem', borderRadius:6, textTransform:'uppercase' }}>2D + 3D</span>
+              </div>
+              <span style={{ fontSize:'.82rem', color:'#6b7080' }}>{gene.symbol} · {gene.id} · {totalLen} aa</span>
+            </div>
+
+            {/* ── 2D DOMAIN ARCHITECTURE MAP ── */}
+            <div style={{ marginBottom:'1.2rem' }}>
+              <div style={{ fontSize:'.85rem', fontWeight:600, color:'#818CF8', textTransform:'uppercase', letterSpacing:'.07em', marginBottom:'.6rem' }}>
+                2D Domain Architecture
+              </div>
+
+              {/* Protein backbone bar */}
+              <div style={{ position:'relative', marginBottom:'2.8rem' }}>
+                {/* Ruler ticks */}
+                <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'.25rem' }}>
+                  {[0, 0.25, 0.5, 0.75, 1].map(f => (
+                    <span key={f} style={{ fontSize:'.7rem', color:'#4a4d5a', fontFamily:'"JetBrains Mono",monospace' }}>
+                      {Math.round(f * totalLen)}
+                    </span>
+                  ))}
+                </div>
+
+                {/* Base backbone */}
+                <div style={{ position:'relative', height:'28px', background:'#1a1d26', borderRadius:4, border:'1px solid #2a2d3a', overflow:'visible' }}>
+                  {/* Domain blocks */}
+                  {gene.domains.map((d, di) => {
+                    const fr = d.functionalRegion;
+                    const idx = colorCounters[fr] || 0;
+                    colorCounters[fr] = idx + 1;
+                    const palette = domainColors[fr] || domainColors.Critical;
+                    const col = palette[idx % palette.length];
+                    domainColorMap[d.name] = col;
+                    const left = ((d.start - 1) / totalLen) * 100;
+                    const width = ((d.end - d.start + 1) / totalLen) * 100;
+                    return (
+                      <div key={di} title={`${d.name} (${d.start}–${d.end})\n${d.description}`}
+                        style={{
+                          position:'absolute', top:0, left:`${left}%`, width:`${Math.max(width, 1.5)}%`,
+                          height:'100%', background:col, borderRadius:3, opacity:.9,
+                          cursor:'help', transition:'opacity .2s',
+                          display:'flex', alignItems:'center', justifyContent:'center', overflow:'hidden'
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                        onMouseLeave={e => e.currentTarget.style.opacity = 0.9}
+                      >
+                        {width > 6 && <span style={{ fontSize:'.6rem', color:'rgba(255,255,255,.9)', fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', padding:'0 3px' }}>
+                          {d.name.replace(' Domain','').replace(' Signal','').replace(' Region','')}
+                        </span>}
+                      </div>
+                    );
+                  })}
+
+                  {/* Mutation pins */}
+                  {mutPins.map((pin, pi) => {
+                    const pct = ((pin.pos - 1) / totalLen) * 100;
+                    return (
+                      <div key={pi} title={pin.hgvs}
+                        style={{ position:'absolute', top:'-2px', left:`${pct}%`, transform:'translateX(-50%)', zIndex:10, cursor:'pointer' }}>
+                        {/* Pin line */}
+                        <div style={{ width:2, height:36, background:pin.color, margin:'0 auto', borderRadius:1 }}></div>
+                        {/* Pin head */}
+                        <div style={{ width:10, height:10, background:pin.color, borderRadius:'50%', margin:'-6px auto 0', border:'2px solid #0c0e14', boxShadow:`0 0 6px ${pin.color}` }}></div>
+                        {/* Label below */}
+                        <div style={{ position:'absolute', top:'100%', left:'50%', transform:'translateX(-50%)', marginTop:4, whiteSpace:'nowrap', fontSize:'.62rem', color:pin.color, fontFamily:'"JetBrains Mono",monospace', fontWeight:600, background:'#0c0e14', padding:'1px 4px', borderRadius:3, border:`1px solid ${pin.color}44` }}>
+                          {pin.hgvs.split(':p.')[1] || pin.hgvs}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* AA position axis */}
+                <div style={{ display:'flex', justifyContent:'space-between', marginTop:'.3rem' }}>
+                  <span style={{ fontSize:'.68rem', color:'#4a4d5a' }}>1</span>
+                  <span style={{ fontSize:'.68rem', color:'#4a4d5a' }}>AA Position</span>
+                  <span style={{ fontSize:'.68rem', color:'#4a4d5a' }}>{totalLen}</span>
+                </div>
+              </div>
+
+              {/* Domain legend */}
+              <div style={{ display:'flex', flexWrap:'wrap', gap:'.45rem', marginTop:'.5rem' }}>
+                {gene.domains.map((d, di) => (
+                  <div key={di} style={{ display:'flex', alignItems:'center', gap:'.3rem', background:'#0f1117', border:'1px solid #1e2130', borderRadius:6, padding:'.25rem .55rem' }}>
+                    <div style={{ width:10, height:10, background:domainColorMap[d.name] || '#06B6D4', borderRadius:2, flexShrink:0 }}></div>
+                    <span style={{ fontSize:'.75rem', color:'#8a8f9e' }}>{d.name}</span>
+                    <span style={{ fontSize:'.7rem', color:'#4a4d5a', fontFamily:'"JetBrains Mono",monospace' }}>{d.start}–{d.end}</span>
+                    <span style={{ fontSize:'.68rem', color: d.functionalRegion==='Critical'?'#EF4444':d.functionalRegion==='Structural'?'#8B5CF6':'#10B981', fontWeight:600 }}>{d.functionalRegion}</span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Mutation pin legend */}
+              {mutPins.length > 0 && (
+                <div style={{ marginTop:'.75rem', padding:'.6rem .8rem', background:'rgba(0,0,0,.2)', border:'1px solid #1e2130', borderRadius:8 }}>
+                  <div style={{ fontSize:'.78rem', color:'#6b7080', fontWeight:600, marginBottom:'.4rem', textTransform:'uppercase', letterSpacing:'.05em' }}>Detected Mutations on Structure</div>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:'.4rem' }}>
+                    {mutPins.map((pin, pi) => (
+                      <div key={pi} style={{ display:'flex', alignItems:'center', gap:'.3rem', background:pin.color+'11', border:`1px solid ${pin.color}44`, borderRadius:5, padding:'.2rem .5rem' }}>
+                        <div style={{ width:8, height:8, background:pin.color, borderRadius:'50%' }}></div>
+                        <span style={{ fontSize:'.75rem', color:pin.color, fontFamily:'"JetBrains Mono",monospace', fontWeight:600 }}>{pin.hgvs.split(':p.')[1] || pin.hgvs}</span>
+                        <span style={{ fontSize:'.7rem', color:'#6b7080' }}>AA {pin.pos}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ── RCSB 3D VIEWER ── */}
+            <div style={{ borderTop:'1px solid #1e2130', paddingTop:'1rem' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'.6rem', marginBottom:'.75rem' }}>
+                <div>
+                  <div style={{ fontSize:'.85rem', fontWeight:600, color:'#818CF8', textTransform:'uppercase', letterSpacing:'.07em' }}>3D Crystal Structure · RCSB PDB</div>
+                  <div style={{ fontSize:'.82rem', color:'#6b7080', marginTop:'.2rem' }}>
+                    <span style={{ color:'#A78BFA', fontFamily:'"JetBrains Mono",monospace', fontWeight:600 }}>{gene.pdb.id}</span>
+                    {' — '}{gene.pdb.description}
+                  </div>
+                </div>
+                <div style={{ display:'flex', gap:'.5rem', flexWrap:'wrap' }}>
+                  <button
+                    onClick={() => setShowRCSB(v => !v)}
+                    style={{ display:'flex', alignItems:'center', gap:'.4rem', padding:'.5rem 1rem', background: showRCSB ? 'rgba(99,102,241,.25)' : 'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.45)', borderRadius:8, color:'#A78BFA', fontSize:'.88rem', fontWeight:600, cursor:'pointer', transition:'all .2s' }}
+                  >
+                    <span>{showRCSB ? '▲ Hide' : '▼ Load'}</span>
+                    <span>3D Viewer</span>
+                  </button>
+                  <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer"
+                    style={{ display:'flex', alignItems:'center', gap:'.4rem', padding:'.5rem 1rem', background:'rgba(6,182,212,.1)', border:'1px solid rgba(6,182,212,.35)', borderRadius:8, color:'#67E8F9', fontSize:'.88rem', fontWeight:600, textDecoration:'none' }}>
+                    ↗ RCSB PDB
+                  </a>
+                </div>
+              </div>
+
+              {showRCSB && (
+                <div style={{ borderRadius:10, overflow:'hidden', border:'1px solid rgba(99,102,241,.3)', background:'#0a0b0f' }}>
+                  <div style={{ padding:'.5rem .8rem', background:'rgba(99,102,241,.1)', borderBottom:'1px solid rgba(99,102,241,.2)', display:'flex', alignItems:'center', gap:'.5rem', flexWrap:'wrap' }}>
+                    <span style={{ fontSize:'.78rem', color:'#A78BFA', fontWeight:600 }}>PDB {gene.pdb.id}</span>
+                    <span style={{ fontSize:'.75rem', color:'#6b7080' }}>·</span>
+                    <span style={{ fontSize:'.78rem', color:'#8a8f9e' }}>{gene.pdb.name}</span>
+                    <span style={{ marginLeft:'auto', fontSize:'.72rem', color:'#4a4d5a' }}>Use mouse to rotate · scroll to zoom</span>
+                  </div>
+                  <iframe
+                    src={`https://www.rcsb.org/3d-view/${gene.pdb.id}`}
+                    width="100%"
+                    height="480"
+                    style={{ border:'none', display:'block' }}
+                    title={`${gene.symbol} 3D structure — PDB ${gene.pdb.id}`}
+                    loading="lazy"
+                    allowFullScreen
+                  />
+                  <div style={{ padding:'.5rem .8rem', background:'rgba(0,0,0,.3)', display:'flex', gap:'1rem', flexWrap:'wrap' }}>
+                    {[
+                      { col:'#06B6D4', label:'α-helix' },
+                      { col:'#FBBF24', label:'β-sheet' },
+                      { col:'#8a8f9e', label:'Loop' },
+                      { col:'#EF4444', label:'Hotspot residues' },
+                    ].map((item, i) => (
+                      <div key={i} style={{ display:'flex', alignItems:'center', gap:'.3rem' }}>
+                        <div style={{ width:10, height:10, background:item.col, borderRadius:2 }}></div>
+                        <span style={{ fontSize:'.75rem', color:'#6b7080' }}>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!showRCSB && (
+                <div style={{ display:'flex', alignItems:'center', gap:'1rem', padding:'.85rem 1rem', background:'#0f1117', border:'1px dashed #2a2d3a', borderRadius:10 }}>
+                  <div style={{ fontSize:'2.2rem', opacity:.4 }}>🧪</div>
+                  <div>
+                    <div style={{ fontSize:'.88rem', color:'#4a4d5a' }}>Click <strong style={{color:'#A78BFA'}}>Load 3D Viewer</strong> to embed the interactive RCSB structure for {gene.symbol}</div>
+                    <div style={{ fontSize:'.78rem', color:'#3a3d4a', marginTop:'.2rem' }}>Requires internet · Powered by RCSB Protein Data Bank · PDB {gene.pdb.id}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* DETAILED MUTATION REPORT */}
       {annotatedMutations.length > 0 && (
         <div className="pc">
@@ -1144,6 +1604,36 @@ export default function TP53MutationAnalyzer() {
                   <strong style={{ color:'#c8cad4' }}>Confidence:</strong> {am.interpretation.confidence} — {am.interpretation.confidenceReason}
                 </div>
               </div>
+
+              {/* ── PATHOGENICITY SCORE ── */}
+              {(() => {
+                const path = scorePathogenicity(am.mutation, am.domainMapping);
+                return (
+                  <div className={path.bgClass} style={{ marginTop:'.75rem' }}>
+                    <div className="path-label" style={{ color: path.color }}>
+                      <span style={{ fontSize:'1rem' }}>
+                        {path.level === 'PATHOGENIC' ? '🔴' : path.level === 'LIKELY_PATHOGENIC' ? '🟡' : path.level === 'VUS' ? '🔵' : '🟢'}
+                      </span>
+                      Pathogenicity: {path.label}
+                      <span style={{ marginLeft:'auto', background: path.color+'22', border:`1px solid ${path.color}55`, color: path.color, fontSize:'.7rem', fontWeight:700, padding:'.1rem .4rem', borderRadius:5 }}>{path.shortLabel}</span>
+                    </div>
+                    <div className="path-bar-wrap">
+                      <div className="path-bar" style={{ width:`${path.score}%`, background: path.score >= 70 ? '#EF4444' : path.score >= 45 ? '#F59E0B' : path.score >= 25 ? '#818CF8' : '#10B981' }}></div>
+                    </div>
+                    <div style={{ fontSize:'.78rem', color:'#6b7080', marginBottom:'.4rem' }}>Pathogenicity score: {path.score}/100</div>
+                    <div style={{ display:'flex', flexDirection:'column', gap:'.2rem' }}>
+                      {path.reasons.map((r, ri) => (
+                        <div key={ri} style={{ fontSize:'.8rem', color:'#8a8f9e', display:'flex', gap:'.4rem', alignItems:'flex-start' }}>
+                          <span style={{ color: path.color, flexShrink:0 }}>·</span>{r}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ marginTop:'.5rem', fontSize:'.75rem', color:'#4a4d5a', fontStyle:'italic', borderTop:'1px solid rgba(100,116,139,.15)', paddingTop:'.4rem' }}>
+                      Score based on domain location, biochemical change, and mutation class. Validate with ClinVar / PolyPhen-2.
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           ))}
         </div>
