@@ -308,839 +308,967 @@ const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta, 
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   ENHANCED 3D STRUCTURE VIEWER WITH CLICK-TO-SELECT & DOMAIN INFO
+   MOLECULAR CPK PANEL COMPONENT (always-visible ball-and-stick)
+   ═══════════════════════════════════════════════════════════════════════════ */
+function MolecularDetailPanel({ domain, gene, color }) {
+  const svgRef = useRef(null);
+  if (!domain) return null;
+
+  const rng = (s) => { let x = Math.sin(s * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  // Representative amino acids for the domain based on domain type
+  const AA_SEQ = ['G','A','V','L','I','P','F','W','M','S','T','C','Y','H','D','E','N','Q','K','R'];
+  const CPK = { C:'#22d3ee', N:'#3b82f6', O:'#ef4444', S:'#fbbf24', CA:'#06b6d4', H:'#e2e8f0' };
+
+  // Show more residues for a denser, more realistic diagram
+  const domLen = Math.min(domain.end - domain.start + 1, 24);
+  const W = 620, H = 230;
+  const padX = 32, padY = 20;
+  const startX = padX, endX = W - padX;
+  const baseY = H / 2 + 10;
+  const step = (endX - startX) / Math.max(domLen - 1, 1);
+  const ssType = domain.functionalRegion === 'Critical' ? 'helix' :
+                 domain.functionalRegion === 'Structural' ? 'sheet' : 'loop';
+
+  const atoms = [], bonds = [], hbonds = [];
+  const caPositions = [];
+
+  for (let i = 0; i < domLen; i++) {
+    const aa = AA_SEQ[(domain.start + i) % AA_SEQ.length];
+    const cx = startX + i * step;
+    let cy;
+    if (ssType === 'helix')       cy = baseY + Math.sin(i * 0.95) * 32;
+    else if (ssType === 'sheet')  cy = baseY + (i % 2 === 0 ? -22 : 22);
+    else                          cy = baseY + Math.sin(i * 0.6) * 18 + (rng(i * 3.7) - 0.5) * 9;
+    caPositions.push({ x: cx, y: cy });
+
+    const caIdx = atoms.length;
+    atoms.push({ x: cx, y: cy, elem: 'CA', label: `${aa}${domain.start + i}`, r: 7.5, col: CPK.CA });
+
+    // Backbone amide N — between this Cα and previous
+    if (i > 0) {
+      const prevCa = caPositions[i - 1];
+      const nIdx = atoms.length;
+      atoms.push({ x: (cx + prevCa.x) / 2, y: cy - 14, elem: 'N', label: 'N', r: 5.5, col: CPK.N });
+      bonds.push({ a: caIdx, b: nIdx, sc: false });
+      bonds.push({ a: nIdx, b: caIdx - 1 - (atoms.length - caIdx - 1), sc: false, prevCaIdx: caIdx-1 });
+    }
+
+    // Carbonyl C=O — between this and next Cα
+    if (i < domLen - 1) {
+      const cIdx = atoms.length;
+      atoms.push({ x: cx + step * 0.38, y: cy + 12, elem: 'C', label: "C'", r: 5, col: CPK.C });
+      bonds.push({ a: caIdx, b: cIdx, sc: false });
+      const oIdx = atoms.length;
+      // Carbonyl O slightly offset (double-bond implied)
+      atoms.push({ x: cx + step * 0.38 + (rng(i * 7.1) - 0.5) * 6, y: cy + 26, elem: 'O', label: 'O', r: 5, col: CPK.O });
+      bonds.push({ a: cIdx, b: oIdx, sc: false });
+    }
+
+    // Side chain Cβ
+    const scDir = i % 2 === 0 ? -1 : 1;
+    const scLen = 18 + rng(i * 5.7) * 15;
+    const scAngle = scDir * (0.9 + rng(i * 3.3) * 0.6);
+    const sc1x = cx + Math.sin(scAngle) * scLen;
+    const sc1y = cy - Math.cos(scAngle) * scLen;
+    const scElem = ['C','N','O','S','C','O','N','C','S','C','N','O','C','C','N','O','S','C','C','O','N','C','S','C'][i % 24];
+    const sc1Idx = atoms.length;
+    atoms.push({ x: sc1x, y: sc1y, elem: scElem, label: aa, r: 4.5, col: CPK[scElem] || CPK.C });
+    bonds.push({ a: caIdx, b: sc1Idx, sc: true });
+
+    // Cγ/Cδ for longer side chains (Arg, Lys, Glu, Gln, etc.)
+    if (['R','K','E','Q','N','D','H','W','Y','F','M','I','L'].includes(aa)) {
+      const sc2x = sc1x + Math.sin(scAngle + 0.6) * 12;
+      const sc2y = sc1y - Math.cos(scAngle + 0.6) * 12;
+      const sc2Elem = ['N','O','O','N','O','C','N','C','S','O'][i % 10];
+      const sc2Idx = atoms.length;
+      atoms.push({ x: sc2x, y: sc2y, elem: sc2Elem, label: sc2Elem, r: 4, col: CPK[sc2Elem] || CPK.C });
+      bonds.push({ a: sc1Idx, b: sc2Idx, sc: true });
+    }
+
+    // H-bonds: α-helix i→i+4, β-sheet i→i+2
+    if (ssType === 'helix' && i + 4 < domLen) {
+      hbonds.push({ x1: cx, y1: cy - 8, x2: startX + (i + 4) * step, y2: (caPositions[i+4]?.y ?? baseY) - 8 });
+    } else if (ssType === 'sheet' && i + 2 < domLen && i % 2 === 0) {
+      hbonds.push({ x1: cx, y1: cy, x2: startX + (i + 2) * step, y2: caPositions[i+2]?.y ?? baseY });
+    }
+  }
+
+  const cpkLegend = [
+    { col: '#06b6d4', label: 'Cα (backbone)' }, { col: '#3b82f6', label: 'N (amide)' },
+    { col: '#ef4444', label: 'O (carbonyl)' }, { col: '#22d3ee', label: "C'" }, { col: '#fbbf24', label: 'S' },
+  ];
+  const gradIds = {'CA':'mdgCA','N':'mdgN','O':'mdgO','C':'mdgC','S':'mdgS'};
+  const gradCols = {'CA':'#06b6d4','N':'#3b82f6','O':'#ef4444','C':'#22d3ee','S':'#fbbf24'};
+
+  return (
+    <div style={{ background: '#050810', border: '1px solid #152540', borderRadius: 10, overflow: 'hidden', marginBottom: '1rem' }}>
+      <div style={{ padding: '.55rem .9rem', background: 'rgba(6,182,212,.07)', borderBottom: '1px solid #152540', display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '.8rem', fontWeight: 700, color: '#67e8f9', textTransform: 'uppercase', letterSpacing: '.07em' }}>
+          ⚛ CPK Ball-and-Stick · {domain.name}
+        </span>
+        <span style={{ fontSize: '.68rem', color: '#2a3a50', fontFamily: '"JetBrains Mono",monospace' }}>
+          AA {domain.start}–{Math.min(domain.start+domLen-1,domain.end)} · {ssType==='helix'?'α-helix backbone':ssType==='sheet'?'β-strand ladder':'loop/coil'} · dashed = H-bonds
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: '.45rem', flexWrap: 'wrap' }}>
+          {cpkLegend.map((l, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.2rem' }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: l.col, boxShadow: `0 0 5px ${l.col}` }}></div>
+              <span style={{ fontSize: '.62rem', color: '#6b7080' }}>{l.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ overflowX: 'auto', background: '#020407' }}>
+        <svg ref={svgRef} width={W} height={H} style={{ display: 'block', minWidth: W }}>
+          <defs>
+            {/* Radial gradients for sphere-like atom appearance */}
+            {Object.entries(gradCols).map(([k,c]) => (
+              <radialGradient key={k} id={gradIds[k]} cx="30%" cy="28%" r="65%">
+                <stop offset="0%" stopColor="#ffffff" stopOpacity="0.55"/>
+                <stop offset="40%" stopColor={c} stopOpacity="1"/>
+                <stop offset="100%" stopColor={c} stopOpacity="0.55"/>
+              </radialGradient>
+            ))}
+            {/* Default gradient for other elements */}
+            <radialGradient id="mdgDef" cx="30%" cy="28%" r="65%">
+              <stop offset="0%" stopColor="#fff" stopOpacity="0.4"/>
+              <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.6"/>
+            </radialGradient>
+          </defs>
+
+          {/* Background grid (reference style) */}
+          {Array.from({length:8}).map((_,i)=>(
+            <line key={`g${i}`} x1={0} y1={i*(H/7)} x2={W} y2={i*(H/7)} stroke="#0c1020" strokeWidth="0.5"/>
+          ))}
+
+          {/* Backbone ribbon trace */}
+          <polyline points={caPositions.map(p=>`${p.x},${p.y}`).join(' ')}
+            fill="none" stroke={`#${color||'06b6d4'}`} strokeWidth="3.5" opacity="0.25"
+            strokeLinejoin="round" strokeLinecap="round"/>
+
+          {/* H-bonds (dashed blue, PyMOL/Chimera style) */}
+          {hbonds.map((hb,i)=>(
+            <line key={`hb${i}`} x1={hb.x1} y1={hb.y1} x2={hb.x2} y2={hb.y2}
+              stroke="#38bdf8" strokeWidth="1.3" strokeDasharray="5,3.5" opacity="0.6"/>
+          ))}
+
+          {/* Covalent bonds */}
+          {bonds.map((b,i)=>{
+            const a1=atoms[b.a];
+            const a2=b.prevCaIdx!==undefined ? atoms[b.prevCaIdx] : atoms[b.b];
+            if(!a1||!a2) return null;
+            return <line key={`b${i}`} x1={a1.x} y1={a1.y} x2={a2.x} y2={a2.y}
+              stroke={b.sc?'#0f1e30':'#1a3558'} strokeWidth={b.sc?1.2:1.8} opacity={b.sc?0.6:0.85}/>;
+          })}
+
+          {/* Atom spheres with lighting gradients */}
+          {atoms.map((a,i)=>{
+            const gId = gradIds[a.elem] || 'mdgDef';
+            const glow = a.elem==='CA' ? 0.25 : a.elem==='O' ? 0.2 : 0.12;
+            return (
+              <g key={`a${i}`}>
+                {/* Outer glow */}
+                <circle cx={a.x} cy={a.y} r={a.r+3.5} fill={a.col} opacity={glow}/>
+                {/* Atom sphere with gradient */}
+                <circle cx={a.x} cy={a.y} r={a.r} fill={`url(#${gId})`} stroke={a.col} strokeWidth="0.5"/>
+                {/* Residue label above Cα atoms */}
+                {a.elem==='CA'&&(
+                  <text x={a.x} y={a.y-a.r-4} textAnchor="middle" fontSize="6.5"
+                    fill={a.col} fontFamily='"JetBrains Mono",monospace' fontWeight="600" opacity="0.85">
+                    {a.label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* SS type label */}
+          <text x={6} y={H-6} textAnchor="start" fontSize="8" fill="#0e1a2e"
+            fontFamily='"JetBrains Mono",monospace' fontWeight="600">
+            {ssType==='helix'?'α-HELIX':ssType==='sheet'?'β-STRAND':'LOOP/COIL'} · CPK colours · H-bonds dashed
+          </text>
+          <text x={W-6} y={H-6} textAnchor="end" fontSize="8" fill="#0e1a2e"
+            fontFamily='"JetBrains Mono",monospace'>
+            {gene.symbol} · {domain.name}
+          </text>
+        </svg>
+      </div>
+      {domain.detail && (
+        <div style={{ padding: '.6rem .9rem', borderTop: '1px solid #0f1620', background: '#030508', display:'flex', gap:'.5rem', alignItems:'flex-start' }}>
+          <span style={{fontSize:'.78rem',color:'#2a4060',fontWeight:700,textTransform:'uppercase',letterSpacing:'.05em',flexShrink:0,marginTop:'.05rem'}}>Key residues:</span>
+          <span style={{ fontSize: '.78rem', color: '#3a5a80', fontFamily: '"JetBrains Mono",monospace', lineHeight: 1.65 }}>{domain.detail}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3D MOLECULAR VIEWER — FULLY CONNECTED RIBBON + CPK ATOMS + ZOOM-TO-DOMAIN
    ═══════════════════════════════════════════════════════════════════════════ */
 function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
   const containerRef = useRef(null);
-  const frameRef = useRef(null);
-  const sceneStateRef = useRef(null);
+  const frameRef    = useRef(null);
+  const sceneRef    = useRef({});        // ← was sceneStateRef, now properly declared
   const [clickedDomain, setClickedDomain] = useState(null);
-  const [isSpinning, setIsSpinning] = useState(true);
-  const [hoveredDomain, setHoveredDomain] = useState(null);
-  const [tooltip, setTooltip] = useState(null);
+  const [isSpinning,    setIsSpinning]    = useState(true);
+  const [tooltip,       setTooltip]       = useState(null);
+  const [viewMode,      setViewMode]      = useState('ribbon'); // 'ribbon'|'ballstick'|'cpk'
 
-  // Build segment list with domain info for raycasting
-  // ─── CONTINUOUS BACKBONE BUILDER ───────────────────────────────────────────
-  // Returns a flat array of {aa, x, y, z, ss, domain} with NO gaps.
-  // Each point's y/z is computed from the PREVIOUS point's y/z, so the chain
-  // is always connected. Helices and sheets use trig offsets relative to the
-  // segment's own entry y/z so they also inherit continuity.
+  // ─── CONTINUOUS BACKBONE BUILDER v3 ───────────────────────────────────────
+  // ROOT FIX: The chain CENTER advances through 3D space — helices/sheets coil
+  // AROUND a moving center rather than returning to zero. No more isolated blobs.
   const buildBackbone = useCallback((gene) => {
-    // Secondary structure layout — just AA ranges + type + turns (no y/z here!)
     const SS_DEFS = {
       TP53: [
-        {t:'loop', s:1,  e:30},  {t:'helix',s:30, e:55,  turns:2},
-        {t:'loop', s:55, e:93},  {t:'sheet',s:102,e:125},
-        {t:'loop', s:125,e:140}, {t:'sheet',s:140,e:162},
-        {t:'loop', s:162,e:175}, {t:'helix',s:175,e:200, turns:3},
-        {t:'loop', s:200,e:220}, {t:'sheet',s:220,e:240},
-        {t:'loop', s:240,e:255}, {t:'sheet',s:255,e:275},
-        {t:'loop', s:275,e:292}, {t:'loop', s:292,e:320},
-        {t:'helix',s:320,e:356, turns:3}, {t:'loop',s:356,e:370},
-        {t:'helix',s:370,e:393, turns:2},
+        {t:'loop',s:1,e:30},{t:'helix',s:30,e:55,turns:2.5},
+        {t:'loop',s:55,e:93},{t:'sheet',s:102,e:125},
+        {t:'loop',s:125,e:140},{t:'sheet',s:140,e:162},
+        {t:'loop',s:162,e:175},{t:'helix',s:175,e:200,turns:3},
+        {t:'loop',s:200,e:220},{t:'sheet',s:220,e:240},
+        {t:'loop',s:240,e:255},{t:'sheet',s:255,e:275},
+        {t:'loop',s:275,e:292},{t:'loop',s:292,e:320},
+        {t:'helix',s:320,e:356,turns:3.5},{t:'loop',s:356,e:370},
+        {t:'helix',s:370,e:393,turns:2},
       ],
-      KRAS: [
-        {t:'loop', s:1,  e:10},  {t:'helix',s:10, e:18, turns:1.2},
-        {t:'sheet',s:18, e:30},  {t:'loop', s:30, e:42},
-        {t:'sheet',s:42, e:57},  {t:'loop', s:57, e:76},
-        {t:'helix',s:76, e:93,  turns:2}, {t:'sheet',s:93,e:116},
-        {t:'loop', s:116,e:130}, {t:'helix',s:130,e:155,turns:2.5},
-        {t:'sheet',s:155,e:167}, {t:'loop', s:167,e:189},
+      KRAS:[
+        {t:'loop',s:1,e:10},{t:'helix',s:10,e:18,turns:1.5},
+        {t:'sheet',s:18,e:30},{t:'loop',s:30,e:42},
+        {t:'sheet',s:42,e:57},{t:'loop',s:57,e:76},
+        {t:'helix',s:76,e:93,turns:2.5},{t:'sheet',s:93,e:116},
+        {t:'loop',s:116,e:130},{t:'helix',s:130,e:155,turns:3},
+        {t:'sheet',s:155,e:167},{t:'loop',s:167,e:189},
       ],
-      BRCA1: [
-        {t:'helix',s:1,   e:45,   turns:3}, {t:'loop',s:45,  e:109},
-        {t:'loop', s:109, e:500},            {t:'loop',s:500, e:900},
-        {t:'loop', s:900, e:1364},           {t:'helix',s:1364,e:1437,turns:6},
-        {t:'loop', s:1437,e:1642},           {t:'helix',s:1642,e:1680,turns:3},
-        {t:'sheet',s:1680,e:1710},           {t:'helix',s:1710,e:1736,turns:2.5},
-        {t:'loop', s:1736,e:1756},           {t:'helix',s:1756,e:1800,turns:4},
-        {t:'sheet',s:1800,e:1830},           {t:'helix',s:1830,e:1863,turns:2.5},
+      BRCA1:[
+        {t:'helix',s:1,e:45,turns:3},{t:'loop',s:45,e:109},
+        {t:'loop',s:109,e:500},{t:'loop',s:500,e:900},
+        {t:'loop',s:900,e:1364},{t:'helix',s:1364,e:1437,turns:6},
+        {t:'loop',s:1437,e:1642},{t:'helix',s:1642,e:1680,turns:3},
+        {t:'sheet',s:1680,e:1710},{t:'helix',s:1710,e:1736,turns:2.5},
+        {t:'loop',s:1736,e:1756},{t:'helix',s:1756,e:1800,turns:4},
+        {t:'sheet',s:1800,e:1830},{t:'helix',s:1830,e:1863,turns:2.5},
       ],
-      EGFR: [
-        {t:'loop', s:1,  e:100},  {t:'helix',s:100,e:180,turns:5},
-        {t:'loop', s:180,e:360},  {t:'helix',s:360,e:480,turns:7},
-        {t:'loop', s:480,e:646},  {t:'loop', s:646,e:712},
-        {t:'sheet',s:712,e:735},  {t:'loop', s:735,e:756},
-        {t:'helix',s:756,e:790,turns:3}, {t:'loop',s:790,e:835},
-        {t:'sheet',s:835,e:858},  {t:'loop', s:858,e:870},
-        {t:'helix',s:870,e:940,turns:5}, {t:'sheet',s:940,e:960},
-        {t:'helix',s:960,e:979,turns:2}, {t:'loop', s:979,e:1100},
+      EGFR:[
+        {t:'loop',s:1,e:100},{t:'helix',s:100,e:180,turns:5},
+        {t:'loop',s:180,e:360},{t:'helix',s:360,e:480,turns:7},
+        {t:'loop',s:480,e:646},{t:'loop',s:646,e:712},
+        {t:'sheet',s:712,e:735},{t:'loop',s:735,e:756},
+        {t:'helix',s:756,e:790,turns:3},{t:'loop',s:790,e:835},
+        {t:'sheet',s:835,e:858},{t:'loop',s:858,e:870},
+        {t:'helix',s:870,e:940,turns:5},{t:'sheet',s:940,e:960},
+        {t:'helix',s:960,e:979,turns:2},{t:'loop',s:979,e:1100},
         {t:'helix',s:1100,e:1180,turns:5},{t:'loop',s:1180,e:1210},
       ],
     };
-
-    const rng = seed => { let x = Math.sin(seed + 1) * 43758.5453; return x - Math.floor(x); };
-    const defs = (SS_DEFS[gene.symbol] || SS_DEFS.TP53).map(d => ({
-      ...d,
-      domain: gene.domains.find(dom => ((d.s + d.e) / 2) >= dom.start && ((d.s + d.e) / 2) <= dom.end) || null,
+    const rng=seed=>{let x=Math.sin(seed+1.9)*43758.5453;return x-Math.floor(x);};
+    const defs=(SS_DEFS[gene.symbol]||SS_DEFS.TP53).map(d=>({
+      ...d,domain:gene.domains.find(dom=>((d.s+d.e)/2)>=dom.start&&((d.s+d.e)/2)<=dom.end)||null,
     }));
+    const total=gene.proteinLength;
+    const toX=aa=>((aa-1)/(total-1))*120-60;
 
-    const total = gene.proteinLength;
-    const toX = aa => ((aa - 1) / (total - 1)) * 120 - 60;
-
-    // Walk the chain — each segment starts AND ends at the same backbone
-    // center-line (curY/curZ). Helices/sheets coil AROUND the center and
-    // smoothly return to it. Loops drift gently and ease back before they end.
-    const pts = []; // { aa, x, y, z, ss, domain, segIdx }
-    let curY = 0, curZ = 0;
-
-    defs.forEach((seg, si) => {
-      const len = seg.e - seg.s;
-      const steps = Math.max(seg.t === 'helix' ? len * 3 : len * 1.5, 12);
-      const entryY = curY, entryZ = curZ;
-      // Target exit: same as entry so segments always connect flush
-      const exitY = entryY, exitZ = entryZ;
-
-      for (let k = 0; k <= steps; k++) {
-        const t = k / steps;
-        const aa = seg.s + t * len;
-        const x = toX(aa);
-        let y, z;
-
-        if (seg.t === 'helix') {
-          // Coil around centerline: sin/cos amplitude with smooth envelope
-          // Envelope = sin(t*π) so it rises from 0 and returns to 0 → starts and ends at entryY/Z
-          const envelope = Math.sin(t * Math.PI);
-          const turns = seg.turns || 2;
-          const angle = t * Math.PI * 2 * turns;
-          y = entryY + Math.sin(angle) * 5.0 * envelope;
-          z = entryZ + Math.cos(angle) * 3.5 * envelope;
-        } else if (seg.t === 'sheet') {
-          // Flat ribbon wave, sin envelope guarantees start=end=entryY/Z
-          const envelope = Math.sin(t * Math.PI);
-          y = entryY + envelope * 4.0 * Math.sin(t * Math.PI * 1.5);
-          z = entryZ + envelope * 2.0;
+    /* ── v3: chain CENTER advances continuously through 3D space ──────────
+       Each segment shifts cY/cZ by a random delta → no more "collapsing to
+       same point" at boundaries.  Helix/sheet coils AROUND the moving center.
+       ──────────────────────────────────────────────────────────────────── */
+    const pts=[];
+    let cY=0,cZ=0;
+    defs.forEach((seg,si)=>{
+      const len=seg.e-seg.s;
+      const steps=Math.max(seg.t==='helix'?len*4:len*2,16);
+      // Where does this segment's CENTER drift to?
+      const dY=(rng(si*17.3+1)-0.5)*(seg.t==='loop'?11:6);
+      const dZ=(rng(si*17.3+5)-0.5)*(seg.t==='loop'? 8:4);
+      const eCY=Math.max(-18,Math.min(18,cY+dY));
+      const eCZ=Math.max(-18,Math.min(18,cZ+dZ));
+      const entryCY=cY,entryCZ=cZ;
+      for(let k=0;k<=steps;k++){
+        const t=k/steps;
+        const aa=seg.s+t*len;
+        const x=toX(aa);
+        // Smoothstep interpolation of center position
+        const sm=t*t*(3-2*t);
+        const centY=entryCY+(eCY-entryCY)*sm;
+        const centZ=entryCZ+(eCZ-entryCZ)*sm;
+        let y,z;
+        if(seg.t==='helix'){
+          // Short fade at tips (5%) so the join is smooth, not a spike
+          const env=Math.min(1,Math.min(t/0.05,(1-t)/0.05));
+          const angle=t*Math.PI*2*(seg.turns||2);
+          y=centY+Math.sin(angle)*5.5*env;
+          z=centZ+Math.cos(angle)*3.5*env;
+        } else if(seg.t==='sheet'){
+          const env=Math.min(1,Math.min(t/0.05,(1-t)/0.05));
+          y=centY+Math.sin(t*Math.PI*3)*4.5*env;
+          z=centZ+Math.cos(t*Math.PI*2)*2.5*env;
         } else {
-          // Loop: random walk with strong pull back to exitY/Z near the end
-          if (k === 0) { y = entryY; z = entryZ; }
-          else {
-            const prev = pts[pts.length - 1];
-            // Remaining fraction: pull harder as we approach end
-            const remaining = 1 - t;
-            const pullStrength = t > 0.7 ? (t - 0.7) / 0.3 : 0; // 0..1 over last 30%
-            const dy = (rng(si * 997 + k * 7.3) - 0.5) * 2.0 * (1 - pullStrength);
-            const dz = (rng(si * 997 + k * 3.1 + 0.5) - 0.5) * 2.0 * (1 - pullStrength);
-            const rawY = prev.y + dy;
-            const rawZ = prev.z + dz;
-            // Blend toward exit over the last 30%
-            y = rawY * (1 - pullStrength) + exitY * pullStrength;
-            z = rawZ * (1 - pullStrength) + exitZ * pullStrength;
-            y = Math.max(-16, Math.min(16, y));
-            z = Math.max(-16, Math.min(16, z));
-          }
+          // Loop: follow center with small wobble
+          const wY=(rng(si*997+k*7.1)-0.5)*1.2;
+          const wZ=(rng(si*997+k*3.9)-0.5)*1.2;
+          y=centY+wY; z=centZ+wZ;
         }
-
-        // Don't duplicate the shared endpoint
-        if (k === 0 && pts.length > 0) continue;
-
-        pts.push({ aa, x, y, z, ss: seg.t, domain: seg.domain, segIdx: si });
-        curY = y; curZ = z;
+        if(k===0&&pts.length>0) continue;
+        pts.push({aa,x,y,z,ss:seg.t,domain:seg.domain,segIdx:si});
       }
-      // Force exact continuity: overwrite last point to precisely entryY/Z
-      // (helix/sheet envelope is ~0 at t=1 anyway, but floating-point may drift)
-      if (pts.length > 0) {
-        pts[pts.length - 1].y = entryY;
-        pts[pts.length - 1].z = entryZ;
-        curY = entryY; curZ = entryZ;
-      }
+      cY=eCY; cZ=eCZ;
     });
+    return {pts,defs};
+  },[]);
 
-    return { pts, defs };
-  }, []);
+  /* ── 3D Viewer Init useEffect ─────────────────────────────────────── */
+  useEffect(()=>{
+    if(!showRCSB) return;
+    const container = containerRef.current;
+    if(!container) return;
+    const W = container.offsetWidth || 820;
 
-  useEffect(() => {
-    if (!showRCSB) return;
-    const timer = setTimeout(() => {
-      const container = containerRef.current;
-      if (!container) return;
-      const W = container.offsetWidth || 800;
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || W < 600;
-      const H = isMobile ? 320 : 480;
-      const go = () => {
+    const timer = setTimeout(()=>{
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)||W<600;
+      const H  = isMobile ? 380 : 480;
+
+      const launch = ()=>{
         const THREE = window.THREE;
-        const renderer = new THREE.WebGLRenderer({ antialias: !isMobile, powerPreference: isMobile ? 'low-power' : 'default' });
-        renderer.setSize(W, H);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1 : 2));
-        renderer.setClearColor(0x060810, 1);
-        container.innerHTML = '';
+
+        /* ── Renderer ── */
+        const renderer = new THREE.WebGLRenderer({antialias:!isMobile,alpha:false,
+          powerPreference:isMobile?'low-power':'high-performance'});
+        renderer.setSize(W,H);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio,isMobile?2:2));
+        renderer.setClearColor(0x04060f,1);
+        renderer.shadowMap.enabled = false;
+        container.innerHTML='';
         container.appendChild(renderer.domElement);
-        renderer.domElement.style.width = '100%';
-        renderer.domElement.style.height = H + 'px';
-        renderer.domElement.style.display = 'block';
+        Object.assign(renderer.domElement.style,{width:'100%',height:H+'px',display:'block'});
 
-        const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x060810, 0.005);
-        const camera = new THREE.PerspectiveCamera(38, W / H, 0.1, 2000);
-        camera.position.set(0, 20, 160);
+        /* ── Scene & Camera ── */
+        const scene  = new THREE.Scene();
+        scene.fog    = new THREE.FogExp2(0x04060f,0.006);
+        const camera = new THREE.PerspectiveCamera(isMobile?48:40,W/H,0.1,2000);
+        camera.position.set(0, isMobile ? 18 : 15, isMobile ? 170 : 155);
+        camera.lookAt(0,0,0);
 
-        // Enhanced lighting
-        scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-        const key = new THREE.DirectionalLight(0x67e8f9, 3.0);
-        key.position.set(50, 80, 60);
-        scene.add(key);
-        const fill = new THREE.DirectionalLight(0xa78bfa, 1.5);
-        fill.position.set(-60, -30, -40);
-        scene.add(fill);
-        const back = new THREE.DirectionalLight(0xfbbf24, 1.0);
-        back.position.set(0, -60, -80);
-        scene.add(back);
-        const rim = new THREE.DirectionalLight(0xffffff, 0.6);
-        rim.position.set(0, 100, -100);
-        scene.add(rim);
+        /* ── Lights ── */
+        scene.add(new THREE.AmbientLight(0xffffff,0.5));
+        const key=new THREE.DirectionalLight(0x67e8f9,3.5); key.position.set(60,90,70); scene.add(key);
+        const fill=new THREE.DirectionalLight(0xa78bfa,1.8); fill.position.set(-70,-40,-50); scene.add(fill);
+        const back=new THREE.DirectionalLight(0xfbbf24,1.2); back.position.set(0,-70,-90); scene.add(back);
+        const rim =new THREE.DirectionalLight(0xffffff,0.7); rim.position.set(0,110,-110); scene.add(rim);
+        const selLight=new THREE.PointLight(0xffffff,0,60); scene.add(selLight);
 
-        // Point lights for selected glow effect
-        const selectionLight = new THREE.PointLight(0xffffff, 0, 50);
-        scene.add(selectionLight);
+        /* ── Build backbone ── */
+        const {pts:allPts,defs:bbDefs} = buildBackbone(gene);
+        // On mobile subsample to ~half
+        const pts = isMobile ? allPts.filter((_,i)=>i%2===0||i===allPts.length-1) : allPts;
 
-        const COLORS = {
-          Critical: [0x06b6d4, 0x22d3ee, 0x0891b2],
-          Structural: [0x8b5cf6, 0xa78bfa, 0x7c3aed],
-          Regulatory: [0x10b981, 0x34d399, 0x059669],
-          loop: 0x1e2840,
+        /* ── Color helpers ── */
+        const DOMAIN_COLS = {Critical:[0x06b6d4,0x22d3ee,0x0891b2],Structural:[0x8b5cf6,0xa78bfa,0x7c3aed],Regulatory:[0x10b981,0x34d399,0x059669]};
+        const LOOP_COL = 0x1a2535;
+        const domainAt = aa=>gene.domains.find(d=>aa>=d.start&&aa<=d.end)||null;
+        const colOf   = aa=>{
+          const d=domainAt(aa); if(!d) return LOOP_COL;
+          const pal=DOMAIN_COLS[d.functionalRegion]||DOMAIN_COLS.Critical;
+          const idx=gene.domains.filter(x=>x.functionalRegion===d.functionalRegion).indexOf(d);
+          return pal[Math.max(0,idx)%pal.length];
         };
 
-        const domainAt = (aa) => gene.domains.find(d => aa >= d.start && aa <= d.end) || null;
-        const colorOf = (aa, selected = false, hovered = false) => {
-          const d = domainAt(aa);
-          if (!d) return selected ? 0x4a5568 : hovered ? 0x2d3748 : COLORS.loop;
-          const pal = COLORS[d.functionalRegion] || COLORS.Critical;
-          const idx = gene.domains.filter(x => x.functionalRegion === d.functionalRegion).indexOf(d);
-          const base = pal[Math.max(0, idx) % pal.length];
-          if (selected) return base;
-          if (hovered) return base;
-          return base;
+        /* ── Geometry helpers ── */
+        const makeTube=(vpts,r,col,emiss=0.18,opacity=1,shine=140)=>{
+          if(vpts.length<2) return null;
+          const curve=new THREE.CatmullRomCurve3(vpts,false,'catmullrom',0.5);
+          const segs=Math.max(vpts.length*(isMobile?2:4),isMobile?8:20);
+          const geo=new THREE.TubeGeometry(curve,segs,r,isMobile?6:10,false);
+          const mat=new THREE.MeshPhongMaterial({color:col,emissive:col,emissiveIntensity:emiss,shininess:shine,specular:0x336688,transparent:opacity<1,opacity});
+          return new THREE.Mesh(geo,mat);
         };
 
-        // ── Subtle grid floor ──────────────────────────────────────────
-        const gridHelper = new THREE.GridHelper(200, 40, 0x1a1a2e, 0x1a1a2e);
-        gridHelper.position.y = -30;
-        gridHelper.material.opacity = 0.3;
-        gridHelper.material.transparent = true;
-        scene.add(gridHelper);
+        /* ── Groups ── */
+        const root       = new THREE.Group(); root.rotation.x=0.15; scene.add(root);
+        const ribbonGrp  = new THREE.Group(); root.add(ribbonGrp);
+        const atomGrp    = new THREE.Group(); root.add(atomGrp); atomGrp.visible=false;
+        const pinGrp     = new THREE.Group(); root.add(pinGrp);
 
-        const makeTube = (pts, radius, col, emissInt = 0.2, opacity = 1, shininess = 130) => {
-          if (pts.length < 2) return null;
-          const curve = new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.5);
-          const segs = Math.max(pts.length * (isMobile ? 2 : 4), isMobile ? 12 : 24);
-          const geo = new THREE.TubeGeometry(curve, segs, radius, isMobile ? 6 : 12, false);
-          const mat = new THREE.MeshPhongMaterial({
-            color: col, emissive: col, emissiveIntensity: emissInt,
-            shininess, specular: 0x446688,
-            transparent: opacity < 1, opacity,
-          });
-          return new THREE.Mesh(geo, mat);
-        };
+        /* ─────────────────────────────────────────────────────────────────
+           RIBBON — split pts by segIdx, share boundary points for seamless join
+           ───────────────────────────────────────────────────────────────── */
+        const clickableMeshes=[]; // {mesh,midAA,domain,ssType,isLinker}
+        let segStart=0;
+        for(let i=1;i<=pts.length;i++){
+          const isLast=(i===pts.length);
+          if(isLast||(pts[i].segIdx!==pts[i-1].segIdx)){
+            // include one extra point across boundary → no gap
+            const slice=pts.slice(segStart,isLast?i:Math.min(i+1,pts.length));
+            if(slice.length>=2){
+              const mid   =slice[Math.floor(slice.length/2)];
+              const ssType=mid.ss;
+              const domain=mid.domain;
+              const midAA =(slice[0].aa+slice[slice.length-1].aa)/2;
+              const col   =colOf(midAA);
+              const isLnk =col===LOOP_COL;
+              const vpts  =slice.map(p=>new THREE.Vector3(p.x,p.y,p.z));
 
-        // ── BUILD CONTINUOUS BACKBONE ──────────────────────────────────
-        // buildBackbone returns pts: [{aa,x,y,z,ss,domain,segIdx}] — one
-        // continuous array with NO jumps. We then split by segIdx to colour
-        // each segment separately, sharing the boundary point so tubes join.
-        const { pts: bbPtsRaw, defs: bbDefs } = buildBackbone(gene);
-        // On mobile, subsample every other point to halve draw calls
-        const bbPts = isMobile
-          ? bbPtsRaw.filter((_, i) => i === 0 || i === bbPtsRaw.length-1 || i % 2 === 0)
-          : bbPtsRaw;
-        const v3 = (p) => new THREE.Vector3(p.x, p.y, p.z);
+              let r=0.4,emiss=0.0,op=0.6,shine=80;
+              if(ssType==='helix') {r=isMobile?2.1:1.7;emiss=0.22;op=1.0;shine=160;}
+              else if(ssType==='sheet'){r=isMobile?1.8:1.4;emiss=0.18;op=1.0;shine=145;}
 
-        const group = new THREE.Group();
-        const atomGroup = new THREE.Group();   // atomic detail (zoom-in)
-        const ribbonGroup = new THREE.Group(); // backbone tubes
-        group.add(ribbonGroup);
-        group.add(atomGroup);
-        atomGroup.visible = false;
-
-        const meshes = []; // { mesh, glowMesh, ss, midAA, domain }
-
-        // Split bbPts into per-segment slices (share boundary pts → no gaps)
-        let segStart = 0;
-        for (let i = 1; i <= bbPts.length; i++) {
-          const isLast = (i === bbPts.length);
-          const curSeg  = isLast ? -1 : bbPts[i].segIdx;
-          const prevSeg = bbPts[i - 1].segIdx;
-          if (isLast || curSeg !== prevSeg) {
-            // Slice: include one extra point from the next segment so the tube
-            // physically touches it (= closed gap at the join).
-            const slice = bbPts.slice(segStart, isLast ? i : i + 1);
-            if (slice.length >= 2) {
-              const midAA = (slice[0].aa + slice[slice.length - 1].aa) / 2;
-              const ssType = slice[Math.floor(slice.length / 2)].ss;
-              const domain = slice[Math.floor(slice.length / 2)].domain;
-              const col    = colorOf(midAA);
-              const isLinker = col === COLORS.loop;
-
-              const vpts = slice.map(v3);
-              let radius, glowR, emissInt, opacity, shine;
-              if (ssType === 'helix')      { radius = 1.65; glowR = 3.6; emissInt = 0.22; opacity = 1.0; shine = 155; }
-              else if (ssType === 'sheet') { radius = 1.35; glowR = 3.0; emissInt = 0.18; opacity = 1.0; shine = 140; }
-              else                         { radius = 0.38; glowR = 0;   emissInt = 0.0;  opacity = 0.65; shine = 80; }
-
-              const tube = makeTube(vpts, isLinker ? Math.min(radius, 0.45) : radius, col, isLinker ? 0 : emissInt, opacity, shine);
-              if (tube) {
-                tube.userData = { ss: { t: ssType }, midAA, domain, segIdx: prevSeg, isLinker };
-                ribbonGroup.add(tube);
-                if (!isLinker && glowR > 0 && !isMobile) {
-                  const glow = makeTube(vpts, glowR, col, 0, 0.05);
-                  if (glow) { glow.material.depthWrite = false; glow.userData = { isGlow: true }; ribbonGroup.add(glow); }
+              const tube=makeTube(vpts,isLnk?Math.min(r,0.42):r,col,isLnk?0:emiss,op,shine);
+              if(tube){
+                tube.userData={ssType,midAA,domain,segIdx:pts[i-1].segIdx,isLinker:isLnk};
+                ribbonGrp.add(tube);
+                // Subtle glow for non-linker, desktop only
+                if(!isLnk&&!isMobile){
+                  const glow=makeTube(vpts,r*2.2,col,0,0.04);
+                  if(glow){glow.material.depthWrite=false;glow.userData={isGlow:true};ribbonGrp.add(glow);}
                 }
-                meshes.push({ mesh: tube, glowMesh: null, ss: { t: ssType }, midAA, domain });
+                if(!isLnk) clickableMeshes.push({mesh:tube,midAA,domain,ssType,isLinker:isLnk});
               }
             }
-            segStart = i;
+            segStart=i;
           }
         }
 
-        // ── MOLECULAR DETAIL LAYER (CPK / Ball-and-Stick) ─────────────
-        // Reference-quality atomic visualization: Cα backbone + N/C=O backbone atoms
-        // + multi-atom side chains + dashed H-bonds (like PyMOL/Chimera style).
-        // CPK colours: C=teal, N=blue, O=red, S=yellow (standard Corey–Pauling–Koltun).
-        // Visible when camera.position.z < 115 (scroll to zoom in).
-        const ACOL = { C: 0x1db87a, N: 0x3b82f6, O: 0xef4444, S: 0xfbbf24, H: 0xe2e8f0, CA: 0x22d3ee };
-        const rng2 = s => { let x = Math.sin(s + 1.7) * 43758.5453; return x - Math.floor(x); };
+        /* ─────────────────────────────────────────────────────────────────
+           BALL-AND-STICK / CPK ATOMS
+           Standard CPK colours:
+             C  = #2dd4bf (teal-green, distinct from white backbone)
+             N  = #3b82f6 (blue)
+             O  = #ef4444 (red)
+             S  = #fbbf24 (yellow)
+             H  = #e2e8f0 (white-ish, only on surface H-donors)
+             Cα = #22d3ee (bright cyan — backbone alpha carbon)
+           Atoms are placed along the sampled backbone with realistic offsets.
+           Bonds are thin cylinder stubs (not TubeGeometry — cheaper).
+           ───────────────────────────────────────────────────────────────── */
+        const CPK={CA:0x22d3ee,C:0x2dd4bf,N:0x3b82f6,O:0xef4444,S:0xfbbf24,H:0xe2e8f0};
+        const sCache={};
+        const sphereGeo=r=>{const k=r.toFixed(2); if(!sCache[k])sCache[k]=new THREE.SphereGeometry(r,isMobile?6:10,isMobile?6:10); return sCache[k];};
+        const atomMat =col=>new THREE.MeshPhongMaterial({color:col,emissive:col,emissiveIntensity:0.38,shininess:260,specular:0xaaccee});
+        const bondMat =new THREE.MeshPhongMaterial({color:0x1a3a5a,emissive:0x0a1a2a,emissiveIntensity:0.15,shininess:80});
 
-        const addAtom = (x, y, z, elem, r = 0.55) => {
-          const col = ACOL[elem] || ACOL.C;
-          const m = new THREE.Mesh(
-            new THREE.SphereGeometry(r, 10, 10),
-            new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.42, shininess: 240, specular: 0xbbccee })
+        const addAtom=(x,y,z,elem,r=0.55)=>{
+          const m=new THREE.Mesh(sphereGeo(r),atomMat(CPK[elem]||CPK.C));
+          m.position.set(x,y,z); m.userData={isAtom:true}; atomGrp.add(m); return m;
+        };
+
+        /* Cylinder bond between two points */
+        const addBond=(x1,y1,z1,x2,y2,z2,r=0.14)=>{
+          const dx=x2-x1,dy=y2-y1,dz=z2-z1;
+          const len=Math.sqrt(dx*dx+dy*dy+dz*dz); if(len<0.01) return;
+          const geo=new THREE.CylinderGeometry(r,r,len,isMobile?4:6,1);
+          const m=new THREE.Mesh(geo,bondMat);
+          m.position.set((x1+x2)/2,(y1+y2)/2,(z1+z2)/2);
+          m.quaternion.setFromUnitVectors(
+            new THREE.Vector3(0,1,0),
+            new THREE.Vector3(dx/len,dy/len,dz/len)
           );
-          m.position.set(x, y, z); m.userData = { isAtom: true };
-          atomGroup.add(m); return m;
+          m.userData={isAtom:true}; atomGrp.add(m);
         };
 
-        const addBond = (x1,y1,z1,x2,y2,z2,col=0x2a5080,r=0.13) => {
-          const m = makeTube([new THREE.Vector3(x1,y1,z1),new THREE.Vector3(x2,y2,z2)], r, col, 0.06, 1, 90);
-          if (m) { m.userData = { isAtom: true }; atomGroup.add(m); }
-        };
-
-        // Dashed H-bond (blue dashes, like PyMOL)
-        const addHBond = (x1,y1,z1,x2,y2,z2) => {
-          const segs = 12;
-          for (let k = 0; k < segs; k++) {
-            if (k % 2 === 0) continue;
-            const t0 = k/segs, t1 = (k+1)/segs;
+        /* Dashed H-bond (PyMOL style) */
+        const addHBond=(x1,y1,z1,x2,y2,z2)=>{
+          const N=8;
+          for(let k=0;k<N;k+=2){
+            const t0=k/N,t1=(k+0.8)/N;
             addBond(x1+(x2-x1)*t0,y1+(y2-y1)*t0,z1+(z2-z1)*t0,
-                    x1+(x2-x1)*t1,y1+(y2-y1)*t1,z1+(z2-z1)*t1, 0x38bdf8, 0.11);
+                    x1+(x2-x1)*t1,y1+(y2-y1)*t1,z1+(z2-z1)*t1, 0.09);
           }
         };
 
-        // Sample backbone for atomic rendering (all domain residues + some linkers)
-        // Skip entirely on mobile — too many draw calls crash WebGL
-        const ATOM_STEP = Math.max(2, Math.floor(bbPts.length / 80));
-        if (!isMobile) bbPts.forEach((p, pi) => {
-          if (pi % ATOM_STEP !== 0) return;
-          if (!p.domain && p.ss === 'loop') return; // skip linker loops to reduce clutter
-          const { x, y, z, ss } = p;
+        const rng2=s=>{let x=Math.sin(s*127.1+311.7)*43758.5453;return x-Math.floor(x);};
+        /* Side-chain element cycling — approximates real AA distribution */
+        const SC_ELEMS=['C','N','O','O','S','C','N','C','O','C','N','O','S','C','C','N','O','O'];
+        const SC2_ELEMS=['O','N','C','S','C','O','N','C'];
 
-          // Cα (backbone alpha-carbon) — slightly larger
-          addAtom(x, y, z, 'CA', 0.52);
+        /* Sample every STEP backbone points for atoms */
+        const STEP=Math.max(2,Math.floor(pts.length/100));
+        const STEP_MOB=Math.max(3,Math.floor(pts.length/40)); // fewer atoms on mobile
 
-          const pPrev = bbPts[Math.max(0, pi - ATOM_STEP)];
-          const pNext = bbPts[Math.min(bbPts.length - 1, pi + ATOM_STEP)];
+        /* ── MOBILE: Cα-only trace with large visible spheres ── */
+        if(isMobile){
+          pts.forEach((p,pi)=>{
+            if(pi%STEP_MOB!==0) return;
+            if(!p.domain) return;
+            addAtom(p.x,p.y,p.z,'CA',0.75);
+            if(pi>0&&pi%STEP_MOB===0){
+              const pp2=pts[Math.max(0,pi-STEP_MOB)];
+              if(pp2.domain) addBond(pp2.x,pp2.y,pp2.z,p.x,p.y,p.z,0.18);
+            }
+          });
+        }
 
-          // Backbone amide N (between Cα-1 and Cα, slightly above)
-          const nx = (x + pPrev.x)/2, ny = (y + pPrev.y)/2 + 0.55, nz = (z + pPrev.z)/2;
-          // Backbone carbonyl C and O (between Cα and Cα+1, below/offset)
-          const coX = (x + pNext.x)/2, coY = (y + pNext.y)/2 - 0.45, coZ = (z + pNext.z)/2;
-          const oX = coX + (rng2(pi*13.1)-0.5)*1.1;
-          const oY = coY - 0.85;
-          const oZ = coZ + (rng2(pi*7.9)-0.5)*1.1;
+        /* ── DESKTOP: Full CPK ball-and-stick ── */
+        if(!isMobile){
+          pts.forEach((p,pi)=>{
+            if(pi%STEP!==0) return;
+            if(!p.domain&&p.ss==='loop') return; // skip non-domain loops
+            const {x,y,z,ss}=p;
+            const pp=pts[Math.max(0,pi-STEP)], pn=pts[Math.min(pts.length-1,pi+STEP)];
 
-          addAtom(nx, ny, nz, 'N', 0.38);
-          addAtom(coX, coY, coZ, 'C', 0.34); // carbonyl C
-          addAtom(oX, oY, oZ, 'O', 0.40);   // carbonyl O (red)
+            /* Backbone atoms */
+            addAtom(x,y,z,'CA',0.54);  // Cα
 
-          // Bonds: N-Cα, Cα-C=O, C=O-O
-          addBond(nx, ny, nz, x, y, z, 0x1a4a7a, 0.14);
-          addBond(x, y, z, coX, coY, coZ, 0x1a4a7a, 0.14);
-          addBond(coX, coY, coZ, oX, oY, oZ, 0x1a4a7a, 0.13);
+            /* Amide N, between this Cα and previous */
+            const nx=(x+pp.x)/2, ny=(y+pp.y)/2+0.6, nz=(z+pp.z)/2;
+            /* Carbonyl C and O */
+            const cx=(x+pn.x)/2, cy=(y+pn.y)/2-0.4, cz=(z+pn.z)/2;
+            const ox=cx+(rng2(pi*13.1)-0.5)*1.0;
+            const oy=cy-0.9;
+            const oz=cz+(rng2(pi*7.9)-0.5)*1.0;
 
-          // Side chain — 2-3 atoms depending on residue type
-          const ang = rng2(pi * 7.3) * Math.PI * 2;
-          const scLen = 1.1 + rng2(pi * 3.7) * 1.6;
-          const sc1x = x + Math.cos(ang) * scLen * 0.7;
-          const sc1y = y + (rng2(pi * 5.2) - 0.3) * scLen * 1.1 + 1.4;
-          const sc1z = z + Math.sin(ang) * scLen * 0.7;
-          // Residue type cycling: Ala, Arg, Asn, Asp, Cys, Gln, Glu, His, Leu…
-          const sideElems = ['C','N','O','O','S','C','N','O','C','C','N','O','S','C','C','N','O','O'][pi % 18] || 'C';
-          addAtom(sc1x, sc1y, sc1z, sideElems, 0.40);
-          addBond(x, y, z, sc1x, sc1y, sc1z, 0x153050, 0.11);
+            addAtom(nx,ny,nz,'N',0.40);
+            addAtom(cx,cy,cz,'C',0.35);
+            addAtom(ox,oy,oz,'O',0.42);
 
-          // Second side-chain atom for longer residues
-          if (pi % 3 === 0) {
-            const ang2 = ang + 1.2;
-            const sc2x = sc1x + Math.cos(ang2) * 1.1;
-            const sc2y = sc1y + (rng2(pi*9.1)-0.5)*0.9;
-            const sc2z = sc1z + Math.sin(ang2) * 1.1;
-            const elem2 = ['O','N','C','S','C','O','N','C'][pi % 8];
-            addAtom(sc2x, sc2y, sc2z, elem2, 0.36);
-            addBond(sc1x, sc1y, sc1z, sc2x, sc2y, sc2z, 0x153050, 0.10);
-            // Occasionally add H-bond from side-chain heteroatom
-            if (['N','O','S'].includes(elem2) && pi % 5 === 0) {
-              const hbTarget = bbPts[Math.min(bbPts.length-1, pi + ATOM_STEP*3)];
-              if (hbTarget && hbTarget.domain) {
-                addHBond(sc2x, sc2y, sc2z, hbTarget.x, hbTarget.y, hbTarget.z);
+            /* Backbone bonds */
+            addBond(nx,ny,nz,x,y,z,0.14);          // N-Cα
+            addBond(x,y,z,cx,cy,cz,0.14);           // Cα-C
+            addBond(cx,cy,cz,ox,oy,oz,0.13);        // C=O
+
+            /* Side chain — Cβ */
+            const ang=rng2(pi*7.3)*Math.PI*2;
+            const scL=1.3+rng2(pi*3.7)*1.4;
+            const sc1x=x+Math.cos(ang)*scL*0.7;
+            const sc1y=y+(rng2(pi*5.2)-0.3)*scL+1.5;
+            const sc1z=z+Math.sin(ang)*scL*0.7;
+            const e1=SC_ELEMS[pi%SC_ELEMS.length];
+            addAtom(sc1x,sc1y,sc1z,e1,0.42);
+            addBond(x,y,z,sc1x,sc1y,sc1z,0.12);
+
+            /* Cγ for longer side chains */
+            if(pi%3===0){
+              const ang2=ang+1.1;
+              const sc2x=sc1x+Math.cos(ang2)*1.2;
+              const sc2y=sc1y+(rng2(pi*9.1)-0.5)*0.8;
+              const sc2z=sc1z+Math.sin(ang2)*1.2;
+              const e2=SC2_ELEMS[pi%SC2_ELEMS.length];
+              addAtom(sc2x,sc2y,sc2z,e2,0.38);
+              addBond(sc1x,sc1y,sc1z,sc2x,sc2y,sc2z,0.11);
+              /* H-bond donor/acceptor */
+              if(['N','O','S'].includes(e2)&&pi%5===0){
+                const hbIdx=Math.min(pts.length-1,pi+STEP*4);
+                const hp=pts[hbIdx];
+                if(hp&&hp.domain) addHBond(sc2x,sc2y,sc2z,hp.x,hp.y,hp.z);
               }
             }
-          }
 
-          // Backbone H-bonds (secondary structure specific)
-          if (ss === 'helix') {
-            // α-helix: i → i+4 H-bond (N-H···O=C)
-            const hp = bbPts[Math.min(bbPts.length-1, pi + ATOM_STEP * 4)];
-            if (hp && hp.domain) addHBond(nx, ny, nz, hp.x + (rng2(pi*3.3)-0.5)*0.6, hp.y - 0.45, hp.z);
-          } else if (ss === 'sheet') {
-            // β-sheet: parallel/antiparallel strand H-bonds
-            const hp = bbPts[Math.min(bbPts.length-1, pi + ATOM_STEP * 2)];
-            if (hp && hp.domain) addHBond(nx, ny, nz, hp.x, hp.y - 0.4, hp.z);
-            // Cross-strand H-bond (perpendicular offset)
-            const hp2 = bbPts[Math.min(bbPts.length-1, pi + ATOM_STEP * 6)];
-            if (hp2 && hp2.domain) addHBond(oX, oY, oZ, hp2.x, hp2.y + 0.5, hp2.z);
-          }
-        }); // end !isMobile forEach
-
-        // Water molecules (O atoms as red spheres) near polar surface residues
-        if (!isMobile) for (let w = 0; w < 45; w++) {
-          const idx = Math.floor(rng2(w * 11.7) * bbPts.length);
-          const p = bbPts[idx]; if (!p || !p.domain) continue;
-          const wr = 2.0 + rng2(w*7.7) * 3.2, wa = rng2(w*13.3)*Math.PI*2, wh = (rng2(w*5.1)-0.5)*4.0;
-          addAtom(p.x + Math.cos(wa)*wr, p.y + wh, p.z + Math.sin(wa)*wr, 'O', 0.28);
-        }
-
-        // Zoom-controlled atom visibility — show atoms earlier (camZ < 115)
-        const updateAtomVisibility = (camZ) => {
-          const show = camZ < 115;
-          atomGroup.visible = show;
-          // Fade ribbon when ultra-zoomed so atoms are visible on white-like bg
-          ribbonGroup.children.forEach(c => {
-            if (c.material && !c.userData.isGlow) {
-              c.material.opacity = camZ < 50 ? 0.25 : camZ < 80 ? 0.65 : 1.0;
-              c.material.transparent = camZ < 80;
+            /* Secondary-structure H-bonds */
+            if(ss==='helix'){
+              const hp=pts[Math.min(pts.length-1,pi+STEP*4)];
+              if(hp&&hp.domain) addHBond(nx,ny,nz,hp.x,hp.y-0.4,hp.z);
+            } else if(ss==='sheet'){
+              const hp=pts[Math.min(pts.length-1,pi+STEP*2)];
+              if(hp&&hp.domain) addHBond(nx,ny,nz,hp.x,hp.y-0.4,hp.z);
             }
           });
-        };
 
-        // ── Mutation pins ──────────────────────────────────────────────
-        const pinMeshes = [];
-        if (mutPins && mutPins.length > 0) {
-          mutPins.forEach(pin => {
-            // Find the backbone point closest to this AA position
-            const bbp = bbPts.find(p => Math.round(p.aa) === pin.pos)
-                     || bbPts.reduce((best, p) => Math.abs(p.aa - pin.pos) < Math.abs(best.aa - pin.pos) ? p : best, bbPts[0]);
-            if (!bbp) return;
-            const col = parseInt((pin.color || '#ef4444').replace('#', ''), 16);
-            const spikePts = [new THREE.Vector3(bbp.x, bbp.y, bbp.z), new THREE.Vector3(bbp.x, bbp.y + 26, bbp.z)];
-            const spike = makeTube(spikePts, 0.22, col, 0.7);
-            if (spike) { spike.userData = { isPin: true, pin }; group.add(spike); }
-            const bGeo = new THREE.SphereGeometry(2.5, isMobile ? 10 : 20, isMobile ? 10 : 20);
-            const bMat = new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 1.0, shininess: 250 });
-            const ball = new THREE.Mesh(bGeo, bMat); ball.position.set(bbp.x, bbp.y + 28, bbp.z);
-            ball.userData = { isPin: true, pin }; group.add(ball); pinMeshes.push(ball);
-            const gGeo = new THREE.SphereGeometry(5, 10, 10);
-            const gMat = new THREE.MeshPhongMaterial({ color: col, transparent: true, opacity: 0.15, depthWrite: false });
-            const glow2 = new THREE.Mesh(gGeo, gMat); glow2.position.set(bbp.x, bbp.y + 28, bbp.z); group.add(glow2);
+          /* Solvation water molecules near domain surface */
+          for(let w=0;w<35;w++){
+            const idx=Math.floor(rng2(w*11.7)*pts.length);
+            const p=pts[idx]; if(!p||!p.domain) continue;
+            const wr=2.5+rng2(w*7.7)*2.5;
+            const wa=rng2(w*13.3)*Math.PI*2;
+            const wh=(rng2(w*5.1)-0.5)*3.5;
+            addAtom(p.x+Math.cos(wa)*wr,p.y+wh,p.z+Math.sin(wa)*wr,'O',0.28);
+          }
+        }
+
+        /* ── Mutation pins ── */
+        if(mutPins&&mutPins.length>0){
+          mutPins.forEach(pin=>{
+            const bp=pts.reduce((b,p)=>Math.abs(p.aa-pin.pos)<Math.abs(b.aa-pin.pos)?p:b,pts[0]);
+            if(!bp) return;
+            const col=parseInt((pin.color||'#ef4444').replace('#',''),16);
+            const spike=makeTube([new THREE.Vector3(bp.x,bp.y,bp.z),new THREE.Vector3(bp.x,bp.y+24,bp.z)],0.2,col,0.8);
+            if(spike){spike.userData={isPin:true,pin};pinGrp.add(spike);}
+            const bm=new THREE.Mesh(new THREE.SphereGeometry(2.2,isMobile?8:16,isMobile?8:16),
+              new THREE.MeshPhongMaterial({color:col,emissive:col,emissiveIntensity:1,shininess:280}));
+            bm.position.set(bp.x,bp.y+26,bp.z); bm.userData={isPin:true,pin}; pinGrp.add(bm);
+            const gm=new THREE.Mesh(new THREE.SphereGeometry(4.5,8,8),
+              new THREE.MeshPhongMaterial({color:col,transparent:true,opacity:0.12,depthWrite:false}));
+            gm.position.set(bp.x,bp.y+26,bp.z); pinGrp.add(gm);
           });
         }
 
-        group.rotation.x = 0.18;
-        scene.add(group);
+        /* ── Grid floor ── */
+        const grid=new THREE.GridHelper(220,44,0x111928,0x111928);
+        grid.position.y=-28; grid.material.opacity=0.25; grid.material.transparent=true; scene.add(grid);
 
-        // Raycaster
-        const raycaster = new THREE.Raycaster();
-        raycaster.params.Line = { threshold: 1 };
-        const mouse = new THREE.Vector2();
-        let selectedMesh = null;
-        let selectedOriginalColor = null;
-        let hoveredMesh = null;
-
-        const getCanvasPos = (clientX, clientY) => {
-          const rect = renderer.domElement.getBoundingClientRect();
-          mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
-          mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
-        };
-
-        const highlightSelected = (mesh, highlight) => {
-          if (!mesh || mesh.userData.isGlow) return;
-          const col = colorOf(mesh.userData.midAA || 0);
-          if (highlight) {
-            mesh.material.emissiveIntensity = 0.8;
-            mesh.material.color.setHex(0xffffff);
-            mesh.material.emissive.setHex(col);
-            mesh.scale.set(1.12, 1.12, 1.12);
-          } else {
-            mesh.material.emissiveIntensity = mesh.userData.isLinker ? 0 : 0.22;
-            mesh.material.color.setHex(col);
-            mesh.material.emissive.setHex(col);
-            mesh.scale.set(1, 1, 1);
+        /* ── View mode switching ── */
+        const applyViewMode = mode=>{
+          if(mode==='ribbon'){
+            ribbonGrp.visible=true; atomGrp.visible=false;
+            ribbonGrp.children.forEach(c=>{if(c.material&&!c.userData.isGlow){c.material.opacity=1;c.material.transparent=false;}});
+          } else if(mode==='ballstick'){
+            ribbonGrp.visible=true; atomGrp.visible=true;
+            ribbonGrp.children.forEach(c=>{if(c.material&&!c.userData.isGlow){c.material.opacity=isMobile?0.35:0.18;c.material.transparent=true;}});
+          } else if(mode==='cpk'){
+            ribbonGrp.visible=false; atomGrp.visible=true;
           }
         };
+        applyViewMode('ribbon');
+        sceneRef.current.applyViewMode=applyViewMode;
 
-        const handleClick = (e) => {
+        /* ── Raycaster & interaction ── */
+        const raycaster=new THREE.Raycaster();
+        raycaster.params.Line={threshold:1};
+        const mouse=new THREE.Vector2();
+        let selectedMesh=null;
+        let autoSpin={v:true};
+        let rotY=0,rotX=0.15,dragging=false,ox=0,oy=0,dragDist=0;
+
+        /* Camera animation to zoom into selected domain region */
+        let camTarget=null;
+        const zoomToWorld=(wx,wy)=>{
+          // wx,wy are in root-group local space; we want camera to look there
+          // and come closer. We only animate camera.position.z and camera.lookAt y
+          camTarget={ty:wy*0.12,tz:55};
+        };
+        sceneRef.current.zoomTo=zoomToWorld;
+        sceneRef.current.autoSpin=autoSpin;
+
+        const getRect=()=>renderer.domElement.getBoundingClientRect();
+        const toNDC=(cx,cy)=>{const r=getRect();mouse.x=((cx-r.left)/r.width)*2-1;mouse.y=-((cy-r.top)/r.height)*2+1;};
+
+        const deselect=()=>{
+          if(selectedMesh){
+            const c=colOf(selectedMesh.userData.midAA||0);
+            selectedMesh.material.color.setHex(c);
+            selectedMesh.material.emissive.setHex(c);
+            selectedMesh.material.emissiveIntensity=selectedMesh.userData.isLinker?0:0.22;
+            selectedMesh.scale.set(1,1,1);
+            selectedMesh=null;
+          }
+          selLight.intensity=0;
+          setClickedDomain(null);
+          autoSpin.v=true; setIsSpinning(true);
+          // Animate camera back to default view
+          camTarget={ty:0,tz:isMobile?170:155};
+        };
+
+        const select=(mesh,hitPt)=>{
+          if(selectedMesh&&selectedMesh!==mesh) deselect();
+          if(selectedMesh===mesh){deselect();return;}
+          selectedMesh=mesh;
+          mesh.material.color.setHex(0xffffff);
+          mesh.material.emissive.setHex(colOf(mesh.userData.midAA||0));
+          mesh.material.emissiveIntensity=0.85;
+          mesh.scale.set(1.1,1.1,1.1);
+          selLight.position.copy(hitPt);
+          selLight.color.setHex(colOf(mesh.userData.midAA||0));
+          selLight.intensity=4;
+          autoSpin.v=false; setIsSpinning(false);
+
+          const domain=mesh.userData.domain;
+          const full=domain?gene.domains.find(d=>d.name===domain.name):null;
+          setClickedDomain({domain:full||domain,midAA:Math.round(mesh.userData.midAA||0),ssType:mesh.userData.ssType,isLinker:mesh.userData.isLinker,color:(colOf(mesh.userData.midAA||0)).toString(16).padStart(6,'0')});
+
+          /* Zoom camera toward hit — use hitPt in ROOT local space */
+          // hitPt is in world space; convert to root-local to get Y for camera aim
+          const localPt=root.worldToLocal(hitPt.clone());
+          camTarget={ty:localPt.y*0.08,tz:isMobile?75:55};
+        };
+
+        const handleClick=e=>{
           e.preventDefault();
-          getCanvasPos(e.clientX, e.clientY);
-          raycaster.setFromCamera(mouse, camera);
-          const clickable = meshes.map(m => m.mesh).filter(m => m && !m.userData.isGlow);
-          const intersects = raycaster.intersectObjects(clickable, false);
+          if(dragDist>5) return; // was a drag, not a click
+          toNDC(e.clientX,e.clientY);
+          raycaster.setFromCamera(mouse,camera);
+          const hits=raycaster.intersectObjects(clickableMeshes.map(m=>m.mesh),false);
+          if(hits.length>0&&!hits[0].object.userData.isGlow){
+            select(hits[0].object,hits[0].point);
+          } else {
+            deselect();
+          }
+        };
 
-          if (intersects.length > 0) {
-            const hit = intersects[0].object;
-            if (hit.userData.isGlow) return;
-
-            // Deselect previous
-            if (selectedMesh && selectedMesh !== hit) {
-              highlightSelected(selectedMesh, false);
-            }
-
-            if (selectedMesh === hit) {
-              // Deselect
-              highlightSelected(hit, false);
-              selectedMesh = null;
-              autoSpinRef.current = true;
-              setIsSpinning(true);
-              setClickedDomain(null);
-              selectionLight.intensity = 0;
+        const el=renderer.domElement;
+        el.style.cursor='grab';
+        el.addEventListener('pointerdown',e=>{dragging=true;ox=e.clientX;oy=e.clientY;dragDist=0;el.setPointerCapture(e.pointerId);el.style.cursor='grabbing';});
+        el.addEventListener('pointermove',e=>{
+          if(dragging){
+            const dx=e.clientX-ox,dy=e.clientY-oy;
+            dragDist=Math.sqrt(dx*dx+dy*dy);
+            rotY+=(e.clientX-ox)*0.01; ox=e.clientX;
+            rotX+=(e.clientY-oy)*0.01; oy=e.clientY;
+            rotX=Math.max(-1.4,Math.min(1.4,rotX));
+          } else {
+            // Hover tooltip
+            toNDC(e.clientX,e.clientY);
+            raycaster.setFromCamera(mouse,camera);
+            const hits=raycaster.intersectObjects(clickableMeshes.map(m=>m.mesh),false);
+            const rect=getRect();
+            if(hits.length>0&&!hits[0].object.userData.isGlow){
+              el.style.cursor='pointer';
+              const d=hits[0].object.userData.domain;
+              setTooltip({text:d?d.name:`Linker ~AA${Math.round(hits[0].object.userData.midAA||0)}`,x:e.clientX-rect.left,y:e.clientY-rect.top-44});
             } else {
-              // Select
-              highlightSelected(hit, true);
-              selectedMesh = hit;
-              autoSpinRef.current = false;
-              setIsSpinning(false);
-              const domain = hit.userData.domain;
-              const midAA = hit.userData.midAA;
-              const ss = hit.userData.ss;
-              const fullDomainInfo = domain ? gene.domains.find(d => d.name === domain.name) : null;
-              setClickedDomain({
-                domain: fullDomainInfo || domain,
-                midAA: Math.round(midAA),
-                ssType: ss?.t,
-                isLinker: hit.userData.isLinker,
-                color: colorOf(midAA).toString(16).padStart(6, '0'),
-              });
-              // Move selection light near clicked region
-              const pt = intersects[0].point;
-              selectionLight.position.copy(pt);
-              selectionLight.color.setHex(colorOf(midAA));
-              selectionLight.intensity = 3;
+              el.style.cursor='grab'; setTooltip(null);
             }
-          } else {
-            // Clicked empty space — deselect
-            if (selectedMesh) {
-              highlightSelected(selectedMesh, false);
-              selectedMesh = null;
-            }
-            autoSpinRef.current = true;
-            setIsSpinning(true);
-            setClickedDomain(null);
-            selectionLight.intensity = 0;
           }
-        };
-
-        // Hover handling for tooltip
-        const handleMouseMove = (e) => {
-          if (dragging) return;
-          getCanvasPos(e.clientX, e.clientY);
-          raycaster.setFromCamera(mouse, camera);
-          const clickable = meshes.map(m => m.mesh).filter(m => m && !m.userData.isGlow);
-          const intersects = raycaster.intersectObjects(clickable, false);
-          const rect = renderer.domElement.getBoundingClientRect();
-
-          if (intersects.length > 0) {
-            const hit = intersects[0].object;
-            if (!hit.userData.isGlow && hit !== selectedMesh) {
-              renderer.domElement.style.cursor = 'pointer';
-              const domain = hit.userData.domain;
-              if (domain) {
-                setTooltip({ text: domain.name, x: e.clientX - rect.left, y: e.clientY - rect.top - 40 });
-                setHoveredDomain(domain.name);
-              } else {
-                setTooltip({ text: `Linker (~AA ${Math.round(hit.userData.midAA)})`, x: e.clientX - rect.left, y: e.clientY - rect.top - 40 });
-                setHoveredDomain(null);
-              }
-            }
-          } else {
-            renderer.domElement.style.cursor = dragging ? 'grabbing' : 'grab';
-            setTooltip(null);
-            setHoveredDomain(null);
-          }
-        };
-
-        let dragging = false, ox = 0, oy = 0, rotY = 0, rotX = 0.18;
-        const autoSpinRef = { current: true };
-
-        const el = renderer.domElement;
-        el.addEventListener('pointerdown', e => {
-          dragging = true; ox = e.clientX; oy = e.clientY;
-          el.setPointerCapture(e.pointerId);
-          el.style.cursor = 'grabbing';
         });
-        el.addEventListener('pointermove', e => {
-          handleMouseMove(e);
-          if (!dragging) return;
-          rotY += (e.clientX - ox) * 0.012; ox = e.clientX;
-          rotX += (e.clientY - oy) * 0.012; oy = e.clientY;
-          rotX = Math.max(-1.4, Math.min(1.4, rotX));
+        el.addEventListener('pointerup',e=>{
+          if(dragDist<5) handleClick(e);
+          dragging=false; el.style.cursor='grab';
         });
-        el.addEventListener('pointerup', e => {
-          if (Math.abs(e.clientX - ox) < 4 && Math.abs(e.clientY - oy) < 4) handleClick(e);
-          dragging = false; el.style.cursor = 'grab';
-        });
-        el.addEventListener('wheel', e => {
-          camera.position.z = Math.max(30, Math.min(400, camera.position.z + e.deltaY * 0.3));
+        el.addEventListener('wheel',e=>{
+          camera.position.z=Math.max(28,Math.min(380,camera.position.z+e.deltaY*0.28));
           e.preventDefault();
-        }, { passive: false });
-        el.style.cursor = 'grab';
+        },{passive:false});
 
-        // Pulse animation for selected mesh
-        let pulseT = 0;
-        const animate = () => {
-          frameRef.current = requestAnimationFrame(animate);
-          if (autoSpinRef.current) rotY += 0.006;
-          group.rotation.y = rotY;
-          group.rotation.x = rotX;
+        /* ── Animate ── */
+        let pulseT=0;
+        const animate=()=>{
+          frameRef.current=requestAnimationFrame(animate);
+          if(autoSpin.v) rotY+=0.005;
+          root.rotation.y=rotY;
+          root.rotation.x=rotX;
 
-          // Pulse selected
-          if (selectedMesh && !selectedMesh.userData.isGlow) {
-            pulseT += 0.05;
-            const pulse = 0.6 + Math.sin(pulseT) * 0.25;
-            selectedMesh.material.emissiveIntensity = pulse;
-            selectionLight.intensity = 2 + Math.sin(pulseT) * 1.5;
-          } else {
-            pulseT = 0;
+          /* Camera zoom animation toward selected domain */
+          if(camTarget){
+            const{ty=0,tz=60}=camTarget;
+            camera.position.z+=(tz-camera.position.z)*0.05;
+            camera.position.y+=(ty-camera.position.y)*0.04;
+            if(Math.abs(camera.position.z-tz)<0.4&&Math.abs(camera.position.y-ty)<0.4) camTarget=null;
           }
 
-          renderer.render(scene, camera);
+          /* Pulse selected */
+          if(selectedMesh){
+            pulseT+=0.04;
+            selectedMesh.material.emissiveIntensity=0.65+Math.sin(pulseT)*0.22;
+            selLight.intensity=3+Math.sin(pulseT)*1.5;
+          } else {
+            pulseT=0;
+          }
+
+          renderer.render(scene,camera);
         };
         animate();
 
-        const onResize = () => {
-          if (!container) return;
-          const W2 = container.offsetWidth;
-          renderer.setSize(W2, H);
-          camera.aspect = W2 / H;
+        const onResize=()=>{
+          if(!container) return;
+          const W2=container.offsetWidth;
+          renderer.setSize(W2,H);
+          camera.aspect=W2/H;
           camera.updateProjectionMatrix();
         };
-        window.addEventListener('resize', onResize);
-        sceneStateRef.current = { autoSpinRef, renderer };
-        frameRef._cleanup = () => { window.removeEventListener('resize', onResize); renderer.dispose(); };
+        window.addEventListener('resize',onResize);
+
+        sceneRef.current={autoSpin,renderer,applyViewMode,zoomTo,deselect};
+        frameRef._cleanup=()=>{window.removeEventListener('resize',onResize);renderer.dispose();};
       };
 
-      if (window.THREE) { go(); }
-      else if (!document.getElementById('three-js')) {
-        const s = document.createElement('script'); s.id = 'three-js';
-        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
-        s.onload = go; document.head.appendChild(s);
+      if(window.THREE){ launch(); }
+      else if(!document.getElementById('three-js')){
+        const s=document.createElement('script');s.id='three-js';
+        s.src='https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+        s.onload=launch; document.head.appendChild(s);
       } else {
-        const poll = setInterval(() => { if (window.THREE) { clearInterval(poll); go(); } }, 100);
+        const poll=setInterval(()=>{if(window.THREE){clearInterval(poll);launch();}},80);
       }
-    }, 80);
+    },80);
 
-    return () => {
+    return ()=>{
       clearTimeout(timer);
-      if (frameRef.current) cancelAnimationFrame(frameRef.current);
-      if (frameRef._cleanup) { frameRef._cleanup(); frameRef._cleanup = null; }
-      if (containerRef.current) containerRef.current.innerHTML = '';
-      setClickedDomain(null);
-      setIsSpinning(true);
+      if(frameRef.current) cancelAnimationFrame(frameRef.current);
+      if(frameRef._cleanup){frameRef._cleanup();frameRef._cleanup=null;}
+      if(containerRef.current) containerRef.current.innerHTML='';
+      setClickedDomain(null); setIsSpinning(true); setTooltip(null);
     };
-  }, [showRCSB, gene, mutPins, buildBackbone]);
+  },[showRCSB,gene,mutPins,buildBackbone]);
 
-  const handleResumeRotation = () => {
-    if (sceneStateRef.current?.autoSpinRef) {
-      sceneStateRef.current.autoSpinRef.current = true;
-      setIsSpinning(true);
-      setClickedDomain(null);
-    }
+  /* Apply view mode changes reactively */
+  useEffect(()=>{
+    sceneRef.current?.applyViewMode?.(viewMode);
+  },[viewMode]);
+
+  const handleResume=()=>{
+    if(sceneRef.current?.autoSpin) sceneRef.current.autoSpin.v=true;
+    if(sceneRef.current?.deselect) sceneRef.current.deselect();
+    setIsSpinning(true); setClickedDomain(null); setTooltip(null);
   };
 
-  const FREGION_COLORS = { Critical: '#06b6d4', Structural: '#8b5cf6', Regulatory: '#10b981' };
+  const FREG_COL={Critical:'#06b6d4',Structural:'#8b5cf6',Regulatory:'#10b981'};
 
   return (
-    <div style={{ borderTop: '1px solid #1e2130', paddingTop: '1rem' }}>
+    <div style={{borderTop:'1px solid #1e2130',paddingTop:'1rem'}}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.6rem', marginBottom: '.75rem' }}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'.6rem',marginBottom:'.75rem'}}>
         <div>
-          <div style={{ fontSize: '.85rem', fontWeight: 700, color: '#818CF8', textTransform: 'uppercase', letterSpacing: '.08em' }}>3D Protein Ribbon · Click to Explore</div>
-          <div style={{ fontSize: '.82rem', color: '#6b7080', marginTop: '.2rem' }}>
-            <span style={{ color: '#A78BFA', fontFamily: '"JetBrains Mono",monospace', fontWeight: 700 }}>{gene.symbol}</span>
-            {' '}{gene.proteinLength} aa · Click segment to inspect · Scroll in → molecular atoms
+          <div style={{fontSize:'.85rem',fontWeight:700,color:'#818CF8',textTransform:'uppercase',letterSpacing:'.08em'}}>3D Molecular Viewer · PDB-style</div>
+          <div style={{fontSize:'.8rem',color:'#6b7080',marginTop:'.15rem'}}>
+            <span style={{color:'#A78BFA',fontFamily:'"JetBrains Mono",monospace',fontWeight:700}}>{gene.symbol}</span>
+            {' '}{gene.proteinLength} aa · Click segment to inspect & zoom · Switch modes below
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
-          <button onClick={() => setShowRCSB(v => !v)}
-            style={{ padding: '.5rem 1rem', background: showRCSB ? 'rgba(99,102,241,.3)' : 'rgba(99,102,241,.12)', border: '1px solid rgba(99,102,241,.5)', borderRadius: 8, color: '#A78BFA', fontSize: '.88rem', fontWeight: 700, cursor: 'pointer' }}>
-            {showRCSB ? '▲ Hide' : '▼ Show'} 3D View
-          </button>
+        <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
           <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer"
-            style={{ padding: '.5rem 1rem', background: 'rgba(6,182,212,.1)', border: '1px solid rgba(6,182,212,.35)', borderRadius: 8, color: '#67E8F9', fontSize: '.88rem', fontWeight: 700, textDecoration: 'none' }}>
+            style={{padding:'.45rem .9rem',background:'rgba(6,182,212,.1)',border:'1px solid rgba(6,182,212,.35)',borderRadius:8,color:'#67E8F9',fontSize:'.84rem',fontWeight:700,textDecoration:'none'}}>
             ↗ PDB {gene.pdb.id}
           </a>
+          <button onClick={()=>setShowRCSB(v=>!v)}
+            style={{padding:'.45rem .9rem',background:showRCSB?'rgba(99,102,241,.3)':'rgba(99,102,241,.12)',border:'1px solid rgba(99,102,241,.5)',borderRadius:8,color:'#A78BFA',fontSize:'.84rem',fontWeight:700,cursor:'pointer'}}>
+            {showRCSB?'▲ Hide':'▼ Show'} 3D
+          </button>
         </div>
       </div>
 
-      {showRCSB && (<>
-        <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(99,102,241,.3)', marginBottom: '1rem' }}>
+      {showRCSB&&(<>
+        <div style={{borderRadius:12,overflow:'hidden',border:'1px solid rgba(99,102,241,.3)',marginBottom:'1rem'}}>
           {/* Toolbar */}
-          <div style={{ padding: '.5rem .9rem', background: 'rgba(99,102,241,.1)', borderBottom: '1px solid rgba(99,102,241,.2)', display: 'flex', alignItems: 'center', gap: '.6rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '.78rem', color: '#A78BFA', fontWeight: 700 }}>PDB {gene.pdb.id}</span>
-            <span style={{ color: '#4a4d5a' }}>·</span>
-            <span style={{ fontSize: '.75rem', color: '#6b7080' }}>{gene.pdb.name}</span>
-            {!isSpinning && (
-              <button onClick={handleResumeRotation}
-                style={{ background: 'rgba(6,182,212,.15)', border: '1px solid rgba(6,182,212,.4)', color: '#67E8F9', fontSize: '.75rem', fontWeight: 700, padding: '.2rem .6rem', borderRadius: 5, cursor: 'pointer' }}>
-                ▶ Resume Rotation
+          <div style={{padding:'.5rem .9rem',background:'rgba(10,12,22,.9)',borderBottom:'1px solid rgba(99,102,241,.2)',display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap'}}>
+            <span style={{fontSize:'.77rem',color:'#A78BFA',fontWeight:700}}>PDB {gene.pdb.id}</span>
+            <span style={{color:'#2a2d3a'}}>·</span>
+            <span style={{fontSize:'.72rem',color:'#4a4d5a'}}>{gene.pdb.name}</span>
+            {/* View mode buttons */}
+            <div style={{display:'flex',gap:'.3rem',marginLeft:'auto'}}>
+              {[
+                {k:'ribbon',   label:'🎗 Ribbon',   tip:'Secondary structure ribbon'},
+                {k:'ballstick',label:'⚛ Ball+Stick', tip:'Ribbon + CPK atoms overlay'},
+                {k:'cpk',      label:'🔵 CPK Only',  tip:'Pure ball-and-stick atoms'},
+              ].map(m=>(
+                <button key={m.k} onClick={()=>setViewMode(m.k)} title={m.tip}
+                  style={{padding:'.22rem .6rem',background:viewMode===m.k?'rgba(6,182,212,.25)':'rgba(30,33,48,.7)',border:`1px solid ${viewMode===m.k?'rgba(6,182,212,.6)':'rgba(99,102,241,.25)'}`,borderRadius:6,color:viewMode===m.k?'#67e8f9':'#6b7080',fontSize:'.72rem',fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+            {!isSpinning&&(
+              <button onClick={handleResume}
+                style={{padding:'.22rem .6rem',background:'rgba(6,182,212,.15)',border:'1px solid rgba(6,182,212,.4)',color:'#67E8F9',fontSize:'.72rem',fontWeight:700,borderRadius:5,cursor:'pointer'}}>
+                ▶ Resume
               </button>
             )}
-            {mutPins && mutPins.length > 0 && (
-              <span style={{ background: 'rgba(239,68,68,.15)', border: '1px solid rgba(239,68,68,.35)', color: '#fca5a5', fontSize: '.72rem', fontWeight: 700, padding: '.15rem .5rem', borderRadius: 5 }}>
-                {mutPins.length} mutation{mutPins.length !== 1 ? 's' : ''} pinned
+            {mutPins&&mutPins.length>0&&(
+              <span style={{background:'rgba(239,68,68,.15)',border:'1px solid rgba(239,68,68,.35)',color:'#fca5a5',fontSize:'.7rem',fontWeight:700,padding:'.15rem .5rem',borderRadius:5}}>
+                {mutPins.length} mutation{mutPins.length!==1?'s':''} pinned
               </span>
             )}
-            <span style={{ marginLeft: 'auto', fontSize: '.72rem', color: '#4a4d5a' }}>
-              {isSpinning ? '🔄 Spinning — Click segment to freeze & inspect' : '⏸ Frozen — Click empty space to resume'}
-            </span>
           </div>
 
-          {/* 3D container */}
-          <div style={{ position: 'relative' }}>
-            <div ref={containerRef} style={{ width: '100%', height: 'clamp(280px, 45vw, 480px)', background: '#060810', position: 'relative' }} />
-            {/* Tooltip */}
-            {tooltip && (
-              <div style={{ position: 'absolute', left: tooltip.x, top: tooltip.y, background: 'rgba(6,6,20,.9)', border: '1px solid rgba(99,102,241,.5)', borderRadius: 6, padding: '.3rem .65rem', fontSize: '.78rem', color: '#c8cad4', fontWeight: 600, pointerEvents: 'none', whiteSpace: 'nowrap', boxShadow: '0 4px 12px rgba(0,0,0,.5)' }}>
+          {/* Canvas */}
+          <div style={{position:'relative'}}>
+            <div ref={containerRef} style={{width:'100%',height:'clamp(260px,42vw,460px)',background:'#04060f',position:'relative'}}/>
+            {tooltip&&(
+              <div style={{position:'absolute',left:tooltip.x,top:tooltip.y,background:'rgba(4,6,15,.93)',border:'1px solid rgba(99,102,241,.55)',borderRadius:7,padding:'.3rem .7rem',fontSize:'.78rem',color:'#c8cad4',fontWeight:600,pointerEvents:'none',whiteSpace:'nowrap',boxShadow:'0 4px 14px rgba(0,0,0,.6)'}}>
                 {tooltip.text}
               </div>
             )}
-            {/* Spinning indicator */}
-            {isSpinning && (
-              <div style={{ position: 'absolute', bottom: 10, left: 10, display: 'flex', alignItems: 'center', gap: '.35rem', background: 'rgba(0,0,0,.5)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 6, padding: '.25rem .6rem' }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981', animation: 'domainPulse 1.5s ease-in-out infinite' }}></div>
-                <span style={{ fontSize: '.72rem', color: '#6b7080' }}>Auto-rotating</span>
+            {/* Spin indicator */}
+            {isSpinning&&(
+              <div style={{position:'absolute',bottom:10,left:10,display:'flex',alignItems:'center',gap:'.35rem',background:'rgba(0,0,0,.55)',border:'1px solid rgba(255,255,255,.07)',borderRadius:6,padding:'.22rem .55rem'}}>
+                <div style={{width:7,height:7,borderRadius:'50%',background:'#10b981',boxShadow:'0 0 6px #10b981',animation:'domainPulse 1.5s ease-in-out infinite'}}></div>
+                <span style={{fontSize:'.7rem',color:'#5a6070'}}>Rotating — click to inspect</span>
               </div>
             )}
+            {/* View mode badge */}
+            <div style={{position:'absolute',top:10,right:10,background:'rgba(0,0,0,.6)',border:'1px solid rgba(255,255,255,.07)',borderRadius:6,padding:'.2rem .5rem',fontSize:'.7rem',color:'#6b7080',fontWeight:600}}>
+              {viewMode==='ribbon'?'🎗 Ribbon':viewMode==='ballstick'?'⚛ Ball+Stick':'🔵 CPK'}
+            </div>
           </div>
 
           {/* Legend */}
-          <div style={{ padding: '.6rem .9rem', background: 'rgba(0,0,0,.45)', display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            {[{ col: '#06b6d4', label: 'α-Helix · Critical' }, { col: '#8b5cf6', label: 'β-Strand · Structural' }, { col: '#10b981', label: 'Helix · Regulatory' }, { col: '#1e2840', label: 'Loop / Linker' }].map((l, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.35rem' }}>
-                <div style={{ width: 14, height: 8, background: l.col, borderRadius: 3, boxShadow: `0 0 6px ${l.col}88` }}></div>
-                <span style={{ fontSize: '.74rem', color: '#8a8f9e' }}>{l.label}</span>
-              </div>
-            ))}
-            {mutPins && mutPins.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '.35rem' }}>
-                <div style={{ width: 14, height: 8, background: '#ef4444', borderRadius: 3, boxShadow: '0 0 6px #ef444488' }}></div>
-                <span style={{ fontSize: '.74rem', color: '#8a8f9e' }}>Mutation site</span>
-              </div>
-            )}
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '.6rem', borderLeft: '1px solid rgba(255,255,255,.06)', paddingLeft: '.8rem' }}>
-              <span style={{ fontSize: '.68rem', color: '#4a4d5a', fontWeight: 600 }}>CPK atoms (scroll↓ to reveal):</span>
-              {[{ col: '#22d3ee', label: 'Cα' }, { col: '#3b82f6', label: 'N' }, { col: '#ef4444', label: 'O' }, { col: '#1db87a', label: 'C' }, { col: '#fbbf24', label: 'S' }].map((a, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '.25rem' }}>
-                  <div style={{ width: 9, height: 9, borderRadius: '50%', background: a.col, boxShadow: `0 0 5px ${a.col}99` }}></div>
-                  <span style={{ fontSize: '.68rem', color: '#6b7080', fontFamily: '"JetBrains Mono",monospace' }}>{a.label}</span>
+          <div style={{padding:'.55rem .9rem',background:'rgba(0,0,0,.5)',display:'flex',gap:'.8rem',flexWrap:'wrap',alignItems:'center'}}>
+            <div style={{display:'flex',gap:'.7rem',flexWrap:'wrap'}}>
+              {[{col:'#06b6d4',label:'Helix · Critical'},{col:'#8b5cf6',label:'Sheet · Structural'},{col:'#10b981',label:'Helix · Regulatory'},{col:'#1a2535',label:'Loop'}].map((l,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'.3rem'}}>
+                  <div style={{width:12,height:7,background:l.col,borderRadius:2,boxShadow:`0 0 5px ${l.col}99`}}></div>
+                  <span style={{fontSize:'.72rem',color:'#6b7080'}}>{l.label}</span>
                 </div>
               ))}
+            </div>
+            {/* CPK legend */}
+            <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:'.5rem',borderLeft:'1px solid rgba(255,255,255,.06)',paddingLeft:'.7rem'}}>
+              <span style={{fontSize:'.67rem',color:'#3a3d4a',fontWeight:600}}>CPK:</span>
+              {[{col:'#22d3ee',l:'Cα'},{col:'#3b82f6',l:'N'},{col:'#ef4444',l:'O'},{col:'#2dd4bf',l:'C'},{col:'#fbbf24',l:'S'}].map((a,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:'.2rem'}}>
+                  <div style={{width:8,height:8,borderRadius:'50%',background:a.col,boxShadow:`0 0 4px ${a.col}aa`}}></div>
+                  <span style={{fontSize:'.66rem',color:'#5a6070',fontFamily:'"JetBrains Mono",monospace'}}>{a.l}</span>
+                </div>
+              ))}
+              <span style={{fontSize:'.67rem',color:'#3a3d4a',marginLeft:'.3rem'}}>Switch to ⚛ Ball+Stick to reveal</span>
             </div>
           </div>
         </div>
 
-        {/* ═══ CLICK INFO PANEL ═══ */}
+        {/* ── Domain info panel ── */}
         {clickedDomain ? (
-          <div style={{ background: '#080c14', border: `2px solid #${clickedDomain.color || '6366f1'}`, borderRadius: 12, overflow: 'hidden', marginBottom: '1rem', animation: 'fadeSlideIn .35s ease-out' }}>
-            {/* Panel header */}
-            <div style={{ padding: '.75rem 1rem', background: `#${clickedDomain.color || '1e2130'}18`, borderBottom: '1px solid rgba(255,255,255,.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '.6rem' }}>
-                <div style={{ width: 10, height: 10, borderRadius: '50%', background: `#${clickedDomain.color}`, boxShadow: `0 0 10px #${clickedDomain.color}` }}></div>
-                <span style={{ fontSize: '.9rem', fontWeight: 700, color: '#e2e4e9' }}>
-                  {clickedDomain.domain ? clickedDomain.domain.name : (clickedDomain.isLinker ? 'Inter-domain Linker Region' : 'Unknown Region')}
+          <div style={{background:'#070a12',border:`2px solid #${clickedDomain.color||'6366f1'}`,borderRadius:13,overflow:'hidden',marginBottom:'1rem',animation:'fadeSlideIn .3s ease-out'}}>
+            <div style={{padding:'.7rem 1rem',background:`#${clickedDomain.color||'1e2130'}12`,borderBottom:'1px solid rgba(255,255,255,.05)',display:'flex',alignItems:'center',justifyContent:'space-between',flexWrap:'wrap',gap:'.4rem'}}>
+              <div style={{display:'flex',alignItems:'center',gap:'.5rem',flexWrap:'wrap'}}>
+                <div style={{width:9,height:9,borderRadius:'50%',background:`#${clickedDomain.color}`,boxShadow:`0 0 8px #${clickedDomain.color}`}}></div>
+                <span style={{fontSize:'.88rem',fontWeight:700,color:'#e2e4e9'}}>
+                  {clickedDomain.domain?clickedDomain.domain.name:(clickedDomain.isLinker?'Inter-domain Linker':'Unknown')}
                 </span>
-                {clickedDomain.domain && (
-                  <span style={{ background: `${FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#6366f1'}22`, border: `1px solid ${FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#6366f1'}55`, color: FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#a78bfa', fontSize: '.72rem', fontWeight: 700, padding: '.15rem .45rem', borderRadius: 5, textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                {clickedDomain.domain&&(
+                  <span style={{background:`${FREG_COL[clickedDomain.domain.functionalRegion]||'#6366f1'}20`,border:`1px solid ${FREG_COL[clickedDomain.domain.functionalRegion]||'#6366f1'}55`,color:FREG_COL[clickedDomain.domain.functionalRegion]||'#a78bfa',fontSize:'.7rem',fontWeight:700,padding:'.12rem .4rem',borderRadius:5,textTransform:'uppercase',letterSpacing:'.05em'}}>
                     {clickedDomain.domain.functionalRegion}
                   </span>
                 )}
-                <span style={{ background: '#1e2130', border: '1px solid #2a2d3a', color: '#6b7080', fontSize: '.7rem', fontWeight: 600, padding: '.12rem .4rem', borderRadius: 5 }}>
-                  {clickedDomain.ssType === 'helix' ? '🌀 α-Helix' : clickedDomain.ssType === 'sheet' ? '➡️ β-Strand' : '〰️ Loop'}
+                <span style={{background:'#13162000',border:'1px solid #2a2d3a',color:'#5a6070',fontSize:'.68rem',fontWeight:600,padding:'.1rem .38rem',borderRadius:5}}>
+                  {clickedDomain.ssType==='helix'?'🌀 α-Helix':clickedDomain.ssType==='sheet'?'➡ β-Strand':'〰 Loop'}
                 </span>
               </div>
-              <button onClick={handleResumeRotation} style={{ background: 'rgba(99,102,241,.15)', border: '1px solid rgba(99,102,241,.35)', color: '#a78bfa', fontSize: '.78rem', fontWeight: 600, padding: '.3rem .7rem', borderRadius: 6, cursor: 'pointer' }}>
-                ▶ Resume
-              </button>
+              <button onClick={handleResume} style={{background:'rgba(99,102,241,.15)',border:'1px solid rgba(99,102,241,.35)',color:'#a78bfa',fontSize:'.76rem',fontWeight:600,padding:'.28rem .65rem',borderRadius:6,cursor:'pointer'}}>▶ Resume</button>
             </div>
 
-            {clickedDomain.domain ? (
-              <div style={{ padding: '1.1rem' }}>
-                {/* Domain position strip */}
-                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem', padding: '.7rem .9rem', background: '#0f1117', border: '1px solid #1e2130', borderRadius: 8 }}>
-                  {[
-                    { label: 'Start', value: `AA ${clickedDomain.domain.start}`, col: '#67e8f9' },
-                    { label: 'End', value: `AA ${clickedDomain.domain.end}`, col: '#67e8f9' },
-                    { label: 'Length', value: `${clickedDomain.domain.end - clickedDomain.domain.start + 1} residues`, col: '#a78bfa' },
-                    { label: 'Clicked ~', value: `AA ${clickedDomain.midAA}`, col: '#fbbf24' },
-                  ].map((s, i) => (
-                    <div key={i} style={{ minWidth: 90 }}>
-                      <div style={{ fontSize: '.72rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: '.15rem' }}>{s.label}</div>
-                      <div style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: '.9rem', fontWeight: 700, color: s.col }}>{s.value}</div>
+            {clickedDomain.domain?(
+              <div style={{padding:'1rem'}}>
+                {/* Position strip */}
+                <div style={{display:'flex',gap:'.9rem',flexWrap:'wrap',padding:'.65rem .85rem',background:'#0b0e18',border:'1px solid #1a1d2a',borderRadius:8,marginBottom:'1rem'}}>
+                  {[{l:'Start',v:`AA ${clickedDomain.domain.start}`,c:'#67e8f9'},{l:'End',v:`AA ${clickedDomain.domain.end}`,c:'#67e8f9'},{l:'Length',v:`${clickedDomain.domain.end-clickedDomain.domain.start+1} aa`,c:'#a78bfa'},{l:'Clicked',v:`~AA ${clickedDomain.midAA}`,c:'#fbbf24'}].map((s,i)=>(
+                    <div key={i} style={{minWidth:80}}>
+                      <div style={{fontSize:'.69rem',color:'#4a4d5a',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.1rem'}}>{s.l}</div>
+                      <div style={{fontFamily:'"JetBrains Mono",monospace',fontSize:'.86rem',fontWeight:700,color:s.c}}>{s.v}</div>
                     </div>
                   ))}
                 </div>
-
-                {/* Description */}
-                <div style={{ marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '.8rem', fontWeight: 700, color: '#818cf8', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: '.4rem' }}>Function Overview</div>
-                  <div style={{ fontSize: '.92rem', color: '#c8cad4', lineHeight: 1.7 }}>{clickedDomain.domain.description}</div>
+                {/* Function */}
+                <div style={{marginBottom:'.85rem'}}>
+                  <div style={{fontSize:'.77rem',fontWeight:700,color:'#818cf8',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:'.3rem'}}>Function</div>
+                  <div style={{fontSize:'.9rem',color:'#c8cad4',lineHeight:1.7}}>{clickedDomain.domain.description}</div>
                 </div>
-
-                {/* Detailed molecular info */}
-                {clickedDomain.domain.detail && (
-                  <div style={{ background: `${FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#6366f1'}0a`, border: `1px solid ${FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#6366f1'}25`, borderRadius: 8, padding: '.85rem 1rem', marginBottom: '1rem' }}>
-                    <div style={{ fontSize: '.8rem', fontWeight: 700, color: FREGION_COLORS[clickedDomain.domain.functionalRegion] || '#a78bfa', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: '.5rem' }}>
-                      🔬 Molecular Detail
-                    </div>
-                    <div style={{ fontSize: '.88rem', color: '#9ca3af', lineHeight: 1.8 }}>{clickedDomain.domain.detail}</div>
-                  </div>
-                )}
-
-                {/* Cancer relevance */}
-                <div style={{ background: 'rgba(239,68,68,.05)', border: '1px solid rgba(239,68,68,.2)', borderRadius: 8, padding: '.75rem 1rem' }}>
-                  <div style={{ fontSize: '.8rem', fontWeight: 700, color: '#fca5a5', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: '.4rem' }}>⚕ Clinical Relevance</div>
-                  <div style={{ fontSize: '.86rem', color: '#9ca3af', lineHeight: 1.7 }}>
-                    {clickedDomain.domain.functionalRegion === 'Critical'
-                      ? `Mutations in the ${clickedDomain.domain.name} are among the most clinically significant alterations in ${gene.symbol}. Variants here typically cause loss of ${gene.type === 'Tumor Suppressor' ? 'tumor-suppressive function' : 'oncogenic gain-of-function changes'}. These are frequently reported in ClinVar as Pathogenic or Likely Pathogenic.`
-                      : clickedDomain.domain.functionalRegion === 'Structural'
-                        ? `The ${clickedDomain.domain.name} maintains the three-dimensional fold of ${gene.symbol}. Mutations here can indirectly disrupt critical function by destabilizing the protein structure. Classified as Likely Pathogenic to VUS depending on specific residue.`
-                        : `The ${clickedDomain.domain.name} modulates ${gene.symbol} activity through post-translational modifications or protein interactions. Variants range from Benign to VUS. Clinical significance often context-dependent.`}
+                {/* CPK Molecular Ball-and-Stick Panel */}
+                <MolecularDetailPanel domain={clickedDomain.domain} gene={gene} color={clickedDomain.color} />
+                {/* Clinical */}
+                <div style={{background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.18)',borderRadius:8,padding:'.7rem .95rem'}}>
+                  <div style={{fontSize:'.77rem',fontWeight:700,color:'#fca5a5',textTransform:'uppercase',letterSpacing:'.07em',marginBottom:'.35rem'}}>⚕ Clinical</div>
+                  <div style={{fontSize:'.84rem',color:'#9ca3af',lineHeight:1.7}}>
+                    {clickedDomain.domain.functionalRegion==='Critical'
+                      ?`Mutations in the ${clickedDomain.domain.name} are among the most clinically significant alterations in ${gene.symbol}. Frequently reported as Pathogenic in ClinVar.`
+                      :clickedDomain.domain.functionalRegion==='Structural'
+                      ?`Structural mutations here can destabilize the ${gene.symbol} protein fold. Classified Likely Pathogenic to VUS.`
+                      :`Regulatory variants range from Benign to VUS. Clinical significance is context-dependent.`}
                   </div>
                 </div>
               </div>
-            ) : (
-              <div style={{ padding: '1rem', color: '#8a8f9e', fontSize: '.9rem' }}>
-                Inter-domain linker region near AA {clickedDomain.midAA}. Flexible connector between functional domains. Generally less conserved; variants here are more often classified as Benign or VUS.
+            ):(
+              <div style={{padding:'1rem',color:'#6b7080',fontSize:'.88rem'}}>
+                Inter-domain linker near AA {clickedDomain.midAA}. Flexible connector — less conserved, typically Benign or VUS.
               </div>
             )}
           </div>
-        ) : (
-          <div style={{ background: '#0d1018', border: '1px dashed #2a2d3a', borderRadius: 10, padding: '.9rem 1.1rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '.75rem' }}>
-            <span style={{ fontSize: '1.5rem', opacity: .5 }}>👆</span>
+        ):(
+          <div style={{background:'#090d16',border:'1px dashed #1e2535',borderRadius:10,padding:'.85rem 1rem',marginBottom:'1rem',display:'flex',alignItems:'center',gap:'.7rem'}}>
+            <span style={{fontSize:'1.4rem',opacity:.4}}>👆</span>
             <div>
-              <div style={{ fontSize: '.9rem', color: '#6b7080', fontWeight: 600 }}>Click any part of the 3D structure to inspect it</div>
-              <div style={{ fontSize: '.78rem', color: '#3a3d4a', marginTop: '.15rem' }}>Rotation will pause and detailed domain information will appear here</div>
+              <div style={{fontSize:'.88rem',color:'#5a6070',fontWeight:600}}>Click any ribbon segment to inspect — camera zooms in automatically</div>
+              <div style={{fontSize:'.75rem',color:'#2e3245',marginTop:'.1rem'}}>Switch to ⚛ Ball+Stick or 🔵 CPK mode for atomic detail</div>
             </div>
           </div>
         )}
 
-        {/* Domain quick-nav */}
-        <div style={{ background: '#0d1018', border: '1px solid #1e2130', borderRadius: 10, overflow: 'hidden', marginBottom: '.5rem' }}>
-          <div style={{ padding: '.65rem .9rem', background: 'rgba(99,102,241,.07)', borderBottom: '1px solid #1e2130', fontSize: '.82rem', fontWeight: 700, color: '#a78bfa' }}>
-            📐 Domain Quick Reference — {gene.symbol}
+        {/* Domain quick reference */}
+        <div style={{background:'#090d16',border:'1px solid #1a1d2a',borderRadius:10,overflow:'hidden',marginBottom:'.5rem'}}>
+          <div style={{padding:'.6rem .9rem',background:'rgba(99,102,241,.06)',borderBottom:'1px solid #1a1d2a',fontSize:'.8rem',fontWeight:700,color:'#a78bfa'}}>
+            📐 Domain Map — {gene.symbol}
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1px', background: '#1e2130' }}>
-            {gene.domains.map((d, i) => {
-              const col = FREGION_COLORS[d.functionalRegion] || '#6366f1';
-              return (
-                <div key={i} style={{ padding: '.75rem .9rem', background: '#0d1018', borderLeft: `3px solid ${col}` }}>
-                  <div style={{ fontSize: '.78rem', fontWeight: 700, color: col, marginBottom: '.1rem' }}>{d.name}</div>
-                  <div style={{ fontSize: '.7rem', color: '#4a4d5a', fontFamily: '"JetBrains Mono",monospace', marginBottom: '.3rem' }}>AA {d.start}–{d.end}</div>
-                  <div style={{ fontSize: '.76rem', color: '#8a8f9e', lineHeight: 1.5 }}>{d.description}</div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(195px,1fr))',gap:'1px',background:'#1a1d2a'}}>
+            {gene.domains.map((d,i)=>{
+              const col=FREG_COL[d.functionalRegion]||'#6366f1';
+              return(
+                <div key={i} style={{padding:'.7rem .85rem',background:'#090d16',borderLeft:`3px solid ${col}`}}>
+                  <div style={{fontSize:'.76rem',fontWeight:700,color:col,marginBottom:'.08rem'}}>{d.name}</div>
+                  <div style={{fontSize:'.68rem',color:'#3a3d4a',fontFamily:'"JetBrains Mono",monospace',marginBottom:'.25rem'}}>AA {d.start}–{d.end}</div>
+                  <div style={{fontSize:'.73rem',color:'#7a8090',lineHeight:1.5}}>{d.description}</div>
                 </div>
               );
             })}
@@ -1148,12 +1276,12 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         </div>
       </>)}
 
-      {!showRCSB && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.9rem 1rem', background: '#0f1117', border: '1px dashed #2a2d3a', borderRadius: 10 }}>
-          <div style={{ fontSize: '2rem', opacity: .5 }}>🧬</div>
+      {!showRCSB&&(
+        <div style={{display:'flex',alignItems:'center',gap:'1rem',padding:'.85rem 1rem',background:'#0b0e18',border:'1px dashed #1e2535',borderRadius:10}}>
+          <div style={{fontSize:'1.8rem',opacity:.4}}>🧬</div>
           <div>
-            <div style={{ fontSize: '.9rem', color: '#6b7080' }}>Click <strong style={{ color: '#A78BFA' }}>Show 3D View</strong> to launch the interactive domain ribbon for <strong style={{ color: gene.color }}>{gene.symbol}</strong></div>
-            <div style={{ fontSize: '.78rem', color: '#3a3d4a', marginTop: '.2rem' }}>Click segments to inspect · Domain info panel · Molecular detail · <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer" style={{ color: '#67e8f9', textDecoration: 'none' }}>PDB {gene.pdb.id} ↗</a></div>
+            <div style={{fontSize:'.88rem',color:'#5a6070'}}>Click <strong style={{color:'#A78BFA'}}>Show 3D</strong> to launch the molecular viewer for <strong style={{color:gene.color}}>{gene.symbol}</strong></div>
+            <div style={{fontSize:'.75rem',color:'#2e3245',marginTop:'.18rem'}}>Ribbon · Ball+Stick · CPK modes · Click-to-zoom · <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer" style={{color:'#67e8f9',textDecoration:'none'}}>PDB {gene.pdb.id} ↗</a></div>
           </div>
         </div>
       )}
