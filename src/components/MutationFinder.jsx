@@ -97,17 +97,17 @@ const GENE_PANEL = {
 };
 
 const CANCER_SAMPLES = {
-  tp53_r175h: { name: 'TP53 R175H', icon: '🧬', color: '#F59E0B', gene: 'TP53', input: 'R175H', inputType: 'hgvs', description: 'Common dominant-negative missense mutation disrupting the zinc finger.' },
-  kras_g12c: { name: 'KRAS G12C', icon: '⚙️', color: '#DC2626', gene: 'KRAS', input: 'G12C', inputType: 'hgvs', description: 'Actionable mutation locked in active GTP state (target of Sotorasib).' },
-  brca1_m1775r: { name: 'BRCA1 M1775R', icon: '🎯', color: '#EF4444', gene: 'BRCA1', input: 'M1775R', inputType: 'hgvs', description: 'Pathogenic variant destroying the phosphopeptide binding pocket.' },
-  egfr_l858r: { name: 'EGFR L858R', icon: '💊', color: '#10B981', gene: 'EGFR', input: 'L858R', inputType: 'hgvs', description: 'Sensitizing kinase domain mutation responding to TKIs.' }
+  tp53_r175h: { name: 'TP53 R175H', tag: 'P53', color: '#F59E0B', gene: 'TP53', input: 'R175H', inputType: 'hgvs', description: 'Common dominant-negative missense mutation disrupting the zinc finger.' },
+  kras_g12c: { name: 'KRAS G12C', tag: 'RAS', color: '#DC2626', gene: 'KRAS', input: 'G12C', inputType: 'hgvs', description: 'Actionable mutation locked in active GTP state (target of Sotorasib).' },
+  brca1_m1775r: { name: 'BRCA1 M1775R', tag: 'BRC', color: '#EF4444', gene: 'BRCA1', input: 'M1775R', inputType: 'hgvs', description: 'Pathogenic variant destroying the phosphopeptide binding pocket.' },
+  egfr_l858r: { name: 'EGFR L858R', tag: 'EGF', color: '#10B981', gene: 'EGFR', input: 'L858R', inputType: 'hgvs', description: 'Sensitizing kinase domain mutation responding to TKIs.' }
 };
 
 const RESEARCH_SAMPLES = {
-  research_normal: { name: 'Normal (Wild-Type)', icon: '✨', color: '#10B981', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Identical Sequences – No Mutations' },
-  research_snp: { name: 'SNP (Missense)', icon: '⚡', color: '#F59E0B', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG'.replace('CGC', 'CGT'), readingFrame: '1', strand: 'forward', description: 'Single Nucleotide Polymorphism (SNP)' },
-  research_ins: { name: 'Insertion', icon: '➕', color: '#3B82F6', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Insertion Mutation (3 nucleotides)' },
-  research_fs: { name: 'Frameshift', icon: '⚠️', color: '#DC2626', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Frameshift Mutation (2 bp Insertion)' }
+  research_normal: { name: 'Normal (Wild-Type)', tag: 'WT', color: '#10B981', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Identical Sequences - No Mutations' },
+  research_snp: { name: 'SNP (Missense)', tag: 'SNP', color: '#F59E0B', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG'.replace('CGC', 'CGT'), readingFrame: '1', strand: 'forward', description: 'Single Nucleotide Polymorphism (SNP)' },
+  research_ins: { name: 'Insertion', tag: 'INS', color: '#3B82F6', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Insertion Mutation (3 nucleotides)' },
+  research_fs: { name: 'Frameshift', tag: 'FS', color: '#DC2626', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Frameshift Mutation (2 bp Insertion)' }
 };
 
 const AA_PROPERTIES = {
@@ -2322,13 +2322,11 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         {/* TOP LEVEL MODE SWITCHER */}
         <div style={{ display: 'flex', gap: '.8rem', marginBottom: '1.25rem' }}>
           <button className={`mode-tab ${!isCancerMode ? 'active' : ''}`} onClick={() => switchMode('research')} style={{ padding: '1rem', border: !isCancerMode ? '2px solid rgba(6,182,212,.5)' : '1px solid #24272f', background: !isCancerMode ? 'rgba(6,182,212,.1)' : '#0f1117' }}>
-            <span style={{ fontSize: '1.2rem', marginBottom: '.2rem' }}>🔬</span>
             <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Research Mode</span>
             <span style={{ fontSize: '.75rem', color: !isCancerMode ? '#a5f3fc' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Manual sequence input & analysis</span>
           </button>
           <button className={`mode-tab ${isCancerMode ? 'active' : ''}`} onClick={() => switchMode('cancer')} style={{ padding: '1rem', border: isCancerMode ? '2px solid rgba(16,185,129,.5)' : '1px solid #24272f', background: isCancerMode ? 'rgba(16,185,129,.1)' : '#0f1117' }}>
-            <span style={{ fontSize: '1.2rem', marginBottom: '.2rem' }}>🧬</span>
-            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Cancer Intelligence Mode</span>
+            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Cancer Intelligence</span>
             <span style={{ fontSize: '.75rem', color: isCancerMode ? '#a7f3d0' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Gene panel & clinical reports</span>
           </button>
         </div>
@@ -2365,7 +2363,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           <div className="pc" style={{ padding: '1.45rem' }}>
             {isCancerMode ? (
               <>
-                <h4 style={{ color: '#6EE7B7', marginBottom: '.6rem', fontSize: '1.1rem' }}>🧬 Cancer Intelligence Mode</h4>
+                <h4 style={{ color: '#6EE7B7', marginBottom: '.6rem', fontSize: '1.1rem' }}>Cancer Intelligence Mode</h4>
                 <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
                   This mode is tailored for translational oncology research. You select a known cancer driver gene (like TP53 or KRAS) and enter a mutation either by clinical HGVS notation (e.g. <code>R175H</code>) or by pasting the full mutated DNA sequence.
                 </p>
@@ -2390,7 +2388,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
               </>
             ) : (
               <>
-                <h4 style={{ color: '#67E8F9', marginBottom: '.6rem', fontSize: '1.1rem' }}>🔬 Research Mode</h4>
+                <h4 style={{ color: '#67E8F9', marginBottom: '.6rem', fontSize: '1.1rem' }}>Research Mode</h4>
                 <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
                   This general-purpose mode allows you to align any novel, proprietary, or uncharacterized DNA reference sequence against an alternate (mutated) sequence, functioning as a secure bioinformatics alignment proxy.
                 </p>
@@ -2426,7 +2424,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
             <div className="sample-menu" onClick={e => e.stopPropagation()}>
               {Object.entries(isCancerMode ? CANCER_SAMPLES : RESEARCH_SAMPLES).map(([k, s]) => (
                 <div key={k} className="sample-item" onClick={() => loadSample(s)} style={{ background: `${s.color}0a` }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.22rem' }}><span style={{ fontSize: '1.25rem' }}>{s.icon}</span><span style={{ fontSize: '1rem', fontWeight: 600, color: s.color }}>{s.name}</span></div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.22rem' }}><span style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: '.7rem', fontWeight: 700, color: '#fff', background: s.color, padding: '.15rem .4rem', borderRadius: 4, letterSpacing: '.04em' }}>{s.tag}</span><span style={{ fontSize: '1rem', fontWeight: 600, color: s.color }}>{s.name}</span></div>
                   <div style={{ fontSize: '.9rem', color: '#8a8f9e' }}>{s.description}</div>
                 </div>
               ))}
@@ -2479,7 +2477,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         {/* INPUT MODE */}
         <div className="pc">
           <div style={{ display: 'flex', gap: '.6rem', marginBottom: '1.2rem' }}>
-            <button className={`mode-tab ${!vcfMode ? 'active' : ''}`} onClick={() => { setVcfMode(false); setVcfMeta(null); }}><span>⌨️</span> Manual Entry</button>
+            <button className={`mode-tab ${!vcfMode ? 'active' : ''}`} onClick={() => { setVcfMode(false); setVcfMeta(null); }}>Manual Entry</button>
             <button className={`mode-tab ${vcfMode ? 'active' : ''}`} onClick={() => setVcfMode(true)}>
               VCF File Upload
               <span style={{ background: 'rgba(139,92,246,.2)', border: '1px solid rgba(139,92,246,.4)', color: '#A78BFA', fontSize: '.7rem', fontWeight: 700, padding: '.12rem .4rem', borderRadius: 5, marginLeft: '.35rem', textTransform: 'uppercase' }}>NGS</span>
@@ -2553,9 +2551,16 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           )}
 
           {error && <div className="error" style={{ marginBottom: '1rem' }}>{error}</div>}
-          <button className="btn-p" onClick={handleAnalyze} disabled={loading || !seq1.trim() || !seq2.trim()} style={{ opacity: (!seq1.trim() || !seq2.trim()) ? 0.5 : 1 }}>
-            {loading ? <><span className="spin"></span><span>Analyzing...</span></> : <><span>Analyze Mutations</span></>}
-          </button>
+          {(() => {
+            const canAnalyze = isCancerMode
+              ? (cancerInput.trim().length > 0)
+              : (seq1.trim().length > 0 && seq2.trim().length > 0);
+            return (
+              <button className="btn-p" onClick={handleAnalyze} disabled={loading || !canAnalyze} style={{ opacity: !canAnalyze ? 0.5 : 1 }}>
+                {loading ? <><span className="spin"></span><span>Analyzing...</span></> : <><span>Analyze Mutations</span></>}
+              </button>
+            );
+          })()}
         </div>
 
         {/* RESULTS */}
@@ -2851,6 +2856,6 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           )}
         </>)}
       </div>
-    </div>
+    </div >
   );
 }

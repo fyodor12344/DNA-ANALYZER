@@ -25,6 +25,7 @@ from algorithms.alignment import needleman_wunsch, smith_waterman, calculate_ali
 from algorithms.mutation_finder import find_mutations
 from algorithms.crispr import find_pam_sites
 from algorithms.primer_design import design_primers
+from algorithms.hgvs_parser import parse_hgvs
 
 # Load environment variables FIRST
 load_dotenv()
@@ -179,6 +180,32 @@ def mutations():
     
     except Exception as e:
         print(f"Error in mutations endpoint: {str(e)}")
+        return jsonify({'error': 'Internal server error. Please try again.'}), 500
+
+
+@app.route('/api/parse-hgvs', methods=['POST', 'OPTIONS'])
+def parse_hgvs_endpoint():
+    """Parse HGVS notation and return a normalized mutation dictionary."""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+
+        gene = data.get('gene', '').strip().upper()
+        hgvs_string = data.get('hgvs', '').strip()
+
+        if not gene:
+            return jsonify({'error': 'Gene name is required'}), 400
+        if not hgvs_string:
+            return jsonify({'error': 'HGVS string is required'}), 400
+
+        result = parse_hgvs(gene, hgvs_string)
+        return jsonify(result)
+
+    except ValueError as e:
+        return jsonify({'error': str(e), 'valid': False}), 400
+    except Exception as e:
+        print(f"Error in parse-hgvs endpoint: {str(e)}")
         return jsonify({'error': 'Internal server error. Please try again.'}), 500
 
 
