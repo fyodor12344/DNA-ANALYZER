@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
+const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
+
 const EMBEDDED_PDB = {
   TP53: "REMARK  TP53 DNA Binding Domain - Domain-accurate CA trace\nREMARK  Based on PDB 2OCJ structural topology\nATOM      1  CA  GLY A 113       3.459  -1.900  -0.675  1.00 30.00           C\nATOM      2  CA  SER A 114       6.294  -0.954  -0.145  1.00 30.00           C\nEND",
 };
@@ -94,11 +96,18 @@ const GENE_PANEL = {
   }
 };
 
-const MUTATION_SAMPLES = {
-  normal: { name: 'Normal (Wild-Type)', icon: 'WT', color: '#10B981', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Identical Sequences – No Mutations' },
-  snp: { name: 'SNP (Missense)', icon: 'SNP', color: '#F59E0B', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG'.replace('CGC', 'CGT'), readingFrame: '1', strand: 'forward', description: '️ Single Nucleotide Polymorphism (SNP)' },
-  insertion: { name: 'Insertion', icon: 'INS', color: '#3B82F6', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: ' Insertion Mutation (3 nucleotides)' },
-  frameshiftInsertion: { name: 'Frameshift (Insertion)', icon: 'FS', color: '#DC2626', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Frameshift Mutation (2 bp Insertion)' }
+const CANCER_SAMPLES = {
+  tp53_r175h: { name: 'TP53 R175H', icon: '🧬', color: '#F59E0B', gene: 'TP53', input: 'R175H', inputType: 'hgvs', description: 'Common dominant-negative missense mutation disrupting the zinc finger.' },
+  kras_g12c: { name: 'KRAS G12C', icon: '⚙️', color: '#DC2626', gene: 'KRAS', input: 'G12C', inputType: 'hgvs', description: 'Actionable mutation locked in active GTP state (target of Sotorasib).' },
+  brca1_m1775r: { name: 'BRCA1 M1775R', icon: '🎯', color: '#EF4444', gene: 'BRCA1', input: 'M1775R', inputType: 'hgvs', description: 'Pathogenic variant destroying the phosphopeptide binding pocket.' },
+  egfr_l858r: { name: 'EGFR L858R', icon: '💊', color: '#10B981', gene: 'EGFR', input: 'L858R', inputType: 'hgvs', description: 'Sensitizing kinase domain mutation responding to TKIs.' }
+};
+
+const RESEARCH_SAMPLES = {
+  research_normal: { name: 'Normal (Wild-Type)', icon: '✨', color: '#10B981', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Identical Sequences – No Mutations' },
+  research_snp: { name: 'SNP (Missense)', icon: '⚡', color: '#F59E0B', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG'.replace('CGC', 'CGT'), readingFrame: '1', strand: 'forward', description: 'Single Nucleotide Polymorphism (SNP)' },
+  research_ins: { name: 'Insertion', icon: '➕', color: '#3B82F6', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Insertion Mutation (3 nucleotides)' },
+  research_fs: { name: 'Frameshift', icon: '⚠️', color: '#DC2626', reference: 'ATGGCCATTGTAATGGGCCGCTGAAAGGGTGCCCGATAG', alternate: 'ATGGCCATTGTAATGGGCCGCTGAACAAGGGTGCCCGATAG', readingFrame: '1', strand: 'forward', description: 'Frameshift Mutation (2 bp Insertion)' }
 };
 
 const AA_PROPERTIES = {
@@ -164,8 +173,8 @@ const calculatePositions = (nucleotidePos, frame) => {
   return { nucleotidePosition: nucleotidePos + 1, codonNumber, aaPosition: codonNumber, literaturePosition: codonNumber };
 };
 
-const generateHGVS = (mutation, positions, refSeq, frame, geneKey = 'TP53') => {
-  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53; const prefix = `${gene.id}:p.`;
+const generateHGVS = (mutation, positions, refSeq, frame, geneKeyOrObj = 'TP53') => {
+  const gene = typeof geneKeyOrObj === 'string' ? (GENE_PANEL[geneKeyOrObj] || GENE_PANEL.TP53) : geneKeyOrObj; const prefix = `${gene.id}:p.`;
   if (mutation.mutation_class === 'Silent') return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}=`;
   if (mutation.mutation_class === 'Missense') return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}${mutation.alternate_amino_acid}`;
   if (mutation.mutation_class === 'Nonsense') return `${prefix}${mutation.reference_amino_acid}${positions.literaturePosition}*`;
@@ -175,8 +184,8 @@ const generateHGVS = (mutation, positions, refSeq, frame, geneKey = 'TP53') => {
   return `${prefix}?`;
 };
 
-const getDomainMapping = (aaPosition, geneKey = 'TP53') => {
-  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
+const getDomainMapping = (aaPosition, geneKeyOrObj = 'TP53') => {
+  const gene = typeof geneKeyOrObj === 'string' ? (GENE_PANEL[geneKeyOrObj] || GENE_PANEL.TP53) : geneKeyOrObj;
   for (const domain of gene.domains) {
     if (aaPosition >= domain.start && aaPosition <= domain.end) {
       return { proteinDomain: domain.name, functionalRegion: domain.functionalRegion, interpretation: `Mutation occurs inside functional domain: ${domain.description}`, start: domain.start, end: domain.end, isInterDomain: false };
@@ -185,8 +194,8 @@ const getDomainMapping = (aaPosition, geneKey = 'TP53') => {
   return { proteinDomain: 'Inter-domain region', functionalRegion: 'N/A', interpretation: `Mutation in inter-domain linker region of ${gene.symbol}`, isInterDomain: true };
 };
 
-const getBiologicalInterpretation = (mutation, domainMapping, geneKey = 'TP53') => {
-  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
+const getBiologicalInterpretation = (mutation, domainMapping, geneKeyOrObj = 'TP53') => {
+  const gene = typeof geneKeyOrObj === 'string' ? (GENE_PANEL[geneKeyOrObj] || GENE_PANEL.TP53) : geneKeyOrObj;
   let interpretation = { mutationType: mutation.type, functionalEffect: mutation.mutation_class, confidence: 'High', confidenceReason: '', scientificNote: '', biochemicalAnalysis: null };
   if (mutation.mutation_class === 'Missense' && mutation.reference_amino_acid && mutation.alternate_amino_acid) {
     const refProps = AA_PROPERTIES[mutation.reference_amino_acid]; const altProps = AA_PROPERTIES[mutation.alternate_amino_acid];
@@ -655,14 +664,15 @@ const detectMutations = (ref, alt, frame, strand) => {
   return { mutations, summary, warnings, sequences: { reference: seq1, alternate: seq2, reference_length: seq1.length, alternate_length: seq2.length, length_difference: lengthDiff, reading_frame: frame, strand } };
 };
 
-const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta, geneKey = 'TP53') => {
-  const gene = GENE_PANEL[geneKey] || GENE_PANEL.TP53;
+const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta, geneKeyOrObj = 'TP53') => {
+  const gene = typeof geneKeyOrObj === 'string' ? (GENE_PANEL[geneKeyOrObj] || GENE_PANEL.TP53) : geneKeyOrObj;
+  const isCancerGene = typeof geneKeyOrObj === 'string' && GENE_PANEL[geneKeyOrObj];
   const timestamp = new Date().toLocaleString();
   const date = new Date().toISOString().split('T')[0];
   const W = 80;
   let pdf = '';
   pdf += '='.repeat(W) + '\n';
-  pdf += `  ${gene.symbol} CLINICAL MUTATION ANALYSIS REPORT\n`;
+  pdf += isCancerGene ? `  ${gene.symbol} CLINICAL MUTATION ANALYSIS REPORT\n` : `  DNA MUTATION ANALYSIS REPORT\n`;
   pdf += `  Multi-Source Interpretation Pipeline v2.0\n`;
   pdf += '='.repeat(W) + '\n\n';
   pdf += `Gene:            ${gene.symbol} — ${gene.name}\n`;
@@ -1566,46 +1576,40 @@ EGFR (PDB 2ITX): kinase domain residues 696-1022, bilobal. N-lobe (beta-rich, AT
         ? `SELECTED DOMAIN: ${d.name} | Residues AA ${d.start}-${d.end} | Secondary structure: ${ssType} | Class: ${d.functionalRegion} | Function: ${d.description}${d.detail ? ' | Key residues: ' + d.detail : ''}. Focus primarily on this domain using exact residue contacts and mutation consequences from the structural data above.`
         : `No domain selected. Provide a full structural overview of ${gene.symbol} as displayed in the ribbon viewer.`;
 
-      const prompt = `Explain the 3D molecular structure of ${gene.symbol} (${gene.proteinLength} amino acids) displayed in a ribbon molecular viewer, for a cancer biology educational tool.
+      const structContext = `3D Molecular Structure Analysis for ${gene.symbol} (${gene.proteinLength} amino acids).
 
 Protein clinical context: ${gene.clinicalContext}
 
-Domains in this protein:
-${gene.domains.map((dm, i) => `${i + 1}. ${dm.name} (AA ${dm.start}-${dm.end}, ${dm.functionalRegion}): ${dm.description}`).join('\n')}
+Domains: ${gene.domains.map((dm, i) => `${i + 1}. ${dm.name} (AA ${dm.start}-${dm.end}, ${dm.functionalRegion}): ${dm.description}`).join('; ')}
 
 ${domainBlock}
 
-Write a rigorous, accurate explanation in flowing scientific prose. Use plain-text ALL CAPS section headers underlined with dashes. No emojis. No bullet lists — write in paragraphs. Cover: (1) what the ribbon represents and how to read it, (2) the specific secondary structure elements (alpha-helices, beta-strands, loops) and their precise roles in this protein using exact residue numbers from the structural data, (3) the CPK ball-and-stick colour scheme (Ca teal, N blue, O red, C cyan, S yellow) and the physical meaning of the hydrogen bonds shown, (4) if a domain is selected: detailed atomic-level explanation of that domain including its verified residue contacts, coordination geometry if applicable, and exactly how specific cancer mutations disrupt it with measured structural consequences, (5) clinical connection between the atomic structure and cancer pathology. Write at graduate textbook level.`;
+VERIFIED STRUCTURAL DATA: ${BOHRIUM_DATA}
 
-      const fullPrompt = `You are a structural biologist writing explanations for an interactive cancer gene education platform. Use the verified crystallographic and MD simulation data below. Be specific with residue numbers, bond geometries, angstrom distances, fold-level consequences. Write in clear scientific prose — no emojis, no bullet lists, plain text ALL CAPS headers underlined with dashes.
+Provide a rigorous structural explanation covering: secondary structure elements, residue contacts, domain functions, mutation consequences, and clinical significance.`;
 
-VERIFIED STRUCTURAL DATA (Bohrium/SciMaster, PDB-sourced):
-${BOHRIUM_DATA}
-
----
-
-${prompt}`;
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const res = await fetch(`${API_URL}/api/explain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: fullPrompt }]
+          tool: 'Mutation Finder',
+          data: {
+            summary: { total_mutations: 0 },
+            mutations: [],
+            context: structContext
+          }
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.error?.message || `HTTP ${response.status}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error || `HTTP ${res.status}`);
       }
 
-      const data = await response.json();
-      const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-      setStructureAI(text || 'No response returned.');
+      const data = await res.json();
+      setStructureAI(data.explanation || 'No response returned.');
     } catch (err) {
-      setStructureAI(`Could not reach AI explanation service.\n\nError: ${err.message}\n\nNote: This feature uses the Anthropic API and requires the Claude.ai interface. Please try again.`);
+      setStructureAI(`Could not reach AI explanation service.\n\nError: ${err.message}\n\nPlease ensure the backend server is running and try again.`);
     }
     setStructureAILoading(false);
   };
@@ -1891,9 +1895,16 @@ export default function CancerGeneMutationAnalyzer() {
     }
   };
 
-  const loadSample = key => {
-    const s = MUTATION_SAMPLES[key];
-    setSeq1(s.reference); setSeq2(s.alternate); setReadingFrame(s.readingFrame); setStrand(s.strand);
+  const loadSample = (s) => {
+    if (isCancerMode) {
+      if (s.gene) setSelectedGene(s.gene);
+      setSeq1(CANONICAL_REFERENCES[s.gene || selectedGene] || ''); setSeq2('');
+      setCancerInputType(s.inputType || 'hgvs');
+      setCancerInput(s.input || '');
+    } else {
+      setSeq1(s.reference || ''); setSeq2(s.alternate || '');
+      setReadingFrame(s.readingFrame || '1'); setStrand(s.strand || 'forward');
+    }
     setCurrentSample(s); setSampleBannerVisible(true); setShowSampleMenu(false);
     setMutations(null); setError(''); setAiExplanation(''); setDiffInfo(null);
     setVcfMode(false); setVcfParsed(null); setVcfFile(null);
@@ -1976,58 +1987,69 @@ export default function CancerGeneMutationAnalyzer() {
 
   useEffect(() => {
     if (mutations?.mutations && readingFrame) {
+      // In Research Mode, use generic gene; in Cancer Mode, use selected cancer gene
+      const isResearch = analysisMode !== 'cancer';
+      const effectiveGene = isResearch
+        ? buildResearchGene(Math.floor((mutations.sequences?.reference_length || 300) / 3))
+        : (GENE_PANEL[selectedGene] || GENE_PANEL.TP53);
+      // For database lookups (COSMIC, ClinVar, conservation), use actual gene key in Cancer Mode,
+      // or a non-existent key in Research Mode so lookups return null gracefully
+      const lookupKey = isResearch ? '__RESEARCH__' : selectedGene;
+
       const refSeq = mutations.sequences?.reference ?? '';
       const baseAnnotated = mutations.mutations.map(mutation => {
         const positionIndex = mutation.codon_position ?? mutation.position ?? 0;
         const positions = calculatePositions(positionIndex, readingFrame);
-        const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame, selectedGene);
-        const domainMapping = getDomainMapping(positions.aaPosition, selectedGene);
-        const interpretation = getBiologicalInterpretation(mutation, domainMapping, selectedGene);
+        const hgvs = generateHGVS(mutation, positions, refSeq, readingFrame, effectiveGene);
+        const domainMapping = getDomainMapping(positions.aaPosition, effectiveGene);
+        const interpretation = getBiologicalInterpretation(mutation, domainMapping, effectiveGene);
         // Augment mutation with aaPosition for scoring
         const augMut = { ...mutation, aaPosition: positions.aaPosition };
-        // Local lookups first (instant)
-        const clinvarLocal = lookupClinVar(augMut, selectedGene);
-        const cosmicLocal = lookupCOSMIC(augMut, selectedGene);
-        const pathogenicity = scorePathogenicity(augMut, domainMapping, selectedGene, clinvarLocal, cosmicLocal);
+        // Local lookups (only meaningful in Cancer Mode, returns null in Research Mode)
+        const clinvarLocal = lookupClinVar(augMut, lookupKey);
+        const cosmicLocal = lookupCOSMIC(augMut, lookupKey);
+        const pathogenicity = scorePathogenicity(augMut, domainMapping, lookupKey, clinvarLocal, cosmicLocal);
         const sift = mutation.reference_amino_acid && mutation.alternate_amino_acid
           ? estimateSIFT(mutation.reference_amino_acid, mutation.alternate_amino_acid) : null;
         const polyphen = mutation.reference_amino_acid && mutation.alternate_amino_acid
-          ? estimatePolyPhen(augMut, domainMapping, selectedGene) : null;
-        const conservation = estimateConservation(augMut, selectedGene);
+          ? estimatePolyPhen(augMut, domainMapping, lookupKey) : null;
+        const conservation = estimateConservation(augMut, lookupKey);
         return {
           mutation: augMut, positions, hgvs, domainMapping, interpretation, pathogenicity,
           sift, polyphen, conservation, clinvar: clinvarLocal, cosmic: cosmicLocal, clinvarLive: null
         };
       });
       setAnnotatedMutations(baseAnnotated);
-      // Background: attempt live ClinVar queries
-      Promise.allSettled(baseAnnotated.map(async (am, idx) => {
-        if (!am.mutation.reference_amino_acid) return am;
-        const live = await fetchClinVarLive(am.hgvs, selectedGene);
-        return { idx, live };
-      })).then(results => {
-        setAnnotatedMutations(prev => {
-          const updated = [...prev];
-          results.forEach(r => {
-            if (r.status === 'fulfilled' && r.value?.live) {
-              const { idx, live } = r.value;
-              if (updated[idx]) {
-                updated[idx] = {
-                  ...updated[idx], clinvarLive: live,
-                  pathogenicity: scorePathogenicity(updated[idx].mutation, updated[idx].domainMapping, selectedGene, live, updated[idx].cosmic)
-                };
+      // Background: attempt live ClinVar queries (only in Cancer Mode)
+      if (!isResearch) {
+        Promise.allSettled(baseAnnotated.map(async (am, idx) => {
+          if (!am.mutation.reference_amino_acid) return am;
+          const live = await fetchClinVarLive(am.hgvs, selectedGene);
+          return { idx, live };
+        })).then(results => {
+          setAnnotatedMutations(prev => {
+            const updated = [...prev];
+            results.forEach(r => {
+              if (r.status === 'fulfilled' && r.value?.live) {
+                const { idx, live } = r.value;
+                if (updated[idx]) {
+                  updated[idx] = {
+                    ...updated[idx], clinvarLive: live,
+                    pathogenicity: scorePathogenicity(updated[idx].mutation, updated[idx].domainMapping, selectedGene, live, updated[idx].cosmic)
+                  };
+                }
               }
-            }
+            });
+            return updated;
           });
-          return updated;
         });
-      });
+      }
     }
-  }, [mutations, readingFrame, selectedGene]);
+  }, [mutations, readingFrame, selectedGene, analysisMode]);
 
   const handleExportPDF = () => {
     if (!mutations) return;
-    try { generatePDF(mutations, annotatedMutations, { readingFrame, strand }, vcfMeta, selectedGene); }
+    try { generatePDF(mutations, annotatedMutations, { readingFrame, strand }, vcfMeta, isCancerMode ? selectedGene : activeGene); }
     catch (e) { setError(`PDF export failed: ${e.message}`); }
   };
 
@@ -2042,7 +2064,7 @@ export default function CancerGeneMutationAnalyzer() {
     if (!mutations) return;
     setLoadingAI(true); setError('');
     try {
-      const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
+      const gene = isCancerMode ? (GENE_PANEL[selectedGene] || GENE_PANEL.TP53) : activeGene;
       const totalMut = mutations.summary.total_mutations;
       const criticalMuts = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Critical');
       const frameshiftMuts = annotatedMutations.filter(am => am.mutation.is_frameshift);
@@ -2105,27 +2127,29 @@ Research and educational use only. Not for clinical diagnosis. Consult a certifi
 
 Write in clear scientific prose. No emojis. No bullet lists — full paragraphs only. Be specific and accurate using the structural data provided.`;
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
+      const response = await fetch(`${API_URL}/api/explain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: analysisPrompt }]
+          tool: 'Mutation Finder',
+          data: {
+            summary: mutations.summary,
+            mutations: mutations.mutations?.slice(0, 10) || [],
+            context: analysisPrompt
+          }
         })
       });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.error?.message || `HTTP ${response.status}`);
+        throw new Error(errData?.error || `HTTP ${response.status}`);
       }
 
       const data = await response.json();
-      const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('\n');
-      setAiExplanation(text || 'No analysis returned.');
+      setAiExplanation(data.explanation || 'No analysis returned.');
     } catch (e) {
-      // Offline fallback using Bohrium structural data
-      const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
+      // Offline fallback report
+      const gene = isCancerMode ? (GENE_PANEL[selectedGene] || GENE_PANEL.TP53) : activeGene;
       const totalMut = mutations.summary.total_mutations;
       const criticalMuts = annotatedMutations.filter(am => am.domainMapping.functionalRegion === 'Critical');
       const frameshiftMuts = annotatedMutations.filter(am => am.mutation.is_frameshift);
@@ -2141,7 +2165,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
 
       let exp = '';
       exp += '='.repeat(64) + '\n';
-      exp += `  ${gene.symbol} CLINICAL MUTATION ANALYSIS REPORT\n`;
+      exp += isCancerMode ? `  ${gene.symbol} CLINICAL MUTATION ANALYSIS REPORT\n` : `  DNA MUTATION ANALYSIS REPORT\n`;
       exp += '='.repeat(64) + '\n\n';
       exp += `Gene:        ${gene.symbol} — ${gene.name}\n`;
       exp += `Type:        ${gene.type}\n`;
@@ -2173,16 +2197,21 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           exp += `  Interpretation: ${am.interpretation.scientificNote}\n\n`;
         });
       }
-      exp += 'STRUCTURAL CONTEXT (Bohrium/PDB-verified)\n' + '-'.repeat(60) + '\n';
-      exp += (MUTATION_STRUCTURAL_DATA[gene.symbol] || gene.clinicalContext) + '\n\n';
-      exp += 'CLINICAL SEVERITY\n' + '-'.repeat(60) + '\n';
+      if (isCancerMode) {
+        exp += 'STRUCTURAL CONTEXT (Bohrium/PDB-verified)\n' + '-'.repeat(60) + '\n';
+        exp += (MUTATION_STRUCTURAL_DATA[gene.symbol] || gene.clinicalContext) + '\n\n';
+      }
+      exp += 'SEVERITY ASSESSMENT\n' + '-'.repeat(60) + '\n';
       exp += `Severity: ${severity}\n\n`;
-      exp += 'ASSOCIATED CANCERS\n' + '-'.repeat(60) + '\n';
-      gene.cancerAssociations.forEach((c, i) => { exp += `  ${i + 1}. ${c}\n`; });
-      exp += '\n' + '-'.repeat(64) + '\n';
+      if (isCancerMode && gene.cancerAssociations?.length > 0) {
+        exp += 'ASSOCIATED CANCERS\n' + '-'.repeat(60) + '\n';
+        gene.cancerAssociations.forEach((c, i) => { exp += `  ${i + 1}. ${c}\n`; });
+        exp += '\n';
+      }
+      exp += '-'.repeat(64) + '\n';
       exp += 'DISCLAIMER: Research and educational use only. Not for clinical diagnosis.\n';
       exp += '-'.repeat(64) + '\n';
-      exp += '\n[Note: AI service unavailable — report generated from verified local structural database]\n';
+      exp += '\n[Note: AI service unavailable — report generated from local analysis]\n';
       setAiExplanation(exp);
     }
     finally { setLoadingAI(false); }
@@ -2334,9 +2363,57 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         </button>
         <div className={`info-wrap ${infoOpen ? 'open' : 'closed'}`}>
           <div className="pc" style={{ padding: '1.45rem' }}>
-            <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, margin: 0 }}>
-              Research-grade cancer gene mutation analyzer with clickable 3D protein structure visualization. Click any region of the 3D ribbon to freeze rotation and see detailed molecular information about that domain.
-            </p>
+            {isCancerMode ? (
+              <>
+                <h4 style={{ color: '#6EE7B7', marginBottom: '.6rem', fontSize: '1.1rem' }}>🧬 Cancer Intelligence Mode</h4>
+                <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
+                  This mode is tailored for translational oncology research. You select a known cancer driver gene (like TP53 or KRAS) and enter a mutation either by clinical HGVS notation (e.g. <code>R175H</code>) or by pasting the full mutated DNA sequence.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem' }}>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Clinical Databases</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Cross-references variants against live ClinVar and COSMIC databases to instantly recognize known pathogenic hotspots.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>3D Structural Mapping</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Renders actual PDB structures (like 2OCJ for TP53) and maps the domain geometry in an interactive 3D ribbon viewer.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>AI Explanations</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Uses Large Language Models to write comprehensive clinical diagnostic insight reports detailing geometric structural consequences.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Pathogenicity Scoring</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Scores severity using BLOSUM62 matrices, empirical empirical frequencies, and structural disruption heuristics.</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <h4 style={{ color: '#67E8F9', marginBottom: '.6rem', fontSize: '1.1rem' }}>🔬 Research Mode</h4>
+                <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
+                  This general-purpose mode allows you to align any novel, proprietary, or uncharacterized DNA reference sequence against an alternate (mutated) sequence, functioning as a secure bioinformatics alignment proxy.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem' }}>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Variant Detection</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Computes reading frame offsets to dynamically trace amino acid changes, revealing insertions, missense, nonsense, and frameshift artifacts.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Privacy Integrity</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Entirely unlinks your analysis from cloud-hosted cancer databases to provide guaranteed separation for proprietary molecular investigations.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>2D Length Simulation</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Predicts basic N/C-terminal boundaries by translating arbitrary gene lengths to show a dynamic two-dimensional model of the structural framework.</p>
+                  </div>
+                  <div>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>VCF Format Utility</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Natively parses VCF text blocks straight from raw automated Next-Generation Sequencing (NGS) outputs or variant callers.</p>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -2347,8 +2424,8 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           </button>
           {showSampleMenu && (
             <div className="sample-menu" onClick={e => e.stopPropagation()}>
-              {Object.entries(MUTATION_SAMPLES).map(([k, s]) => (
-                <div key={k} className="sample-item" onClick={() => loadSample(k)} style={{ background: `${s.color}0a` }}>
+              {Object.entries(isCancerMode ? CANCER_SAMPLES : RESEARCH_SAMPLES).map(([k, s]) => (
+                <div key={k} className="sample-item" onClick={() => loadSample(s)} style={{ background: `${s.color}0a` }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.22rem' }}><span style={{ fontSize: '1.25rem' }}>{s.icon}</span><span style={{ fontSize: '1rem', fontWeight: 600, color: s.color }}>{s.name}</span></div>
                   <div style={{ fontSize: '.9rem', color: '#8a8f9e' }}>{s.description}</div>
                 </div>
@@ -2538,8 +2615,8 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           )}
 
           {/* PROTEIN STRUCTURE VISUALIZATION */}
-          {(() => {
-            const gene = GENE_PANEL[selectedGene] || GENE_PANEL.TP53;
+          {isCancerMode && (() => {
+            const gene = activeGene;
             const totalLen = gene.proteinLength;
             const domainColorMap = buildDomainColorMap(gene);
             const mutPins = annotatedMutations.map(am => ({ pos: am.positions.aaPosition, hgvs: am.hgvs, color: am.mutation.is_frameshift ? '#EF4444' : am.mutation.mutation_class === 'Missense' ? '#FBBF24' : am.mutation.mutation_class === 'Nonsense' ? '#EF4444' : '#10B981' }));
@@ -2606,7 +2683,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
             <div className="pc">
               <div style={{ fontSize: '1rem', fontWeight: 600, color: '#c8cad4', marginBottom: '.8rem' }}>Detailed Mutation Interpretation</div>
               {annotatedMutations.map((am, idx) => {
-                const path = am.pathogenicity || scorePathogenicity(am.mutation, am.domainMapping, selectedGene, am.clinvar, am.cosmic);
+                const path = am.pathogenicity || scorePathogenicity(am.mutation, am.domainMapping, isCancerMode ? selectedGene : '__RESEARCH__', am.clinvar, am.cosmic);
                 const cardColor = am.mutation.is_frameshift ? '#DC2626' : am.mutation.mutation_class === 'Nonsense' ? '#EF4444' : am.mutation.mutation_class === 'Missense' ? '#FBBF24' : '#10B981';
                 return (
                   <div key={idx} className="mut-card" style={{ borderLeft: `4px solid ${cardColor}`, marginBottom: '1.25rem' }}>

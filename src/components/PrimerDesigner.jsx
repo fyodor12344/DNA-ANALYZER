@@ -223,205 +223,307 @@ function classifyScore(score) {
 }
 
 /* ─── MAIN PRIMER DESIGN ENGINE ──────────────────────────────────────────── */
-async function designPrimers(seq, mode) {
-  await new Promise(r => setTimeout(r, 900)); // simulate async
-  seq = seq.toUpperCase();
+/* ─── CANDIDATE SCANNER ──────────────────────────────────────────────────────
+   Scans the sequence with given thresholds and returns raw candidate lists.
+   thresholds: { gcMax, tmMin, tmMax, hpMin, sdMin, allowNoClamp, allowRuns3 }
+   ─────────────────────────────────────────────────────────────────────────── */
+function scanCandidates(seq, mode, ampMin, ampMax, th) {
   const n = seq.length;
+  const fwds = [], revs = [];
 
-  const allFwd = [], allRev = [];
+  const tryPrimer = (p, start, end, isRev) => {
+    const gc = calcGC(p);
+    if (gc < 40 || gc > th.gcMax) return null;
+    if (hasRuns(p, th.allowRuns3 ? 5 : 4)) return null;          // relax: allow 4-run, block only 5+
+    if (!th.allowNoClamp && !hasGCClamp(p)) return null;
+    if (!noTerminalGGGCCC(p)) return null;
+    // Skip expensive internal complementarity check in relaxed passes
+    if (!th.relaxed && hasInternalComplementarity(p)) return null;
+    const tm = calcTmNN(p);
+    if (tm < th.tmMin || tm > th.tmMax) return null;
+    const hp = calcHairpinDG(p);
+    const sd = calcSelfDimerDG(p);
+    if (hp < th.hpMin) return null;
+    if (sd < th.sdMin) return null;
+    return {
+      sequence: p, length: p.length, start, end,
+      tm, gc_content: gc,
+      hairpin_dg: hp, self_dimer_dg: sd,
+      three_prime_dg: calc3PrimeDG(p),
+      last_5bp_gc: calcLast5GC(p),
+      gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g)||[]).length }
+    };
+  };
 
-  // Scan forward primers
   for (let start = 0; start < n - 18; start++) {
     for (let len = 18; len <= 22; len++) {
       if (start + len > n) continue;
-      const p = seq.slice(start, start + len);
-      const gc = calcGC(p);
-      if (gc < 40 || gc > 65) continue;
-      if (hasRuns(p, 4)) continue;
-      if (!hasGCClamp(p)) continue;
-      if (!noTerminalGGGCCC(p)) continue;
-      if (hasInternalComplementarity(p)) continue;
-      const tm = calcTmNN(p);
-      if (tm < 58 || tm > 65) continue;
-      const hp = calcHairpinDG(p);
-      const sd = calcSelfDimerDG(p);
-      if (hp < -3) continue;
-      if (sd < -5) continue;
-      allFwd.push({
-        sequence: p, length: len, start, end: start + len,
-        tm, gc_content: gc,
-        hairpin_dg: hp, self_dimer_dg: sd,
-        three_prime_dg: calc3PrimeDG(p),
-        last_5bp_gc: calcLast5GC(p),
-        gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g)||[]).length }
-      });
+      const r = tryPrimer(seq.slice(start, start + len), start, start + len, false);
+      if (r) fwds.push(r);
     }
   }
-
-  // Scan reverse primers
-  for (let endPos = mode.prodMin; endPos <= n; endPos++) {
+  for (let endPos = ampMin; endPos <= n; endPos++) {
     for (let len = 18; len <= 22; len++) {
       const start = endPos - len;
       if (start < 0) continue;
       const rc = revComp(seq.slice(start, endPos));
-      const gc = calcGC(rc);
-      if (gc < 40 || gc > 65) continue;
-      if (hasRuns(rc, 4)) continue;
-      if (!hasGCClamp(rc)) continue;
-      if (!noTerminalGGGCCC(rc)) continue;
-      if (hasInternalComplementarity(rc)) continue;
-      const tm = calcTmNN(rc);
-      if (tm < 58 || tm > 65) continue;
-      const hp = calcHairpinDG(rc);
-      const sd = calcSelfDimerDG(rc);
-      if (hp < -3) continue;
-      if (sd < -5) continue;
-      allRev.push({
-        sequence: rc, length: len, start, end: endPos,
-        tm, gc_content: gc,
-        hairpin_dg: hp, self_dimer_dg: sd,
-        three_prime_dg: calc3PrimeDG(rc),
-        last_5bp_gc: calcLast5GC(rc),
-        gc_clamp: { has_clamp: hasGCClamp(rc), clamp_strength: (rc.slice(-2).match(/[GC]/g)||[]).length }
-      });
+      const r = tryPrimer(rc, start, endPos, true);
+      if (r) revs.push(r);
     }
   }
+  return { fwds, revs };
+}
 
-  if (!allFwd.length || !allRev.length) {
-    return { success: false, error: `No valid primers found for ${mode.name} mode. Try a different sequence or application mode.` };
-  }
-
-  // Score all
-  allFwd.forEach(p => { p.quality_score = scorePrimerFull(p, seq, mode); p.quality_grade = classifyScore(p.quality_score); });
-  allRev.forEach(p => { p.quality_score = scorePrimerFull(p, seq, mode); p.quality_grade = classifyScore(p.quality_score); });
-  allFwd.sort((a, b) => b.quality_score - a.quality_score);
-  allRev.sort((a, b) => b.quality_score - a.quality_score);
-
-  // Find best pair: amplicon in range, Tm diff ≤ 3°C, cross-dimer > -6
+/* ─── PAIR PICKER ────────────────────────────────────────────────────────────
+   Given scored fwd+rev lists, find best pair within amplicon/Tm/dimer limits.
+   ─────────────────────────────────────────────────────────────────────────── */
+function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin) {
   let best = null, bestScore = -Infinity;
-  for (const fwd of allFwd.slice(0, 60)) {
-    for (const rev of allRev.slice(0, 60)) {
+  for (const fwd of fwds.slice(0, 80)) {
+    for (const rev of revs.slice(0, 80)) {
       const amp = rev.end - fwd.start;
-      if (amp < mode.prodMin || amp > mode.prodMax) continue;
-      if (Math.abs(fwd.tm - rev.tm) > 3) continue;
+      if (amp < ampMin || amp > ampMax) continue;
+      if (Math.abs(fwd.tm - rev.tm) > tmDiffMax) continue;
       const cd = calcCrossDimerDG(fwd.sequence, rev.sequence);
-      if (cd < -6) continue;
+      if (cd < crossDimerMin) continue;
       const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
-      if (pairScore > bestScore) {
-        bestScore = pairScore;
-        best = { fwd, rev, amp, cross_dimer_dg: cd };
-      }
+      if (pairScore > bestScore) { bestScore = pairScore; best = { fwd, rev, amp, cross_dimer_dg: cd }; }
     }
   }
+  return best;
+}
 
-  if (!best) {
-    return { success: false, error: `No compatible primer pair found within ${mode.prodMin}–${mode.prodMax} bp amplicon range. Sequence may be too short or repetitive for this mode.` };
+/* ─── PICK TOP 3 BORDERLINE PAIRS ────────────────────────────────────────────
+   Last resort: return top 3 scored pairs regardless of Tm/dimer strictness.
+   ─────────────────────────────────────────────────────────────────────────── */
+function pickBorderlinePairs(fwds, revs, ampMin, ampMax) {
+  const pairs = [];
+  for (const fwd of fwds.slice(0, 40)) {
+    for (const rev of revs.slice(0, 40)) {
+      const amp = rev.end - fwd.start;
+      if (amp < ampMin || amp > ampMax) continue;
+      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence);
+      const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
+      pairs.push({ fwd, rev, amp, cross_dimer_dg: cd, pairScore });
+    }
   }
+  pairs.sort((a, b) => b.pairScore - a.pairScore);
+  return pairs.slice(0, 3);
+}
 
-  const { fwd, rev, amp, cross_dimer_dg } = best;
-  const tmDiff  = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
-  const annealT = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
-  const gcMax   = Math.max(fwd.gc_content, rev.gc_content);
+/* ─── BUILD RESULT OBJECT ────────────────────────────────────────────────────
+   Shared result builder for both strict and borderline paths.
+   ─────────────────────────────────────────────────────────────────────────── */
+function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline) {
+  const tmDiff    = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
+  const annealT   = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
+  const gcMax     = Math.max(fwd.gc_content, rev.gc_content);
   const overallScore = Math.round((fwd.quality_score + rev.quality_score) / 2);
+  const hpRisk    = dg => dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
 
-  // Warnings
+  // Warnings — include relaxation info
   const warnings = [];
+  if (isBorderline) warnings.push({ urgency:'high', text:'Borderline pair — experimental validation strongly recommended before use' });
+  if (relaxLevel >= 1) warnings.push({ urgency:'medium', text:`Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
   if (tmDiff > 3)    warnings.push({ urgency:'high',   text:`Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
   if (gcMax > 70)    warnings.push({ urgency:'high',   text:`GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
-  if (cross_dimer_dg < -4) warnings.push({ urgency:'medium', text:`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold` });
+  if (cross_dimer_dg < -4) warnings.push({ urgency:'medium', text:`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold (limit −6)` });
+  if (fwd.hairpin_dg < -3) warnings.push({ urgency:'medium', text:`Forward hairpin ΔG ${fwd.hairpin_dg} kcal/mol — relaxed threshold applied` });
+  if (rev.hairpin_dg < -3) warnings.push({ urgency:'medium', text:`Reverse hairpin ΔG ${rev.hairpin_dg} kcal/mol — relaxed threshold applied` });
   const fwdRep = countRepeatHits(fwd.sequence, seq);
   const revRep = countRepeatHits(rev.sequence, seq);
   if (fwdRep > 5) warnings.push({ urgency:'medium', text:`Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
   if (revRep > 5) warnings.push({ urgency:'medium', text:`Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
-  // Classification with downgrade rules
+  // Classification
   let classification = overallScore >= 85 ? 'Excellent' : overallScore >= 70 ? 'Good' : overallScore >= 60 ? 'Fair' : 'Poor';
-  if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
-  if (tmDiff > 3 && classification === 'Good')      classification = 'Fair';
+  if (isBorderline)                                              classification = 'Borderline';
+  else if (relaxLevel > 0 && classification === 'Excellent')     classification = 'Good';
+  else if (relaxLevel > 0 && classification === 'Good')          classification = 'Fair';
+  else if (tmDiff > 3 && classification === 'Excellent')         classification = 'Good';
+  else if (tmDiff > 3 && classification === 'Good')              classification = 'Fair';
 
-  // Specificity score
   const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
 
-  // Build hairpin risk for display
-  const hpRisk = dg => dg > -1 ? 'low' : dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
-
-  const fwdOut = {
-    sequence: fwd.sequence,
-    length: fwd.length,
-    tm: fwd.tm,
-    gc_content: fwd.gc_content,
-    position: `${fwd.start + 1}–${fwd.end}`,
-    quality_grade: fwd.quality_grade,
-    quality_score: fwd.quality_score,
-    hairpin: { risk_level: hpRisk(fwd.hairpin_dg), delta_g: fwd.hairpin_dg },
-    self_dimer_dg: fwd.self_dimer_dg,
-    three_prime_stability_dg: fwd.three_prime_dg,
-    last_5bp_gc_percent: fwd.last_5bp_gc,
-    gc_clamp: fwd.gc_clamp,
+  const mkPrimer = (p, isRev) => ({
+    sequence: p.sequence, length: p.length,
+    tm: p.tm, gc_content: p.gc_content,
+    position: `${p.start + 1}–${p.end}`,
+    quality_grade: p.quality_grade, quality_score: p.quality_score,
+    hairpin: { risk_level: hpRisk(p.hairpin_dg), delta_g: p.hairpin_dg },
+    self_dimer_dg: p.self_dimer_dg,
+    three_prime_stability_dg: p.three_prime_dg,
+    last_5bp_gc_percent: p.last_5bp_gc,
+    gc_clamp: p.gc_clamp,
     issues: [], warnings: []
+  });
+
+  return {
+    forward_primer:        mkPrimer(fwd, false),
+    reverse_primer:        mkPrimer(rev, true),
+    cross_dimer_dg,
+    expected_product_size: amp,
+    tm_difference:         tmDiff,
+    annealing_temperature: annealT,
+    specificity_score:     specScore,
+    overall_score:         overallScore,
+    classification,
+    warnings,
+    isBorderline,
+    relaxLevel,
+    dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
+    pcr_protocol: {
+      annealing_temp:  annealT,
+      extension_time:  Math.max(30, Math.ceil(amp / 1000) * 60),
+      cycles:          35,
+      polymerase: mode.name === 'qPCR (Real-Time)'
+        ? 'SYBR Green Master Mix (high-fidelity)'
+        : 'Phusion or Q5 High-Fidelity Polymerase',
+      notes: [
+        mode.name === 'qPCR (Real-Time)'
+          ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
+          : 'Confirm product size by gel electrophoresis. Sequence before downstream use.',
+        `Denaturation: 98°C 30s | Annealing: ${annealT}°C 30s | Extension: 72°C ${Math.max(30, Math.ceil(amp / 1000) * 60)}s`,
+        ...(relaxLevel > 0 ? ['⚠ Relaxed constraints were used — validate these primers empirically before committing to synthesis.'] : [])
+      ]
+    },
+    _meta: {
+      model: 'SantaLucia 1998 Nearest-Neighbor',
+      conditions: '[oligo]=250nM, [Na+]=50mM, T=37°C',
+      scoring: '25% Tm · 20% GC · 20% structure · 15% dimer · 10% clamp · 10% specificity',
+      application_mode: mode.name,
+      relax_level: relaxLevel,
+      borderline: isBorderline
+    }
+  };
+}
+
+/* ─── MAIN DESIGN ENGINE WITH FALLBACK CASCADE ───────────────────────────────
+
+   Fallback order:
+     Pass 0 — strict (GC≤65, Tm 58–65, hp>-3, sd>-5, amplicon exact, ΔTm≤3, cd>-6)
+     Pass 1 — relax ΔTm to 5°C
+     Pass 2 — relax GC up to 70%, hairpin down to -4 kcal/mol
+     Pass 3 — expand amplicon ±50 bp
+     Pass 4 — full borderline: relax all, return top 3 pairs
+   ─────────────────────────────────────────────────────────────────────────── */
+async function designPrimers(seq, mode) {
+  await new Promise(r => setTimeout(r, 900));
+  seq = seq.toUpperCase();
+  const n = seq.length;
+
+  if (n < 40) return { success: false, error: 'Sequence must be at least 40 bp. Cannot design primers for this input.' };
+
+  const scoreAll = (candidates, fullSeq) => {
+    candidates.forEach(p => {
+      p.quality_score = scorePrimerFull(p, fullSeq, mode);
+      p.quality_grade = classifyScore(p.quality_score);
+    });
+    candidates.sort((a, b) => b.quality_score - a.quality_score);
   };
 
-  const revOut = {
-    sequence: rev.sequence,
-    length: rev.length,
-    tm: rev.tm,
-    gc_content: rev.gc_content,
-    position: `${rev.start + 1}–${rev.end}`,
-    quality_grade: rev.quality_grade,
-    quality_score: rev.quality_score,
-    hairpin: { risk_level: hpRisk(rev.hairpin_dg), delta_g: rev.hairpin_dg },
-    self_dimer_dg: rev.self_dimer_dg,
-    three_prime_stability_dg: rev.three_prime_dg,
-    last_5bp_gc_percent: rev.last_5bp_gc,
-    gc_clamp: rev.gc_clamp,
-    issues: [], warnings: []
-  };
+  // ── PASS 0: Strict ────────────────────────────────────────────────────────
+  {
+    const th = { gcMax:65, tmMin:58, tmMax:65, hpMin:-3, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:false };
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    scoreAll(fwds, seq); scoreAll(revs, seq);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 3, -6);
+    if (best) {
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false);
+      data.all_candidates = buildAltCandidates(fwds, revs, best);
+      return { success: true, data };
+    }
+  }
 
-  // Alternative candidates (top 5 each, excluding selected)
-  const altCandidates = [];
-  [...allFwd.slice(1, 4), ...allRev.slice(1, 4)].forEach((p, i) => {
-    altCandidates.push({
-      type: i < 3 ? 'Alternative Forward' : 'Alternative Reverse',
+  // ── PASS 1: Relax Tm difference to 5°C ───────────────────────────────────
+  {
+    const th = { gcMax:65, tmMin:58, tmMax:65, hpMin:-3, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:false };
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    scoreAll(fwds, seq); scoreAll(revs, seq);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
+    if (best) {
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false);
+      data.all_candidates = buildAltCandidates(fwds, revs, best);
+      return { success: true, data };
+    }
+  }
+
+  // ── PASS 2: Relax GC to 70% and hairpin to -4 kcal/mol ───────────────────
+  {
+    const th = { gcMax:70, tmMin:56, tmMax:67, hpMin:-4, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:true };
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    scoreAll(fwds, seq); scoreAll(revs, seq);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
+    if (best) {
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false);
+      data.all_candidates = buildAltCandidates(fwds, revs, best);
+      return { success: true, data };
+    }
+  }
+
+  // ── PASS 3: Expand amplicon range ±50 bp ─────────────────────────────────
+  {
+    const ampMin = Math.max(40, mode.prodMin - 50);
+    const ampMax = mode.prodMax + 50;
+    const th = { gcMax:70, tmMin:56, tmMax:67, hpMin:-4, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:true };
+    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
+    scoreAll(fwds, seq); scoreAll(revs, seq);
+    const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6);
+    if (best) {
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false);
+      data.all_candidates = buildAltCandidates(fwds, revs, best);
+      return { success: true, data };
+    }
+  }
+
+  // ── PASS 4: Full borderline — relax everything, return top 3 pairs ────────
+  {
+    const ampMin = Math.max(40, mode.prodMin - 100);
+    const ampMax = mode.prodMax + 100;
+    const th = { gcMax:75, tmMin:50, tmMax:70, hpMin:-5, sdMin:-6, allowNoClamp:true, allowRuns3:true, relaxed:true };
+    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
+    scoreAll(fwds, seq); scoreAll(revs, seq);
+
+    if (!fwds.length || !revs.length) {
+      return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
+    }
+
+    const borderlinePairs = pickBorderlinePairs(fwds, revs, ampMin, ampMax);
+    if (!borderlinePairs.length) {
+      return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
+    }
+
+    // Use best borderline as primary result, expose all 3
+    const primary = borderlinePairs[0];
+    const data = buildResult(primary.fwd, primary.rev, primary.amp, primary.cross_dimer_dg, seq, mode, 4, true);
+    data.borderline_pairs = borderlinePairs.map((bp, i) => ({
+      rank: i + 1,
+      label: `Borderline Pair ${i + 1} — Experimental Validation Recommended`,
+      forward: { sequence: bp.fwd.sequence, tm: bp.fwd.tm, gc: bp.fwd.gc_content, score: bp.fwd.quality_score },
+      reverse: { sequence: bp.rev.sequence, tm: bp.rev.tm, gc: bp.rev.gc_content, score: bp.rev.quality_score },
+      amplicon_size: bp.amp,
+      pair_score: parseFloat(bp.pairScore.toFixed(1)),
+      cross_dimer_dg: bp.cross_dimer_dg,
+      tm_difference: parseFloat(Math.abs(bp.fwd.tm - bp.rev.tm).toFixed(1))
+    }));
+    data.all_candidates = buildAltCandidates(fwds, revs, primary);
+    return { success: true, data };
+  }
+}
+
+/* ─── ALT CANDIDATES BUILDER ─────────────────────────────────────────────── */
+function buildAltCandidates(fwds, revs, best) {
+  const alts = [];
+  [...fwds.slice(0, 5), ...revs.slice(0, 5)].forEach((p, i) => {
+    if (i < 5 && p.sequence === best.fwd.sequence) return;
+    if (i >= 5 && p.sequence === best.rev.sequence) return;
+    alts.push({
+      type: i < 5 ? 'Alternative Forward' : 'Alternative Reverse',
       sequence: p.sequence, length: p.length, tm: p.tm,
       gc_content: p.gc_content, quality_grade: p.quality_grade, quality_score: p.quality_score
     });
   });
-
-  return {
-    success: true,
-    data: {
-      forward_primer:         fwdOut,
-      reverse_primer:         revOut,
-      cross_dimer_dg,
-      expected_product_size:  amp,
-      tm_difference:          tmDiff,
-      annealing_temperature:  annealT,
-      specificity_score:      specScore,
-      overall_score:          overallScore,
-      classification,
-      warnings,
-      dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
-      pcr_protocol: {
-        annealing_temp:  annealT,
-        extension_time:  Math.max(30, Math.ceil(amp / 1000) * 60),
-        cycles:          35,
-        polymerase:      mode.name === 'qPCR (Real-Time)' ? 'SYBR Green Master Mix (high-fidelity)' : 'Phusion or Q5 High-Fidelity Polymerase',
-        notes: [
-          mode.name === 'qPCR (Real-Time)'
-            ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
-            : 'Confirm product size by gel electrophoresis. Sequence before downstream use.',
-          `Denaturation: 98°C 30s | Annealing: ${annealT}°C 30s | Extension: 72°C ${Math.max(30, Math.ceil(amp / 1000) * 60)}s`
-        ]
-      },
-      all_candidates: altCandidates,
-      _meta: {
-        model: 'SantaLucia 1998 Nearest-Neighbor',
-        conditions: '[oligo]=250nM, [Na+]=50mM, T=37°C',
-        scoring: '25% Tm · 20% GC · 20% structure · 15% dimer · 10% clamp · 10% specificity',
-        application_mode: mode.name
-      }
-    }
-  };
+  return alts.slice(0, 6);
 }
 
 /* ─── VALIDATION ─────────────────────────────────────────────────────────── */
@@ -444,8 +546,8 @@ const APP_MODES = {
 const QUAL_COL = { Excellent:'#00FFC6', Good:'#00c9a0', Fair:'#F59E0B', Poor:'#EF4444' };
 const RISK_COL = { low:'#00FFC6', medium:'#F59E0B', high:'#EF4444' };
 const URG_COL  = { high:'#EF4444', medium:'#F59E0B', low:'#00FFC6' };
-const CLASS_COL = { Excellent:'#00FFC6', Good:'#60A5FA', Fair:'#F59E0B', Poor:'#EF4444' };
-const CLASS_BG  = { Excellent:'rgba(0,255,198,0.1)', Good:'rgba(96,165,250,0.1)', Fair:'rgba(245,158,11,0.1)', Poor:'rgba(239,68,68,0.1)' };
+const CLASS_COL = { Excellent:'#00FFC6', Good:'#60A5FA', Fair:'#F59E0B', Poor:'#EF4444', Borderline:'#F87171' };
+const CLASS_BG  = { Excellent:'rgba(0,255,198,0.1)', Good:'rgba(96,165,250,0.1)', Fair:'rgba(245,158,11,0.1)', Poor:'rgba(239,68,68,0.1)', Borderline:'rgba(248,113,113,0.1)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -1087,6 +1189,63 @@ export default function PrimerDesigner() {
           <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#818cf8', marginBottom:'0.65rem' }}>AI Analysis</div>
           <div style={{ fontSize:'0.96rem', color:'#e2e4e9', lineHeight:1.82, whiteSpace:'pre-wrap', maxHeight:450, overflowY:'auto', background:'rgba(0,0,0,0.25)', borderRadius:8, padding:'0.8rem', border:'1px solid #24272f' }}>
             {aiExplanation}
+          </div>
+        </div>
+      )}
+
+      {/* BORDERLINE PAIRS PANEL */}
+      {primers.isBorderline && primers.borderline_pairs?.length > 0 && (
+        <div className="pc" style={{ marginBottom:'0.55rem', borderColor:'rgba(239,68,68,0.35)', background:'rgba(239,68,68,0.04)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.55rem', marginBottom:'0.75rem' }}>
+            <span style={{ fontSize:'1rem' }}>🧪</span>
+            <span style={{ fontSize:'0.9rem', fontWeight:700, color:'#EF4444', textTransform:'uppercase', letterSpacing:'0.07em' }}>Borderline Results — Experimental Validation Required</span>
+          </div>
+          <p style={{ fontSize:'0.88rem', color:'#8a8f9e', lineHeight:1.7, marginBottom:'0.9rem' }}>
+            No primer pair satisfied strict thermodynamic criteria for this sequence. The engine relaxed all constraints and found <strong style={{color:'#c8cad4'}}>{primers.borderline_pairs.length} borderline pair{primers.borderline_pairs.length > 1 ? 's' : ''}</strong> ranked below. The <strong style={{color:'#c8cad4'}}>best-scoring pair</strong> is shown in the primer cards above. All borderline pairs <strong style={{color:'#F87171'}}>must be validated experimentally</strong> before committing to synthesis.
+          </p>
+          <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem' }}>
+            {primers.borderline_pairs.map((bp, i) => (
+              <div key={i} style={{ background:'#0a0c10', border:`1px solid ${i===0?'rgba(239,68,68,0.4)':'#1a1d26'}`, borderRadius:10, padding:'0.85rem 1rem' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.55rem', flexWrap:'wrap', gap:'0.38rem' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+                    <span style={{ background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', color:'#EF4444', fontSize:'0.65rem', fontWeight:700, padding:'0.18rem 0.5rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>
+                      Rank #{bp.rank}
+                    </span>
+                    {i === 0 && <span style={{ background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', color:'#F59E0B', fontSize:'0.65rem', fontWeight:700, padding:'0.18rem 0.5rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>Best Available</span>}
+                  </div>
+                  <div style={{ display:'flex', gap:'0.75rem', fontSize:'0.78rem', color:'#6b7080' }}>
+                    <span>Amplicon: <b style={{color:'#a0a3b1'}}>{bp.amplicon_size} bp</b></span>
+                    <span>ΔTm: <b style={{color: bp.tm_difference > 3 ? '#F59E0B' : '#a0a3b1'}}>{bp.tm_difference}°C</b></span>
+                    <span>Score: <b style={{color:'#a0a3b1'}}>{bp.pair_score}</b></span>
+                  </div>
+                </div>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.45rem' }}>
+                  {[['→ Forward', bp.forward], ['← Reverse', bp.reverse]].map(([lbl, p])=>(
+                    <div key={lbl} style={{ background:'#12141c', borderRadius:8, padding:'0.55rem 0.7rem' }}>
+                      <div style={{ fontSize:'0.68rem', color:'#3d4155', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'0.3rem' }}>{lbl}</div>
+                      <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'0.76rem', color:'#00c9a0', wordBreak:'break-all', marginBottom:'0.28rem' }}>{p.sequence}</div>
+                      <div style={{ fontSize:'0.72rem', color:'#6b7080' }}>Tm {p.tm}°C · GC {p.gc}% · Score {p.score}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop:'0.45rem', fontSize:'0.72rem', color: bp.cross_dimer_dg < -5 ? '#F87171' : '#6b7080' }}>
+                  Cross-dimer ΔG: {bp.cross_dimer_dg} kcal/mol {bp.cross_dimer_dg < -5 ? '⚠ High risk' : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* RELAXED CONSTRAINT NOTICE */}
+      {!primers.isBorderline && primers.relaxLevel > 0 && (
+        <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:9, padding:'0.65rem 0.9rem', marginBottom:'0.9rem', display:'flex', gap:'0.5rem', alignItems:'flex-start' }}>
+          <span style={{ fontSize:'0.88rem' }}>⚠️</span>
+          <div>
+            <span style={{ fontSize:'0.84rem', fontWeight:600, color:'#F59E0B' }}>Relaxed Constraints Applied (Pass {primers.relaxLevel})</span>
+            <div style={{ fontSize:'0.8rem', color:'#8a8f9e', marginTop:'0.18rem', lineHeight:1.6 }}>
+              Strict parameters found no valid pair. Constraints were progressively relaxed — validate these primers empirically before synthesis.
+            </div>
           </div>
         </div>
       )}
