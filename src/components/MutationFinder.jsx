@@ -2290,26 +2290,42 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           </div>
         </div>
 
-        {/* GENE PANEL SELECTOR */}
-        <div className="pc" style={{ borderColor: 'rgba(16,185,129,.3)', background: 'rgba(16,185,129,.04)', marginBottom: '1.1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '1rem' }}>
-
-            <span style={{ fontSize: '1rem', fontWeight: 600, color: '#6EE7B7' }}>Gene Panel Selection</span>
-          </div>
-          <div className="gene-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '.5rem' }}>
-            {Object.values(GENE_PANEL).map(gene => (
-              <button key={gene.symbol} onClick={() => { setSelectedGene(gene.symbol); setMutations(null); setAnnotatedMutations([]); setError(''); setAiExplanation(''); setShowRCSB(false); }}
-                style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '.25rem', padding: '.75rem .4rem', background: selectedGene === gene.symbol ? `${gene.color}18` : '#0f1117', border: selectedGene === gene.symbol ? `2px solid ${gene.color}` : '1px solid #1e2130', borderRadius: 10, cursor: 'pointer', transition: 'all .25s ease', boxShadow: selectedGene === gene.symbol ? `0 4px 16px ${gene.color}30` : 'none' }}>
-                <span style={{ fontFamily: '"JetBrains Mono",monospace', fontWeight: 700, fontSize: '.9rem', color: selectedGene === gene.symbol ? gene.color : '#c8cad4' }}>{gene.symbol}</span>
-                <span style={{ fontSize: '.68rem', color: '#6b7080', textAlign: 'center', lineHeight: 1.3 }}>{gene.type}</span>
-              </button>
-            ))}
-          </div>
-          <div style={{ marginTop: '1rem', padding: '.85rem 1rem', background: `${activeGene.color}0d`, border: `1px solid ${activeGene.color}30`, borderRadius: 8 }}>
-            <div style={{ fontSize: '.85rem', fontWeight: 600, color: activeGene.color, marginBottom: '.3rem' }}>{activeGene.icon} {activeGene.symbol} — {activeGene.name}</div>
-            <div style={{ fontSize: '.85rem', color: '#8a8f9e', lineHeight: 1.6 }}>{activeGene.clinicalContext}</div>
-          </div>
+        {/* TOP LEVEL MODE SWITCHER */}
+        <div style={{ display: 'flex', gap: '.8rem', marginBottom: '1.25rem' }}>
+          <button className={`mode-tab ${!isCancerMode ? 'active' : ''}`} onClick={() => switchMode('research')} style={{ padding: '1rem', border: !isCancerMode ? '2px solid rgba(6,182,212,.5)' : '1px solid #24272f', background: !isCancerMode ? 'rgba(6,182,212,.1)' : '#0f1117' }}>
+            <span style={{ fontSize: '1.2rem', marginBottom: '.2rem' }}>🔬</span>
+            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Research Mode</span>
+            <span style={{ fontSize: '.75rem', color: !isCancerMode ? '#a5f3fc' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Manual sequence input & analysis</span>
+          </button>
+          <button className={`mode-tab ${isCancerMode ? 'active' : ''}`} onClick={() => switchMode('cancer')} style={{ padding: '1rem', border: isCancerMode ? '2px solid rgba(16,185,129,.5)' : '1px solid #24272f', background: isCancerMode ? 'rgba(16,185,129,.1)' : '#0f1117' }}>
+            <span style={{ fontSize: '1.2rem', marginBottom: '.2rem' }}>🧬</span>
+            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Cancer Intelligence Mode</span>
+            <span style={{ fontSize: '.75rem', color: isCancerMode ? '#a7f3d0' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Gene panel & clinical reports</span>
+          </button>
         </div>
+
+        {/* GENE PANEL SELECTOR */}
+        {isCancerMode && (
+          <div className="pc" style={{ borderColor: 'rgba(16,185,129,.3)', background: 'rgba(16,185,129,.04)', marginBottom: '1.1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem', marginBottom: '1rem' }}>
+
+              <span style={{ fontSize: '1rem', fontWeight: 600, color: '#6EE7B7' }}>Gene Panel Selection</span>
+            </div>
+            <div className="gene-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '.5rem' }}>
+              {Object.values(GENE_PANEL).map(gene => (
+                <button key={gene.symbol} onClick={() => { setSelectedGene(gene.symbol); setMutations(null); setAnnotatedMutations([]); setError(''); setAiExplanation(''); setShowRCSB(false); }}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '.25rem', padding: '.75rem .4rem', background: selectedGene === gene.symbol ? `${gene.color}18` : '#0f1117', border: selectedGene === gene.symbol ? `2px solid ${gene.color}` : '1px solid #1e2130', borderRadius: 10, cursor: 'pointer', transition: 'all .25s ease', boxShadow: selectedGene === gene.symbol ? `0 4px 16px ${gene.color}30` : 'none' }}>
+                  <span style={{ fontFamily: '"JetBrains Mono",monospace', fontWeight: 700, fontSize: '.9rem', color: selectedGene === gene.symbol ? gene.color : '#c8cad4' }}>{gene.symbol}</span>
+                  <span style={{ fontSize: '.68rem', color: '#6b7080', textAlign: 'center', lineHeight: 1.3 }}>{gene.type}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ marginTop: '1rem', padding: '.85rem 1rem', background: `${activeGene.color}0d`, border: `1px solid ${activeGene.color}30`, borderRadius: 8 }}>
+              <div style={{ fontSize: '.85rem', fontWeight: 600, color: activeGene.color, marginBottom: '.3rem' }}>{activeGene.icon} {activeGene.symbol} — {activeGene.name}</div>
+              <div style={{ fontSize: '.85rem', color: '#8a8f9e', lineHeight: 1.6 }}>{activeGene.clinicalContext}</div>
+            </div>
+          </div>
+        )}
 
         {/* INFO TOGGLE */}
         <button className="btn-g" onClick={() => setInfoOpen(v => !v)} style={{ width: '100%', justifyContent: 'space-between', marginBottom: '1.1rem' }}>
@@ -2427,18 +2443,35 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
           ) : (
             <div>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#c8cad4', marginBottom: '1.1rem' }}>Sequence Input</h3>
-              <div className="seq-input-grid" style={{ marginBottom: '1rem' }}>
-                <div>
-                  <label className="lbl">Reference Sequence</label>
-                  <textarea rows={5} value={seq1} onChange={e => setSeq1(e.target.value)} placeholder="Paste reference DNA sequence (ATGC)…" />
-                  <div style={{ marginTop: '.38rem', fontSize: '.88rem', fontFamily: '"JetBrains Mono",monospace', color: '#6b7080' }}>{seq1.trim().length.toLocaleString()} bp</div>
+              {isCancerMode ? (
+                <div style={{ marginBottom: '1rem' }}>
+                  <label className="lbl">Variant Input (HGVS Notation or Mutant DNA Sequence)</label>
+                  <textarea rows={4} value={cancerInput} onChange={e => {
+                    const val = e.target.value; setCancerInput(val); setCancerInputType(detectInputType(val));
+                  }} placeholder={`Enter variant (e.g. R175H, p.Arg175His) or complete mutant DNA sequence for ${selectedGene}…`} />
+                  <div style={{ marginTop: '.38rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontSize: '.85rem', fontFamily: '"JetBrains Mono",monospace', color: cancerInputType === 'hgvs' ? '#10B981' : cancerInputType === 'sequence' ? '#60A5FA' : '#6b7080', fontWeight: 600 }}>
+                      Detected format: {cancerInputType.toUpperCase()}
+                    </span>
+                    {cancerInputType === 'sequence' && <span style={{ fontSize: '.85rem', fontFamily: '"JetBrains Mono",monospace', color: '#6b7080' }}>
+                      {cancerInput.trim().replace(/\s/g, '').length.toLocaleString()} bp vs Reference {CANONICAL_REFERENCES[selectedGene].length.toLocaleString()} bp
+                    </span>}
+                  </div>
                 </div>
-                <div>
-                  <label className="lbl">Alternate Sequence</label>
-                  <textarea rows={5} value={seq2} onChange={e => setSeq2(e.target.value)} placeholder="Paste alternate DNA sequence (ATGC)…" />
-                  <div style={{ marginTop: '.38rem', fontSize: '.88rem', fontFamily: '"JetBrains Mono",monospace', color: '#6b7080' }}>{seq2.trim().length.toLocaleString()} bp</div>
+              ) : (
+                <div className="seq-input-grid" style={{ marginBottom: '1rem' }}>
+                  <div>
+                    <label className="lbl">Reference Sequence</label>
+                    <textarea rows={5} value={seq1} onChange={e => setSeq1(e.target.value)} placeholder="Paste reference DNA sequence (ATGC)…" />
+                    <div style={{ marginTop: '.38rem', fontSize: '.88rem', fontFamily: '"JetBrains Mono",monospace', color: '#6b7080' }}>{seq1.trim().length.toLocaleString()} bp</div>
+                  </div>
+                  <div>
+                    <label className="lbl">Alternate Sequence</label>
+                    <textarea rows={5} value={seq2} onChange={e => setSeq2(e.target.value)} placeholder="Paste alternate DNA sequence (ATGC)…" />
+                    <div style={{ marginTop: '.38rem', fontSize: '.88rem', fontFamily: '"JetBrains Mono",monospace', color: '#6b7080' }}>{seq2.trim().length.toLocaleString()} bp</div>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 
@@ -2644,20 +2677,22 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
                             <div style={{ fontSize: '.68rem', color: am.conservation.color, marginTop: '.1rem' }}>{am.conservation.label}</div>
                           </div>
                         )}
-                        {/* COSMIC */}
-                        <div style={{ background: 'rgba(10,12,22,.8)', border: `1px solid ${am.cosmic ? 'rgba(239,68,68,.35)' : '#1a1d2a'}`, borderRadius: 7, padding: '.55rem .65rem' }}>
-                          <div style={{ fontSize: '.67rem', color: '#3a3d4a', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: '.2rem' }}>COSMIC</div>
-                          {am.cosmic ? <>
-                            <div style={{ fontFamily: 'monospace', fontSize: '.82rem', fontWeight: 700, color: '#fca5a5' }}>{(am.cosmic.freq * 100).toFixed(1)}% freq</div>
-                            <div style={{ fontSize: '.68rem', color: '#7a3030', marginTop: '.1rem' }}>{am.cosmic.samples.toLocaleString()} samples</div>
-                            <div style={{ fontSize: '.63rem', color: '#4a2020', marginTop: '.08rem' }}>{am.cosmic.cosmic_id}</div>
-                          </> : <div style={{ fontSize: '.72rem', color: '#2a2d3a', marginTop: '.2rem' }}>Not in catalogue</div>}
-                        </div>
+                        {/* COSMIC - Cancer Mode Only */}
+                        {isCancerMode && (
+                          <div style={{ background: 'rgba(10,12,22,.8)', border: `1px solid ${am.cosmic ? 'rgba(239,68,68,.35)' : '#1a1d2a'}`, borderRadius: 7, padding: '.55rem .65rem' }}>
+                            <div style={{ fontSize: '.67rem', color: '#3a3d4a', textTransform: 'uppercase', letterSpacing: '.07em', marginBottom: '.2rem' }}>COSMIC</div>
+                            {am.cosmic ? <>
+                              <div style={{ fontFamily: 'monospace', fontSize: '.82rem', fontWeight: 700, color: '#fca5a5' }}>{(am.cosmic.freq * 100).toFixed(1)}% freq</div>
+                              <div style={{ fontSize: '.68rem', color: '#7a3030', marginTop: '.1rem' }}>{am.cosmic.samples.toLocaleString()} samples</div>
+                              <div style={{ fontSize: '.63rem', color: '#4a2020', marginTop: '.08rem' }}>{am.cosmic.cosmic_id}</div>
+                            </> : <div style={{ fontSize: '.72rem', color: '#2a2d3a', marginTop: '.2rem' }}>Not in catalogue</div>}
+                          </div>
+                        )}
                       </div>
                     )}
 
-                    {/* ClinVar evidence */}
-                    {(am.clinvar || am.clinvarLive) && (() => {
+                    {/* ClinVar evidence - Cancer Mode Only */}
+                    {isCancerMode && (am.clinvar || am.clinvarLive) && (() => {
                       const cv = am.clinvarLive || am.clinvar;
                       const sigColor = cv.sig?.toLowerCase().includes('pathogenic') && !cv.sig?.toLowerCase().includes('likely') ? '#EF4444'
                         : cv.sig?.toLowerCase().includes('likely pathogenic') ? '#F59E0B'
