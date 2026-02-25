@@ -17,54 +17,419 @@ const SAMPLE_SEQUENCE = [
   'CCCGGCACTGCCTCAGCCCTCAGCCCTAAGCCCAGTGCCAACTCAGCCCCCGGCCCCCAG'
 ].join('');
 
-/* ─── MOCK UTILS ─────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+   THERMODYNAMIC ENGINE — SantaLucia 1998 Nearest-Neighbor
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+// ΔH (kcal/mol), ΔS (cal/mol·K)
+const NN = {
+  AA:[-7.9,-22.2], AT:[-7.2,-20.4], TA:[-7.2,-21.3], CA:[-8.5,-22.7],
+  GT:[-8.4,-22.4], CT:[-7.8,-21.0], GA:[-8.2,-22.2], CG:[-10.6,-27.2],
+  GC:[-9.8,-24.4], GG:[-8.0,-19.9], AC:[-7.8,-21.0], TC:[-8.2,-22.2],
+  TG:[-8.5,-22.7], AG:[-7.8,-21.0], TT:[-7.9,-22.2], CC:[-8.0,-19.9]
+};
+const INIT_AT = [2.3, 4.1];
+const INIT_GC = [0.1, -2.8];
+const R_GAS   = 1.987; // cal/mol·K
+
+const revComp = seq => {
+  const m = { A:'T', T:'A', G:'C', C:'G' };
+  return seq.split('').reverse().map(b => m[b] || b).join('');
+};
+
+// Nearest-neighbor Tm (SantaLucia 1998), [oligo]=250nM, [Na+]=50mM
+function calcTmNN(seq) {
+  seq = seq.toUpperCase();
+  let dH = 0, dS = 0;
+  for (let i = 0; i < seq.length - 1; i++) {
+    const p = seq[i] + seq[i+1];
+    if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+  }
+  // Initiation penalties
+  [seq[0], seq[seq.length-1]].forEach(b => {
+    if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
+    else                  { dH += INIT_GC[0]; dS += INIT_GC[1]; }
+  });
+  // Salt correction for 50 mM NaCl
+  dS += 0.368 * (seq.length - 1) * Math.log(0.05);
+  const CT = 250e-9; // 250 nM
+  const TmK = (dH * 1000) / (dS + R_GAS * Math.log(CT / 4));
+  return parseFloat((TmK - 273.15).toFixed(1));
+}
+
+function calcGC(seq) {
+  seq = seq.toUpperCase();
+  return parseFloat(((seq.split('').filter(b => 'GC'.includes(b)).length / seq.length) * 100).toFixed(1));
+}
+
+// 3′-end stability: ΔG of last 5 bp duplex at 37 °C
+function calc3PrimeDG(seq) {
+  const end = seq.slice(-5).toUpperCase();
+  let dH = 0, dS = 0;
+  for (let i = 0; i < end.length - 1; i++) {
+    const p = end[i] + end[i+1];
+    if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+  }
+  return parseFloat((dH - 310.15 * (dS / 1000)).toFixed(2));
+}
+
+function calcLast5GC(seq) {
+  const end = seq.slice(-5).toUpperCase();
+  return parseFloat(((end.split('').filter(b => 'GC'.includes(b)).length / 5) * 100).toFixed(1));
+}
+
+// Hairpin ΔG via stem-loop search (full complementarity required)
+function calcHairpinDG(seq) {
+  seq = seq.toUpperCase();
+  const n = seq.length;
+  let best = 0;
+  for (let stemLen = 3; stemLen <= 7; stemLen++) {
+    for (let loopLen = 3; loopLen <= 6; loopLen++) {
+      for (let i = 0; i <= n - 2*stemLen - loopLen; i++) {
+        const stem1  = seq.slice(i, i + stemLen);
+        const j      = i + stemLen + loopLen;
+        if (j + stemLen > n) continue;
+        const stem2rc = revComp(seq.slice(j, j + stemLen));
+        if (stem1 !== stem2rc) continue;
+        let dH = 0, dS = 0;
+        for (let k = 0; k < stemLen - 1; k++) {
+          const p = stem1[k] + stem1[k+1];
+          if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+        }
+        const loopPen = loopLen === 3 ? 5.4 : loopLen === 4 ? 4.5 : 4.0;
+        const dG = dH - 310.15 * (dS / 1000) + loopPen;
+        if (dG < best) best = dG;
+      }
+    }
+  }
+  return parseFloat(best.toFixed(2));
+}
+
+// Self-dimer ΔG (3′ end vs rest of same primer)
+function calcSelfDimerDG(seq) {
+  seq = seq.toUpperCase();
+  let best = 0;
+  for (let endLen = 4; endLen <= 10; endLen++) {
+    if (endLen > seq.length) continue;
+    const end = seq.slice(-endLen);
+    for (let i = 0; i <= seq.length - endLen; i++) {
+      if (i === seq.length - endLen) continue;
+      if (end !== revComp(seq.slice(i, i + endLen))) continue;
+      let dH = 0, dS = 0;
+      for (let k = 0; k < endLen - 1; k++) {
+        const p = end[k] + end[k+1];
+        if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+      }
+      const dG = dH - 310.15 * (dS / 1000);
+      if (dG < best) best = dG;
+    }
+  }
+  return parseFloat(best.toFixed(2));
+}
+
+// Cross-dimer ΔG between forward 3′ and reverse 3′
+function calcCrossDimerDG(fwd, rev) {
+  fwd = fwd.toUpperCase(); rev = rev.toUpperCase();
+  let best = 0;
+  for (let endLen = 4; endLen <= 10; endLen++) {
+    if (endLen > fwd.length || endLen > rev.length) continue;
+    const fEnd = fwd.slice(-endLen);
+    if (fEnd !== revComp(rev.slice(-endLen))) continue;
+    let dH = 0, dS = 0;
+    for (let k = 0; k < endLen - 1; k++) {
+      const p = fEnd[k] + fEnd[k+1];
+      if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+    }
+    const dG = dH - 310.15 * (dS / 1000);
+    if (dG < best) best = dG;
+  }
+  return parseFloat(best.toFixed(2));
+}
+
+function hasRuns(seq, n = 4) {
+  return ['A','T','G','C'].some(b => seq.toUpperCase().includes(b.repeat(n)));
+}
+
+function hasGCClamp(seq) {
+  const end2 = seq.slice(-2).toUpperCase();
+  const gc = (end2.match(/[GC]/g) || []).length;
+  return gc >= 1 && gc <= 2;
+}
+
+function noTerminalGGGCCC(seq) {
+  const end3 = seq.slice(-3).toUpperCase();
+  return !end3.includes('GGG') && !end3.includes('CCC');
+}
+
+function hasInternalComplementarity(seq) {
+  seq = seq.toUpperCase();
+  const n = seq.length;
+  for (let len = 5; len <= 8; len++) {
+    for (let i = 0; i <= n - 2*len; i++) {
+      const sub = seq.slice(i, i + len);
+      for (let j = i + len; j <= n - len; j++) {
+        if (seq.slice(j, j + len) === revComp(sub)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+// Count max 8-mer repeat hits of primer against full sequence (specificity)
+function countRepeatHits(primer, fullSeq) {
+  primer = primer.toUpperCase(); fullSeq = fullSeq.toUpperCase();
+  let max = 0;
+  for (let i = 0; i <= primer.length - 8; i++) {
+    const kmer = primer.slice(i, i + 8);
+    let cnt = 0, pos = 0;
+    while ((pos = fullSeq.indexOf(kmer, pos)) !== -1) { cnt++; pos++; }
+    if (cnt > max) max = cnt;
+  }
+  return max;
+}
+
+/* ─── SCORING (weighted) ─────────────────────────────────────────────────── */
+function scorePrimerFull(p, fullSeq, mode) {
+  const tmTarget = (mode.tmMin + mode.tmMax) / 2;
+
+  // 25% Tm stability
+  const tmScore = Math.max(0, 1 - Math.abs(p.tm - tmTarget) / 5);
+
+  // 20% GC balance
+  const gcScore = Math.max(0, 1 - Math.abs(p.gc - 50) / 15);
+
+  // 20% secondary structure (hairpin)
+  const hpScore = p.hairpin_dg > -1 ? 1.0 : p.hairpin_dg > -2 ? 0.8 : p.hairpin_dg > -3 ? 0.55 : 0.0;
+
+  // 15% self-dimer
+  const sdScore = p.self_dimer_dg > -2 ? 1.0 : p.self_dimer_dg > -3.5 ? 0.75 : p.self_dimer_dg > -5 ? 0.45 : 0.0;
+
+  // 10% GC clamp
+  const clampScore = hasGCClamp(p.sequence) ? 1.0 : 0.0;
+
+  // 10% specificity
+  const rep = countRepeatHits(p.sequence, fullSeq);
+  const specScore = rep <= 2 ? 1.0 : rep <= 5 ? 0.7 : rep <= 10 ? 0.35 : 0.1;
+
+  const total = 0.25*tmScore + 0.20*gcScore + 0.20*hpScore + 0.15*sdScore + 0.10*clampScore + 0.10*specScore;
+  return Math.round(total * 100);
+}
+
+function classifyScore(score) {
+  if (score >= 85) return 'Excellent';
+  if (score >= 70) return 'Good';
+  if (score >= 60) return 'Fair';
+  return 'Poor';
+}
+
+/* ─── MAIN PRIMER DESIGN ENGINE ──────────────────────────────────────────── */
+async function designPrimers(seq, mode) {
+  await new Promise(r => setTimeout(r, 900)); // simulate async
+  seq = seq.toUpperCase();
+  const n = seq.length;
+
+  const allFwd = [], allRev = [];
+
+  // Scan forward primers
+  for (let start = 0; start < n - 18; start++) {
+    for (let len = 18; len <= 22; len++) {
+      if (start + len > n) continue;
+      const p = seq.slice(start, start + len);
+      const gc = calcGC(p);
+      if (gc < 40 || gc > 65) continue;
+      if (hasRuns(p, 4)) continue;
+      if (!hasGCClamp(p)) continue;
+      if (!noTerminalGGGCCC(p)) continue;
+      if (hasInternalComplementarity(p)) continue;
+      const tm = calcTmNN(p);
+      if (tm < 58 || tm > 65) continue;
+      const hp = calcHairpinDG(p);
+      const sd = calcSelfDimerDG(p);
+      if (hp < -3) continue;
+      if (sd < -5) continue;
+      allFwd.push({
+        sequence: p, length: len, start, end: start + len,
+        tm, gc_content: gc,
+        hairpin_dg: hp, self_dimer_dg: sd,
+        three_prime_dg: calc3PrimeDG(p),
+        last_5bp_gc: calcLast5GC(p),
+        gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g)||[]).length }
+      });
+    }
+  }
+
+  // Scan reverse primers
+  for (let endPos = mode.prodMin; endPos <= n; endPos++) {
+    for (let len = 18; len <= 22; len++) {
+      const start = endPos - len;
+      if (start < 0) continue;
+      const rc = revComp(seq.slice(start, endPos));
+      const gc = calcGC(rc);
+      if (gc < 40 || gc > 65) continue;
+      if (hasRuns(rc, 4)) continue;
+      if (!hasGCClamp(rc)) continue;
+      if (!noTerminalGGGCCC(rc)) continue;
+      if (hasInternalComplementarity(rc)) continue;
+      const tm = calcTmNN(rc);
+      if (tm < 58 || tm > 65) continue;
+      const hp = calcHairpinDG(rc);
+      const sd = calcSelfDimerDG(rc);
+      if (hp < -3) continue;
+      if (sd < -5) continue;
+      allRev.push({
+        sequence: rc, length: len, start, end: endPos,
+        tm, gc_content: gc,
+        hairpin_dg: hp, self_dimer_dg: sd,
+        three_prime_dg: calc3PrimeDG(rc),
+        last_5bp_gc: calcLast5GC(rc),
+        gc_clamp: { has_clamp: hasGCClamp(rc), clamp_strength: (rc.slice(-2).match(/[GC]/g)||[]).length }
+      });
+    }
+  }
+
+  if (!allFwd.length || !allRev.length) {
+    return { success: false, error: `No valid primers found for ${mode.name} mode. Try a different sequence or application mode.` };
+  }
+
+  // Score all
+  allFwd.forEach(p => { p.quality_score = scorePrimerFull(p, seq, mode); p.quality_grade = classifyScore(p.quality_score); });
+  allRev.forEach(p => { p.quality_score = scorePrimerFull(p, seq, mode); p.quality_grade = classifyScore(p.quality_score); });
+  allFwd.sort((a, b) => b.quality_score - a.quality_score);
+  allRev.sort((a, b) => b.quality_score - a.quality_score);
+
+  // Find best pair: amplicon in range, Tm diff ≤ 3°C, cross-dimer > -6
+  let best = null, bestScore = -Infinity;
+  for (const fwd of allFwd.slice(0, 60)) {
+    for (const rev of allRev.slice(0, 60)) {
+      const amp = rev.end - fwd.start;
+      if (amp < mode.prodMin || amp > mode.prodMax) continue;
+      if (Math.abs(fwd.tm - rev.tm) > 3) continue;
+      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence);
+      if (cd < -6) continue;
+      const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
+      if (pairScore > bestScore) {
+        bestScore = pairScore;
+        best = { fwd, rev, amp, cross_dimer_dg: cd };
+      }
+    }
+  }
+
+  if (!best) {
+    return { success: false, error: `No compatible primer pair found within ${mode.prodMin}–${mode.prodMax} bp amplicon range. Sequence may be too short or repetitive for this mode.` };
+  }
+
+  const { fwd, rev, amp, cross_dimer_dg } = best;
+  const tmDiff  = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
+  const annealT = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
+  const gcMax   = Math.max(fwd.gc_content, rev.gc_content);
+  const overallScore = Math.round((fwd.quality_score + rev.quality_score) / 2);
+
+  // Warnings
+  const warnings = [];
+  if (tmDiff > 3)    warnings.push({ urgency:'high',   text:`Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
+  if (gcMax > 70)    warnings.push({ urgency:'high',   text:`GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
+  if (cross_dimer_dg < -4) warnings.push({ urgency:'medium', text:`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold` });
+  const fwdRep = countRepeatHits(fwd.sequence, seq);
+  const revRep = countRepeatHits(rev.sequence, seq);
+  if (fwdRep > 5) warnings.push({ urgency:'medium', text:`Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
+  if (revRep > 5) warnings.push({ urgency:'medium', text:`Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
+
+  // Classification with downgrade rules
+  let classification = overallScore >= 85 ? 'Excellent' : overallScore >= 70 ? 'Good' : overallScore >= 60 ? 'Fair' : 'Poor';
+  if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
+  if (tmDiff > 3 && classification === 'Good')      classification = 'Fair';
+
+  // Specificity score
+  const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
+
+  // Build hairpin risk for display
+  const hpRisk = dg => dg > -1 ? 'low' : dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
+
+  const fwdOut = {
+    sequence: fwd.sequence,
+    length: fwd.length,
+    tm: fwd.tm,
+    gc_content: fwd.gc_content,
+    position: `${fwd.start + 1}–${fwd.end}`,
+    quality_grade: fwd.quality_grade,
+    quality_score: fwd.quality_score,
+    hairpin: { risk_level: hpRisk(fwd.hairpin_dg), delta_g: fwd.hairpin_dg },
+    self_dimer_dg: fwd.self_dimer_dg,
+    three_prime_stability_dg: fwd.three_prime_dg,
+    last_5bp_gc_percent: fwd.last_5bp_gc,
+    gc_clamp: fwd.gc_clamp,
+    issues: [], warnings: []
+  };
+
+  const revOut = {
+    sequence: rev.sequence,
+    length: rev.length,
+    tm: rev.tm,
+    gc_content: rev.gc_content,
+    position: `${rev.start + 1}–${rev.end}`,
+    quality_grade: rev.quality_grade,
+    quality_score: rev.quality_score,
+    hairpin: { risk_level: hpRisk(rev.hairpin_dg), delta_g: rev.hairpin_dg },
+    self_dimer_dg: rev.self_dimer_dg,
+    three_prime_stability_dg: rev.three_prime_dg,
+    last_5bp_gc_percent: rev.last_5bp_gc,
+    gc_clamp: rev.gc_clamp,
+    issues: [], warnings: []
+  };
+
+  // Alternative candidates (top 5 each, excluding selected)
+  const altCandidates = [];
+  [...allFwd.slice(1, 4), ...allRev.slice(1, 4)].forEach((p, i) => {
+    altCandidates.push({
+      type: i < 3 ? 'Alternative Forward' : 'Alternative Reverse',
+      sequence: p.sequence, length: p.length, tm: p.tm,
+      gc_content: p.gc_content, quality_grade: p.quality_grade, quality_score: p.quality_score
+    });
+  });
+
+  return {
+    success: true,
+    data: {
+      forward_primer:         fwdOut,
+      reverse_primer:         revOut,
+      cross_dimer_dg,
+      expected_product_size:  amp,
+      tm_difference:          tmDiff,
+      annealing_temperature:  annealT,
+      specificity_score:      specScore,
+      overall_score:          overallScore,
+      classification,
+      warnings,
+      dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
+      pcr_protocol: {
+        annealing_temp:  annealT,
+        extension_time:  Math.max(30, Math.ceil(amp / 1000) * 60),
+        cycles:          35,
+        polymerase:      mode.name === 'qPCR (Real-Time)' ? 'SYBR Green Master Mix (high-fidelity)' : 'Phusion or Q5 High-Fidelity Polymerase',
+        notes: [
+          mode.name === 'qPCR (Real-Time)'
+            ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
+            : 'Confirm product size by gel electrophoresis. Sequence before downstream use.',
+          `Denaturation: 98°C 30s | Annealing: ${annealT}°C 30s | Extension: 72°C ${Math.max(30, Math.ceil(amp / 1000) * 60)}s`
+        ]
+      },
+      all_candidates: altCandidates,
+      _meta: {
+        model: 'SantaLucia 1998 Nearest-Neighbor',
+        conditions: '[oligo]=250nM, [Na+]=50mM, T=37°C',
+        scoring: '25% Tm · 20% GC · 20% structure · 15% dimer · 10% clamp · 10% specificity',
+        application_mode: mode.name
+      }
+    }
+  };
+}
+
+/* ─── VALIDATION ─────────────────────────────────────────────────────────── */
 function validateSequence(seq) {
   const cleaned = seq.toUpperCase().replace(/[^ATGC]/g, '');
   if (cleaned.length === 0) return { valid: false, error: 'No valid DNA bases found.' };
   if (cleaned.length < 40)  return { valid: false, error: 'Sequence must be at least 40 bp.' };
   return { valid: true, cleaned };
-}
-
-async function designPrimers(seq) {
-  await new Promise(r => setTimeout(r, 900));
-  const fwdSeq = seq.substring(0, 20);
-  const revRaw = seq.substring(seq.length - 21, seq.length - 1);
-  const comp   = { A:'T', T:'A', G:'C', C:'G' };
-  const revSeq = revRaw.split('').reverse().map(b => comp[b] || b).join('');
-  const gc     = s => ((s.match(/[GC]/g)||[]).length / s.length) * 100;
-  const calcTm = s => 2*(s.match(/[AT]/g)||[]).length + 4*(s.match(/[GC]/g)||[]).length;
-  return {
-    success: true,
-    data: {
-      forward_primer: {
-        sequence: fwdSeq, length: fwdSeq.length, tm: calcTm(fwdSeq),
-        gc_content: parseFloat(gc(fwdSeq).toFixed(1)), position: '1–20',
-        quality_grade: 'Good', quality_score: 78,
-        hairpin: { risk_level: 'low', delta_g: -0.4 },
-        gc_clamp: { has_clamp: true, clamp_strength: 2 },
-        issues: [], warnings: []
-      },
-      reverse_primer: {
-        sequence: revSeq, length: revSeq.length, tm: calcTm(revSeq),
-        gc_content: parseFloat(gc(revSeq).toFixed(1)), position: `${seq.length-20}–${seq.length}`,
-        quality_grade: 'Good', quality_score: 74,
-        hairpin: { risk_level: 'medium', delta_g: -1.2 },
-        gc_clamp: { has_clamp: false, clamp_strength: 1 },
-        issues: [], warnings: []
-      },
-      expected_product_size: seq.length,
-      tm_difference: Math.abs(calcTm(fwdSeq) - calcTm(revSeq)),
-      dimer_analysis: { risk_level: 'low' },
-      pcr_protocol: {
-        annealing_temp: Math.min(calcTm(fwdSeq), calcTm(revSeq)) - 5,
-        extension_time: Math.max(60, Math.ceil(seq.length / 1000) * 60),
-        cycles: 35,
-        polymerase: 'Taq DNA Polymerase (high-fidelity)',
-        notes: ['Use hot-start polymerase for best specificity', 'Verify product size on gel after PCR']
-      },
-      all_candidates: []
-    }
-  };
 }
 
 /* ─── APP MODES ──────────────────────────────────────────────────────────── */
@@ -79,29 +444,30 @@ const APP_MODES = {
 const QUAL_COL = { Excellent:'#00FFC6', Good:'#00c9a0', Fair:'#F59E0B', Poor:'#EF4444' };
 const RISK_COL = { low:'#00FFC6', medium:'#F59E0B', high:'#EF4444' };
 const URG_COL  = { high:'#EF4444', medium:'#F59E0B', low:'#00FFC6' };
+const CLASS_COL = { Excellent:'#00FFC6', Good:'#60A5FA', Fair:'#F59E0B', Poor:'#EF4444' };
+const CLASS_BG  = { Excellent:'rgba(0,255,198,0.1)', Good:'rgba(96,165,250,0.1)', Fair:'rgba(245,158,11,0.1)', Poor:'rgba(239,68,68,0.1)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
-   MAIN
+   MAIN COMPONENT
    ════════════════════════════════════════════════════════════════════════════ */
 export default function PrimerDesigner() {
-  const [sequence, setSequence]       = useState('');
-  const [appMode, setAppMode]         = useState('diagnostic');
-  const [primers, setPrimers]         = useState(null);
-  const [loading, setLoading]         = useState(false);
-  const [error, setError]             = useState('');
-  const [showCand, setShowCand]       = useState(false);
-  const [showInfo, setShowInfo]       = useState(false);
+  const [sequence, setSequence]           = useState('');
+  const [appMode, setAppMode]             = useState('diagnostic');
+  const [primers, setPrimers]             = useState(null);
+  const [loading, setLoading]             = useState(false);
+  const [error, setError]                 = useState('');
+  const [showCand, setShowCand]           = useState(false);
+  const [showInfo, setShowInfo]           = useState(false);
+  const [showJSON, setShowJSON]           = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
-  const [loadingAI, setLoadingAI]     = useState(false);
+  const [loadingAI, setLoadingAI]         = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
-  const mode = APP_MODES[appMode];
-  const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g,'').length;
+  const mode     = APP_MODES[appMode];
+  const bpCount  = sequence.toUpperCase().replace(/[^ATGC]/g,'').length;
 
-  /* ── load sample ── */
   const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPrimers(null); setAiExplanation(''); };
 
-  /* ── close export menu on outside click ── */
   useEffect(() => {
     const close = () => setShowExportMenu(false);
     if (showExportMenu) {
@@ -116,143 +482,125 @@ export default function PrimerDesigner() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const content = evt.target?.result;
-      if (typeof content === 'string') {
-        const cleanSeq = content
-          .split('\n')
-          .filter(line => !line.startsWith('>'))
-          .join('')
-          .replace(/\s/g, '');
-        setSequence(cleanSeq);
-        setError('');
-        setPrimers(null);
-        setAiExplanation('');
+      if (typeof evt.target?.result === 'string') {
+        const clean = evt.target.result.split('\n').filter(l => !l.startsWith('>')).join('').replace(/\s/g,'');
+        setSequence(clean); setError(''); setPrimers(null); setAiExplanation('');
       }
     };
     reader.readAsText(file);
   };
 
-  /* ── Export functions ── */
+  /* ── Export ── */
   const exportTXT = (detailed = false) => {
     if (!primers) return;
-    let content = `PCR Primer Designer Results\n`;
-    content += `${'='.repeat(50)}\n\n`;
-    content += `Application Mode: ${mode.name}\n`;
-    content += `Product Size: ${primers.expected_product_size} bp\n`;
-    content += `Tm Difference: ${primers.tm_difference?.toFixed(1)} °C\n\n`;
-
+    let c = `PCR Primer Designer Results\n${'='.repeat(50)}\n\n`;
+    c += `Application Mode: ${mode.name}\n`;
+    c += `Classification: ${primers.classification}  (${primers.overall_score}/100)\n`;
+    c += `Product Size: ${primers.expected_product_size} bp\n`;
+    c += `Tm Difference: ${primers.tm_difference} °C\n`;
+    c += `Annealing Temperature: ${primers.annealing_temperature} °C\n`;
+    c += `Specificity Score: ${primers.specificity_score}/100\n`;
+    c += `Cross-Dimer ΔG: ${primers.cross_dimer_dg} kcal/mol\n\n`;
+    if (primers.warnings?.length) {
+      c += `WARNINGS:\n`;
+      primers.warnings.forEach(w => { c += `  ⚠ ${w.text}\n`; });
+      c += '\n';
+    }
     if (primers.forward_primer) {
-      content += `FORWARD PRIMER:\n`;
-      content += `  Sequence: ${primers.forward_primer.sequence}\n`;
-      content += `  Length: ${primers.forward_primer.length} bp\n`;
-      content += `  Tm: ${primers.forward_primer.tm} °C\n`;
-      content += `  GC Content: ${primers.forward_primer.gc_content}%\n`;
-      content += `  Quality: ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)\n\n`;
+      c += `FORWARD PRIMER:\n`;
+      c += `  Sequence: ${primers.forward_primer.sequence}\n`;
+      c += `  Length: ${primers.forward_primer.length} bp\n`;
+      c += `  Tm: ${primers.forward_primer.tm} °C\n`;
+      c += `  GC: ${primers.forward_primer.gc_content}%\n`;
+      c += `  Hairpin ΔG: ${primers.forward_primer.hairpin.delta_g} kcal/mol\n`;
+      c += `  Self-Dimer ΔG: ${primers.forward_primer.self_dimer_dg} kcal/mol\n`;
+      c += `  3′ Stability ΔG: ${primers.forward_primer.three_prime_stability_dg} kcal/mol\n`;
+      c += `  Last 5bp GC: ${primers.forward_primer.last_5bp_gc_percent}%\n`;
+      c += `  Quality: ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)\n\n`;
     }
-
     if (primers.reverse_primer) {
-      content += `REVERSE PRIMER:\n`;
-      content += `  Sequence: ${primers.reverse_primer.sequence}\n`;
-      content += `  Length: ${primers.reverse_primer.length} bp\n`;
-      content += `  Tm: ${primers.reverse_primer.tm} °C\n`;
-      content += `  GC Content: ${primers.reverse_primer.gc_content}%\n`;
-      content += `  Quality: ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)\n\n`;
+      c += `REVERSE PRIMER:\n`;
+      c += `  Sequence: ${primers.reverse_primer.sequence}\n`;
+      c += `  Length: ${primers.reverse_primer.length} bp\n`;
+      c += `  Tm: ${primers.reverse_primer.tm} °C\n`;
+      c += `  GC: ${primers.reverse_primer.gc_content}%\n`;
+      c += `  Hairpin ΔG: ${primers.reverse_primer.hairpin.delta_g} kcal/mol\n`;
+      c += `  Self-Dimer ΔG: ${primers.reverse_primer.self_dimer_dg} kcal/mol\n`;
+      c += `  3′ Stability ΔG: ${primers.reverse_primer.three_prime_stability_dg} kcal/mol\n`;
+      c += `  Last 5bp GC: ${primers.reverse_primer.last_5bp_gc_percent}%\n`;
+      c += `  Quality: ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)\n\n`;
     }
-
     if (detailed && primers.pcr_protocol) {
-      content += `PCR PROTOCOL:\n`;
-      content += `  Annealing Temp: ${primers.pcr_protocol.annealing_temp} °C\n`;
-      content += `  Extension Time: ${primers.pcr_protocol.extension_time} s\n`;
-      content += `  Cycles: ${primers.pcr_protocol.cycles}\n`;
-      content += `  Polymerase: ${primers.pcr_protocol.polymerase}\n`;
+      c += `PCR PROTOCOL:\n`;
+      c += `  Annealing Temp: ${primers.pcr_protocol.annealing_temp} °C\n`;
+      c += `  Extension Time: ${primers.pcr_protocol.extension_time} s\n`;
+      c += `  Cycles: ${primers.pcr_protocol.cycles}\n`;
+      c += `  Polymerase: ${primers.pcr_protocol.polymerase}\n`;
+      primers.pcr_protocol.notes?.forEach(n => { c += `  • ${n}\n`; });
     }
-
-    const blob = new Blob([content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob([c], { type:'text/plain' });
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setShowExportMenu(false);
+    a.href = URL.createObjectURL(blob);
+    a.download = `Primer_Results_${detailed?'Detailed_':''}${new Date().toISOString().split('T')[0]}.txt`;
+    a.click(); setShowExportMenu(false);
   };
 
   const exportPDF = (detailed = false) => {
     if (!primers) return;
-    let content = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>PCR Primer Designer Results</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 40px; color: #333; }
-    h1 { color: #00FFC6; border-bottom: 3px solid #00FFC6; padding-bottom: 10px; }
-    .summary { background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0; }
-    .primer-box { margin: 20px 0; padding: 20px; border-left: 4px solid #00FFC6; background: #f9f9f9; }
-    code { background: #e5e5e5; padding: 4px 8px; border-radius: 3px; font-family: monospace; font-size: 1.1em; }
-    .label { font-weight: bold; color: #555; }
-  </style>
-</head>
-<body>
-  <h1>PCR Primer Designer Results</h1>
-  <div class="summary">
-    <p><span class="label">Mode:</span> ${mode.name}</p>
-    <p><span class="label">Product Size:</span> ${primers.expected_product_size} bp</p>
-    <p><span class="label">Tm Difference:</span> ${primers.tm_difference?.toFixed(1)} °C</p>
-    <p><span class="label">Generated:</span> ${new Date().toLocaleString()}</p>
-  </div>`;
-
-    if (primers.forward_primer) {
-      content += `
-  <div class="primer-box">
-    <h2>Forward Primer</h2>
-    <p><span class="label">Sequence:</span> <code>${primers.forward_primer.sequence}</code></p>
-    <p><span class="label">Length:</span> ${primers.forward_primer.length} bp</p>
-    <p><span class="label">Tm:</span> ${primers.forward_primer.tm} °C</p>
-    <p><span class="label">GC Content:</span> ${primers.forward_primer.gc_content}%</p>
-    <p><span class="label">Quality:</span> ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)</p>
-  </div>`;
+    let h = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PCR Primer Results</title>
+    <style>body{font-family:Arial,sans-serif;margin:40px;color:#333}
+    h1{color:#00FFC6;border-bottom:3px solid #00FFC6;padding-bottom:10px}
+    .sum{background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0}
+    .box{margin:20px 0;padding:20px;border-left:4px solid #00FFC6;background:#f9f9f9;border-radius:4px}
+    code{background:#e5e5e5;padding:4px 8px;border-radius:3px;font-family:monospace;font-size:1.05em}
+    .lbl{font-weight:bold;color:#555}.warn{color:#d97706;background:#fef3c7;padding:8px 12px;border-radius:4px;margin:4px 0}
+    table{width:100%;border-collapse:collapse;margin:10px 0}th,td{border:1px solid #ddd;padding:8px;text-align:left}
+    th{background:#00FFC6;color:#0c0e14}</style></head><body>
+    <h1>PCR Primer Designer Results</h1>
+    <div class="sum">
+      <p><b>Mode:</b> ${mode.name}</p>
+      <p><b>Classification:</b> ${primers.classification} (${primers.overall_score}/100)</p>
+      <p><b>Product Size:</b> ${primers.expected_product_size} bp</p>
+      <p><b>Annealing Temperature:</b> ${primers.annealing_temperature} °C</p>
+      <p><b>Tm Difference:</b> ${primers.tm_difference} °C</p>
+      <p><b>Cross-Dimer ΔG:</b> ${primers.cross_dimer_dg} kcal/mol</p>
+      <p><b>Generated:</b> ${new Date().toLocaleString()}</p>
+    </div>`;
+    if (primers.warnings?.length) {
+      h += `<h2>⚠ Warnings</h2>`;
+      primers.warnings.forEach(w => { h += `<div class="warn">${w.text}</div>`; });
     }
-
-    if (primers.reverse_primer) {
-      content += `
-  <div class="primer-box">
-    <h2>Reverse Primer</h2>
-    <p><span class="label">Sequence:</span> <code>${primers.reverse_primer.sequence}</code></p>
-    <p><span class="label">Length:</span> ${primers.reverse_primer.length} bp</p>
-    <p><span class="label">Tm:</span> ${primers.reverse_primer.tm} °C</p>
-    <p><span class="label">GC Content:</span> ${primers.reverse_primer.gc_content}%</p>
-    <p><span class="label">Quality:</span> ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)</p>
-  </div>`;
-    }
-
+    ['forward_primer','reverse_primer'].forEach(key => {
+      const p = primers[key];
+      if (!p) return;
+      h += `<div class="box"><h2>${key === 'forward_primer' ? 'Forward' : 'Reverse'} Primer</h2>
+        <p><b>Sequence:</b> <code>${p.sequence}</code></p>
+        <table><tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Length</td><td>${p.length} bp</td></tr>
+        <tr><td>Tm (NN model)</td><td>${p.tm} °C</td></tr>
+        <tr><td>GC Content</td><td>${p.gc_content}%</td></tr>
+        <tr><td>Hairpin ΔG</td><td>${p.hairpin.delta_g} kcal/mol</td></tr>
+        <tr><td>Self-Dimer ΔG</td><td>${p.self_dimer_dg} kcal/mol</td></tr>
+        <tr><td>3′ Stability ΔG</td><td>${p.three_prime_stability_dg} kcal/mol</td></tr>
+        <tr><td>Last 5bp GC%</td><td>${p.last_5bp_gc_percent}%</td></tr>
+        <tr><td>Quality</td><td>${p.quality_grade} (${p.quality_score}/100)</td></tr>
+        </table></div>`;
+    });
     if (detailed && primers.pcr_protocol) {
-      content += `
-  <div class="primer-box">
-    <h2>PCR Protocol</h2>
-    <p><span class="label">Annealing Temp:</span> ${primers.pcr_protocol.annealing_temp} °C</p>
-    <p><span class="label">Extension Time:</span> ${primers.pcr_protocol.extension_time} s</p>
-    <p><span class="label">Cycles:</span> ${primers.pcr_protocol.cycles}</p>
-    <p><span class="label">Polymerase:</span> ${primers.pcr_protocol.polymerase}</p>
-  </div>`;
+      h += `<div class="box"><h2>PCR Protocol</h2>
+        <p><b>Annealing Temp:</b> ${primers.pcr_protocol.annealing_temp} °C</p>
+        <p><b>Extension Time:</b> ${primers.pcr_protocol.extension_time} s</p>
+        <p><b>Cycles:</b> ${primers.pcr_protocol.cycles}</p>
+        <p><b>Polymerase:</b> ${primers.pcr_protocol.polymerase}</p>
+        ${primers.pcr_protocol.notes?.map(n=>`<p>• ${n}</p>`).join('')}</div>`;
     }
-
-    content += `</body></html>`;
-
-    const blob = new Blob([content], { type: 'text/html' });
+    h += `</body></html>`;
+    const blob = new Blob([h], {type:'text/html'});
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.html`;
+    const a = document.createElement('a'); a.href = url;
+    a.download = `Primer_Results_${detailed?'Detailed_':''}${new Date().toISOString().split('T')[0]}.html`;
     a.click();
-    URL.revokeObjectURL(url);
-    
-    const printWindow = window.open(url);
-    if (printWindow) {
-      printWindow.onload = () => {
-        setTimeout(() => printWindow.print(), 250);
-      };
-    }
+    const w = window.open(url); if (w) w.onload = () => setTimeout(() => w.print(), 250);
     setShowExportMenu(false);
   };
 
@@ -262,11 +610,11 @@ export default function PrimerDesigner() {
     const v = validateSequence(sequence);
     if (!v.valid) { setError(v.error); return; }
     setLoading(true); setError(''); setPrimers(null); setAiExplanation('');
-    const res = await designPrimers(v.cleaned);
+    const res = await designPrimers(v.cleaned, mode);
     setLoading(false);
     if (res.success) {
-      if (res.data.forward_primer) res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
-      if (res.data.reverse_primer) res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
+      res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
+      res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
       res.data.optimization_tips = buildTips(res.data, mode);
       setPrimers(res.data);
     } else { setError(res.error); }
@@ -281,16 +629,15 @@ export default function PrimerDesigner() {
       const t = setTimeout(() => ctrl.abort(), 60000);
       const res = await fetch(`${API_URL}/api/explain`, {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ tool:'PCR Primer Designer', data:primers }),
-        signal: ctrl.signal
+        body: JSON.stringify({ tool:'PCR Primer Designer', data: primers }), signal: ctrl.signal
       });
       clearTimeout(t);
-      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error || 'AI failed'); }
+      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||'AI failed'); }
       const data = await res.json();
       const txt = data.explanation || data.output_text || data.data?.explanation || data.choices?.[0]?.message?.content;
       if (!txt) throw new Error('No explanation returned');
       setAiExplanation(txt);
-    } catch (e) { setError(e.name === 'AbortError' ? 'AI timed out' : (e.message || 'AI failed')); }
+    } catch(e) { setError(e.name==='AbortError'?'AI timed out':(e.message||'AI failed')); }
     finally { setLoadingAI(false); }
   };
 
@@ -298,18 +645,32 @@ export default function PrimerDesigner() {
   function buildAnalysis(p) {
     const a = [];
     if (p.hairpin?.risk_level !== 'low') a.push({
-      type: p.hairpin.risk_level === 'high' ? 'error' : 'warning', 
-      title:'Hairpin Formation Risk',
-      issue:`May form a secondary structure (ΔG = ${p.hairpin.delta_g} kcal/mol)`,
-      impact:'Reduces primer availability, which lowers PCR yield and overall efficiency.',
-      fixes:['Shift primer 2–3 bp upstream or downstream','Add 3–5 % DMSO to destabilise secondary structures','Increase annealing temperature by 2–3 °C']
+      type: p.hairpin.risk_level === 'high' ? 'error' : 'warning',
+      title: 'Hairpin Formation Risk',
+      issue: `May form a secondary structure (ΔG = ${p.hairpin.delta_g} kcal/mol)`,
+      impact: 'Reduces primer availability, which lowers PCR yield and overall efficiency.',
+      fixes: ['Shift primer 2–3 bp upstream or downstream', 'Add 3–5% DMSO to destabilise secondary structures', 'Increase annealing temperature by 2–3 °C']
     });
     if (!p.gc_clamp?.has_clamp) a.push({
-      type:'warning',
-      title:'Missing GC Clamp',
-      issue:'No G or C base within the last 5 bases of the 3′ end.',
-      impact:'Weaker 3′ binding reduces extension efficiency — especially important for cloning workflows.',
-      fixes:['Shift primer so a natural G/C falls at the 3′ end','Extend the primer by 1–2 G/C bases if the template allows']
+      type: 'warning',
+      title: 'Missing GC Clamp',
+      issue: 'No G or C base within the last 2 bases of the 3′ end.',
+      impact: 'Weaker 3′ binding reduces extension efficiency.',
+      fixes: ['Shift primer so a natural G/C falls at the 3′ end', 'Extend the primer by 1–2 G/C bases if the template allows']
+    });
+    if (p.self_dimer_dg < -3.5) a.push({
+      type: 'warning',
+      title: 'Self-Dimer Risk',
+      issue: `Self-dimer ΔG = ${p.self_dimer_dg} kcal/mol (threshold: −5)`,
+      impact: 'Primer may partially dimerize, reducing effective concentration.',
+      fixes: ['Reduce primer concentration to 0.2 µM', 'Use hot-start polymerase', 'Shift primer 1–2 bp to break 3′ complementarity']
+    });
+    if (p.last_5bp_gc_percent > 80) a.push({
+      type: 'warning',
+      title: 'GC-Rich 3′ End',
+      issue: `Last 5 bp GC content is ${p.last_5bp_gc_percent}% — risk of non-specific binding.`,
+      impact: 'High 3′ GC can lead to mispriming on off-target sites.',
+      fixes: ['Shift primer to reduce terminal GC density', 'Increase annealing stringency (+2 °C)']
     });
     return a;
   }
@@ -318,22 +679,27 @@ export default function PrimerDesigner() {
     const tips = [];
     const f = data.forward_primer, r = data.reverse_primer;
     if (!f || !r) return tips;
-    if (Math.abs(f.tm - r.tm) > 5) tips.push({
-      category:'Temperature', title:'Large Tm Difference Detected',
-      recommendation:`Run a gradient PCR between ${Math.min(f.tm,r.tm)-5} °C and ${Math.max(f.tm,r.tm)-3} °C to find the optimal annealing temperature.`,
-      urgency:'high'
+    if (data.tm_difference > 3) tips.push({
+      category: 'Temperature', title: 'Large Tm Difference Detected',
+      recommendation: `Run gradient PCR between ${Math.min(f.tm,r.tm)-5}°C and ${Math.max(f.tm,r.tm)-3}°C to find optimal annealing temperature.`,
+      urgency: 'high'
     });
     if (data.dimer_analysis?.risk_level !== 'low') tips.push({
-      category:'Dimer Prevention', title:'Primer-Dimer Risk Detected',
-      recommendation:'Reduce primer concentration to 0.2 µM and use a hot-start polymerase to minimise dimer formation.',
-      urgency:'medium'
+      category: 'Dimer Prevention', title: 'Primer-Dimer Risk Detected',
+      recommendation: 'Reduce primer concentration to 0.2 µM. Use hot-start polymerase to minimise dimer formation during setup.',
+      urgency: 'medium'
+    });
+    if (data.cross_dimer_dg < -3) tips.push({
+      category: 'Cross-Dimer', title: 'Forward–Reverse 3′ Complementarity',
+      recommendation: `Cross-dimer ΔG = ${data.cross_dimer_dg} kcal/mol. Use separate tubes for diluted primers and combine only in the final mix.`,
+      urgency: data.cross_dimer_dg < -5 ? 'high' : 'medium'
     });
     tips.push({
-      category:'Protocol', title:`${m.name} Best Practices`,
+      category: 'Protocol', title: `${m.name} Best Practices`,
       recommendation: m.name === 'qPCR (Real-Time)'
-        ? 'Keep amplicon size between 70–150 bp. Use a ROX passive reference dye. Verify amplification efficiency falls within 90–110 %.'
-        : 'Use a high-fidelity polymerase (Phusion or Q5). Confirm your final product by sequencing before downstream use.',
-      urgency:'low'
+        ? 'Keep amplicon 70–150 bp. Verify amplification efficiency 90–110%. Include no-template control (NTC). Use ROX passive reference dye.'
+        : 'Use high-fidelity polymerase (Phusion or Q5). Confirm product size by gel electrophoresis. Sequence the final product before downstream use.',
+      urgency: 'low'
     });
     return tips;
   }
@@ -451,6 +817,25 @@ export default function PrimerDesigner() {
     .info-wrap.closed{ max-height:0; opacity:0; }
     .info-wrap.open{ max-height:1000px; opacity:1; }
 
+    .json-wrap{ overflow:hidden; transition:max-height 0.4s cubic-bezier(0.4,0,0.2,1), opacity 0.3s; }
+    .json-wrap.closed{ max-height:0; opacity:0; }
+    .json-wrap.open{ max-height:2000px; opacity:1; }
+
+    .json-block{
+      background:#080a10; border:1px solid #1e2130; border-radius:10px;
+      padding:1rem; font-family:'JetBrains Mono',monospace; font-size:0.78rem;
+      line-height:1.9; color:#a0a3b1; overflow-x:auto; max-height:500px; overflow-y:auto;
+    }
+    .json-key{ color:#818cf8; }
+    .json-str{ color:#00FFC6; }
+    .json-num{ color:#FBBF24; }
+
+    .constraint-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:0.45rem; }
+    .constraint-box{
+      background:#0a0c10; border:1px solid #1a1d26; border-radius:8px; padding:0.45rem 0.6rem;
+      display:flex; flex-direction:column; gap:0.1rem;
+    }
+
     .step-row{ display:flex; gap:0.58rem; align-items:flex-start; margin-bottom:0.65rem; }
     .step-num{ flex-shrink:0; width:26px; height:26px; border-radius:50%; background:#00FFC6; color:#0c0e14; font-size:0.7rem; font-weight:700; display:flex; align-items:center; justify-content:center; margin-top:0.1rem; }
 
@@ -459,8 +844,12 @@ export default function PrimerDesigner() {
     .primer-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0.9rem; }
     .proto-grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:0.55rem; }
     .prop-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0.45rem; }
+    .ext-prop-grid{ display:grid; grid-template-columns:1fr 1fr; gap:0.45rem; }
 
     .ai-box{ background:rgba(99,102,241,0.08); border:1px solid rgba(99,102,241,0.3); border-radius:12px; padding:1.25rem; margin-bottom:1rem; }
+
+    @keyframes fadeIn{ from{opacity:0;transform:translateY(5px)} to{opacity:1;transform:translateY(0)} }
+    .fade-in{ animation:fadeIn .35s ease forwards; }
 
     @media(max-width:640px){
       .mode-grid{ grid-template-columns:repeat(2,1fr); }
@@ -468,24 +857,10 @@ export default function PrimerDesigner() {
       .primer-grid{ grid-template-columns:1fr; }
       .proto-grid{ grid-template-columns:1fr; }
       .pc{ padding:1rem; }
-      
-      .export-menu{ 
-        right:auto; 
-        left:0; 
-        max-width:calc(100vw - 2.2rem);
-      }
-      
+      .export-menu{ right:auto; left:0; max-width:calc(100vw - 2.2rem); }
       .lbl{ font-size:0.82rem; }
       select, textarea{ font-size:0.9rem; }
       .btn-p{ font-size:0.96rem; padding:0.8rem 1.1rem; }
-      .btn-ai{ font-size:0.92rem; }
-      .btn-g{ font-size:0.84rem; padding:0.42rem 0.8rem; }
-      .btn-sample{ font-size:0.78rem; padding:0.38rem 0.72rem; }
-      .btn-export{ font-size:0.78rem; padding:0.38rem 0.72rem; }
-      .export-item{ font-size:0.82rem; padding:0.58rem 0.65rem; }
-      .stat-v{ font-size:1.2rem; }
-      .stat-l{ font-size:0.72rem; }
-      .seq-box{ font-size:0.82rem; padding:0.75rem 0.8rem; }
     }
     @media(max-width:380px){
       .mode-grid{ grid-template-columns:1fr 1fr; gap:0.42rem; }
@@ -502,9 +877,10 @@ export default function PrimerDesigner() {
       <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.42rem', flexWrap:'wrap' }}>
         <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.55rem', color:'#fff' }}>PCR Primer Designer</h1>
         <span style={{ background:'rgba(0,255,198,0.1)', border:'1px solid rgba(0,255,198,0.25)', color:'#00FFC6', fontSize:'0.7rem', fontWeight:600, padding:'0.22rem 0.56rem', borderRadius:20, letterSpacing:'0.08em', textTransform:'uppercase' }}>Research Grade</span>
+        <span style={{ background:'rgba(129,140,248,0.1)', border:'1px solid rgba(129,140,248,0.25)', color:'#818cf8', fontSize:'0.7rem', fontWeight:600, padding:'0.22rem 0.56rem', borderRadius:20, letterSpacing:'0.08em', textTransform:'uppercase' }}>NN Thermodynamics v2</span>
       </div>
-      <p style={{ color:'#6b7080', fontSize:'0.96rem', lineHeight:1.58, maxWidth:580 }}>
-        Application-specific primer design with Tm, GC, hairpin &amp; dimer analysis across four PCR workflows.
+      <p style={{ color:'#6b7080', fontSize:'0.96rem', lineHeight:1.58, maxWidth:620 }}>
+        Full nearest-neighbor thermodynamic primer design with hairpin, dimer, GC clamp, and specificity analysis across four PCR application modes.
       </p>
     </div>
   </div>
@@ -521,8 +897,6 @@ export default function PrimerDesigner() {
 
     <div className={`info-wrap ${showInfo ? 'open' : 'closed'}`}>
       <div className="pc" style={{ padding:'1.35rem' }}>
-
-        {/* WHY */}
         <div style={{ marginBottom:'1.15rem' }}>
           <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.52rem' }}>
             <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'0.07em' }}>Why This Tool Matters</span>
@@ -530,35 +904,55 @@ export default function PrimerDesigner() {
           <p style={{ fontSize:'0.96rem', color:'#8a8f9e', lineHeight:1.78, margin:0 }}>
             Designing primers by hand is slow and error-prone. A single mismatch at the
             <strong style={{ color:'#c8cad4' }}> 3′ end </strong>
-            can silently kill your entire PCR run. This tool automates every critical check —
-            <strong style={{ color:'#c8cad4' }}> melting temperature </strong>,
-            <strong style={{ color:'#c8cad4' }}> GC content </strong>,
-            <strong style={{ color:'#c8cad4' }}> hairpin &amp; dimer risk </strong>, and
-            <strong style={{ color:'#c8cad4' }}> 3′ GC-clamp stability </strong>
-            — so you get a reliable, optimised primer pair in seconds. Each application mode enforces the exact parameter windows that matter most for that specific workflow.
+            can silently kill your entire PCR run. This tool uses a
+            <strong style={{ color:'#c8cad4' }}> full SantaLucia 1998 nearest-neighbor thermodynamic model </strong>
+            to calculate accurate Tm, and then automatically checks every candidate for
+            <strong style={{ color:'#c8cad4' }}> hairpin formation, self-dimerization, cross-dimer risk, GC clamp quality, </strong> and
+            <strong style={{ color:'#c8cad4' }}> repeat-region specificity</strong>. Primers are scored across 6 weighted dimensions and classified as Excellent, Good, Fair, or Poor.
           </p>
         </div>
 
-        <div style={{ borderTop:'1px solid #24272f', margin:'1.05rem 0' }}></div>
-
-        {/* WORKFLOW */}
-        <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.68rem' }}>
-          <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'0.07em' }}>Workflow &amp; Next Steps</span>
-        </div>
-        {[
-          ['Pick Your Application',      'Choose the PCR type below. Each mode pre-tunes amplicon size, Tm window, and strictness — Diagnostic is the broadest; qPCR is the tightest.'],
-          ['Paste Your Target Sequence', 'Drop in your gene region (FASTA body or plain text). The tool strips headers, line-breaks, and numbers for you automatically.'],
-          ['Run the Analysis',           'Hit Design Primers. The engine scores every candidate on Tm balance, GC%, hairpin ΔG, dimer risk, and 3′ clamp — then surfaces the best pair.'],
-          ['Use the Results Downstream', 'Copy the oligo sequences straight into a synthesis order or clone them into an expression vector. The protocol block gives you annealing temp, extension time, and cycle count ready to go.']
-        ].map(([title, desc], i) => (
-          <div key={i} className="step-row">
-            <div className="step-num">{i+1}</div>
-            <div>
-              <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#c8cad4', marginBottom:'0.12rem' }}>{title}</div>
-              <div style={{ fontSize:'0.9rem', color:'#6b7080', lineHeight:1.65 }}>{desc}</div>
-            </div>
+        {/* Constraint reference */}
+        <div style={{ borderTop:'1px solid #1e2130', paddingTop:'0.9rem', marginBottom:'1rem' }}>
+          <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#4a4d5e', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.55rem' }}>Applied Constraints</div>
+          <div className="constraint-grid">
+            {[
+              ['Length','18–22 bp','#00FFC6'],
+              ['GC Content','40–60%','#00FFC6'],
+              ['Tm Range','58–65 °C','#60A5FA'],
+              ['ΔTm','≤ 3 °C','#60A5FA'],
+              ['Hairpin ΔG','> −3 kcal/mol','#FBBF24'],
+              ['Self-Dimer ΔG','> −5 kcal/mol','#FBBF24'],
+              ['Cross-Dimer ΔG','> −6 kcal/mol','#F87171'],
+              ['GC Clamp 3′','1–2 GC bases','#00FFC6'],
+            ].map(([k,v,c])=>(
+              <div key={k} className="constraint-box">
+                <span style={{ fontSize:'0.65rem', color:'#2e3145', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em' }}>{k}</span>
+                <span style={{ fontSize:'0.78rem', color:c, fontFamily:'"JetBrains Mono",monospace', fontWeight:600 }}>{v}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+
+        <div style={{ borderTop:'1px solid #1e2130', paddingTop:'0.9rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.68rem' }}>
+            <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'0.07em' }}>Workflow &amp; Next Steps</span>
+          </div>
+          {[
+            ['Pick Your Application',      'Choose the PCR type below. Each mode pre-tunes amplicon size and Tm window — Diagnostic is broadest; qPCR is tightest.'],
+            ['Paste Your Target Sequence', 'Drop in your gene region (FASTA body or plain text). Headers, line-breaks, and numbers are stripped automatically.'],
+            ['Run the Analysis',           'Hit Design Primers. The NN engine scans all valid candidates, scores each on 6 dimensions, and surfaces the best matching pair.'],
+            ['Use the Results Downstream', 'Copy oligo sequences directly into a synthesis order. The protocol block gives you annealing temp, extension time, and cycle count.']
+          ].map(([title, desc], i) => (
+            <div key={i} className="step-row">
+              <div className="step-num">{i+1}</div>
+              <div>
+                <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#c8cad4', marginBottom:'0.12rem' }}>{title}</div>
+                <div style={{ fontSize:'0.9rem', color:'#6b7080', lineHeight:1.65 }}>{desc}</div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
 
@@ -566,7 +960,7 @@ export default function PrimerDesigner() {
     <label className="lbl">Application Mode</label>
     <div className="mode-grid" style={{ marginBottom:'1.15rem' }}>
       {Object.entries(APP_MODES).map(([k, m]) => (
-        <div key={k} className={`mode-card ${appMode===k?'active':''}`} onClick={()=>setAppMode(k)}>
+        <div key={k} className={`mode-card ${appMode===k?'active':''}`} onClick={()=>{setAppMode(k);setPrimers(null);setError('');}}>
           {appMode===k && <span style={{ position:'absolute', top:'0.52rem', right:'0.52rem', background:'#00FFC6', color:'#0c0e14', fontSize:'0.64rem', fontWeight:700, width:19, height:19, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>✓</span>}
           <div style={{ fontSize:'0.9rem', fontWeight:600, color:appMode===k?'#00FFC6':'#c8cad4', marginBottom:'0.2rem' }}>{m.name}</div>
           <div style={{ fontSize:'0.82rem', color:'#6b7080', lineHeight:1.45 }}>{m.desc}</div>
@@ -581,6 +975,8 @@ export default function PrimerDesigner() {
       <span style={{ fontSize:'0.9rem', color:'#8a8f9e' }}>Amplicon {mode.prodMin}–{mode.prodMax} bp</span>
       <span style={{ color:'#3a3d4a', fontSize:'0.84rem' }}>|</span>
       <span style={{ fontSize:'0.9rem', color:'#8a8f9e' }}>Tm {mode.tmMin}–{mode.tmMax} °C</span>
+      <span style={{ color:'#3a3d4a', fontSize:'0.84rem' }}>|</span>
+      <span style={{ fontSize:'0.9rem', color:'#818cf8' }}>SantaLucia 1998 NN Model</span>
     </div>
 
     {/* ═══ SEQUENCE INPUT ═══ */}
@@ -599,7 +995,7 @@ export default function PrimerDesigner() {
       {sequence && (
         <div style={{ marginTop:'0.45rem', fontSize:'0.88rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', alignItems:'center', gap:'0.75rem', flexWrap:'wrap' }}>
           <span>{bpCount} bp after cleaning</span>
-          {bpCount < 150 && bpCount > 0 && <span style={{ color:'#F59E0B' }}>Short sequence — parameters will auto-adjust</span>}
+          {bpCount < 150 && bpCount > 0 && <span style={{ color:'#F59E0B' }}>Short sequence — fewer candidates available</span>}
         </div>
       )}
     </div>
@@ -612,77 +1008,83 @@ export default function PrimerDesigner() {
 
     {/* ═══ SUBMIT ═══ */}
     <button className="btn-p" onClick={handleDesign} disabled={loading}>
-      {loading ? <><span className="spin"></span> Designing Primers…</> : <>Design Primers</>}
+      {loading ? <><span className="spin"></span> Running Thermodynamic Analysis…</> : <>Design Primers</>}
     </button>
 
     {/* ═══════════════════════════════════════════════════════════════════
         RESULTS
         ═══════════════════════════════════════════════════════════════════ */}
-    {primers && (<>
+    {primers && (
+    <div className="fade-in">
 
-      {/* STATS */}
-      <div style={{ marginTop:'1.55rem' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.52rem', flexWrap:'wrap', gap:'0.52rem' }}>
-          <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>
-            Results — <span style={{ color:'#00FFC6' }}>{mode.name}</span>
+      {/* CLASSIFICATION BANNER */}
+      <div style={{ marginTop:'1.55rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.65rem', marginBottom:'0.9rem' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', flexWrap:'wrap' }}>
+          <span style={{ background:CLASS_BG[primers.classification], border:`1px solid ${CLASS_COL[primers.classification]}44`, color:CLASS_COL[primers.classification],
+            padding:'0.28rem 0.85rem', borderRadius:20, fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase' }}>
+            {primers.classification === 'Excellent' ? '⭐ ' : primers.classification === 'Good' ? '✅ ' : primers.classification === 'Fair' ? '⚠️ ' : '❌ '}
+            {primers.classification}
           </span>
-          <div style={{ position:'relative' }}>
-            <button 
-              className="btn-export" 
-              onClick={(e) => { e.stopPropagation(); setShowExportMenu(v => !v); }}
-            >
-              Export Results <span style={{ fontSize:'0.76rem', marginLeft:'0.22rem' }}>▼</span>
-            </button>
-            {showExportMenu && (
-              <div className="export-menu" onClick={(e) => e.stopPropagation()}>
-                <div className="export-item" onClick={() => exportTXT(false)}>
-                  <strong>TXT - Summary Only</strong>
-                  <div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Basic primer info</div>
-                </div>
-                <div className="export-item" onClick={() => exportTXT(true)}>
-                  <strong>TXT - Detailed</strong>
-                  <div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Includes PCR protocol</div>
-                </div>
-                <div className="export-item" onClick={() => exportPDF(false)}>
-                  <strong>PDF - Summary Only</strong>
-                  <div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Basic primer info</div>
-                </div>
-                <div className="export-item" onClick={() => exportPDF(true)}>
-                  <strong>PDF - Detailed</strong>
-                  <div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Includes PCR protocol</div>
-                </div>
-              </div>
-            )}
-          </div>
+          <span style={{ fontSize:'1.15rem', fontWeight:700, color:CLASS_COL[primers.classification] }}>{primers.overall_score}</span>
+          <span style={{ fontSize:'0.78rem', color:'#6b7080' }}>/100 overall</span>
+          <span style={{ fontSize:'0.78rem', color:'#818cf8' }}>Specificity: {primers.specificity_score}/100</span>
         </div>
-        <div className="stat-grid" style={{ marginTop:'0.52rem' }}>
-          {[
-            { l:'Product Size',  v:`${primers.expected_product_size} bp`,                                     c:'#fff' },
-            { l:'Tm Difference', v:`${primers.tm_difference?.toFixed(1)} °C`,                                 c:'#fff' },
-            { l:'Compatibility', v: primers.tm_difference < 5 ? 'Excellent' : 'Acceptable',                  c: primers.tm_difference < 5 ? '#00FFC6' : '#F59E0B' },
-            { l:'Dimer Risk',    v: primers.dimer_analysis?.risk_level || '—',                                c: RISK_COL[primers.dimer_analysis?.risk_level] || '#6b7080' }
-          ].map((s,i) => (
-            <div key={i} className="stat-b">
-              <div className="stat-v" style={{ color:s.c }}>{s.v}</div>
-              <div className="stat-l">{s.l}</div>
+        <div style={{ position:'relative' }}>
+          <button className="btn-export" onClick={(e)=>{ e.stopPropagation(); setShowExportMenu(v=>!v); }}>
+            Export Results <span style={{ fontSize:'0.76rem', marginLeft:'0.22rem' }}>▼</span>
+          </button>
+          {showExportMenu && (
+            <div className="export-menu" onClick={e=>e.stopPropagation()}>
+              <div className="export-item" onClick={()=>exportTXT(false)}><strong>TXT - Summary</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Primer sequences & key metrics</div></div>
+              <div className="export-item" onClick={()=>exportTXT(true)}><strong>TXT - Detailed</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>All thermodynamic data + protocol</div></div>
+              <div className="export-item" onClick={()=>exportPDF(false)}><strong>PDF - Summary</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Clean report for sharing</div></div>
+              <div className="export-item" onClick={()=>exportPDF(true)}><strong>PDF - Detailed</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Full report incl. protocol</div></div>
             </div>
-          ))}
+          )}
         </div>
       </div>
 
-      {/* AI EXPLAIN BUTTON */}
-      <div style={{ marginTop:'1.15rem' }}>
+      {/* WARNINGS */}
+      {primers.warnings?.length > 0 && (
+        <div style={{ marginBottom:'1rem' }}>
+          {primers.warnings.map((w,i)=>(
+            <div key={i} style={{ display:'flex', gap:'0.5rem', alignItems:'flex-start', background:`${URG_COL[w.urgency]}0a`, border:`1px solid ${URG_COL[w.urgency]}30`, borderRadius:8, padding:'0.55rem 0.78rem', marginBottom:'0.38rem', fontSize:'0.86rem', color:URG_COL[w.urgency] }}>
+              <span>⚠</span><span>{w.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* STATS */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.52rem', flexWrap:'wrap', gap:'0.52rem' }}>
+        <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>
+          Results — <span style={{ color:'#00FFC6' }}>{mode.name}</span>
+        </span>
+      </div>
+      <div className="stat-grid" style={{ marginBottom:'1.1rem' }}>
+        {[
+          { l:'Product Size',  v:`${primers.expected_product_size} bp`,          c:'#fff' },
+          { l:'Tm Difference', v:`${primers.tm_difference} °C`,                  c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444' },
+          { l:'Compatibility', v: primers.tm_difference <= 2 ? 'Excellent' : primers.tm_difference <= 3 ? 'Acceptable' : 'Poor',
+                               c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444' },
+          { l:'Cross-Dimer ΔG',v:`${primers.cross_dimer_dg} kcal/mol`,           c: primers.cross_dimer_dg > -3 ? '#00FFC6' : primers.cross_dimer_dg > -5 ? '#F59E0B' : '#EF4444' }
+        ].map((s,i) => (
+          <div key={i} className="stat-b">
+            <div className="stat-v" style={{ color:s.c, fontSize: s.v.length > 8 ? '1.05rem' : '1.42rem' }}>{s.v}</div>
+            <div className="stat-l">{s.l}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* AI EXPLAIN */}
+      <div style={{ marginBottom:'1.1rem' }}>
         <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
           {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
         </button>
       </div>
-
-      {/* AI RESULT */}
       {aiExplanation && (
         <div className="ai-box">
-          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.65rem' }}>
-            <span style={{ fontSize:'0.94rem', fontWeight:600, color:'#818cf8' }}>AI Analysis</span>
-          </div>
+          <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#818cf8', marginBottom:'0.65rem' }}>AI Analysis</div>
           <div style={{ fontSize:'0.96rem', color:'#e2e4e9', lineHeight:1.82, whiteSpace:'pre-wrap', maxHeight:450, overflowY:'auto', background:'rgba(0,0,0,0.25)', borderRadius:8, padding:'0.8rem', border:'1px solid #24272f' }}>
             {aiExplanation}
           </div>
@@ -691,16 +1093,12 @@ export default function PrimerDesigner() {
 
       {/* OPTIMIZATION TIPS */}
       {primers.optimization_tips?.length > 0 && (
-        <div className="pc" style={{ marginTop:'1.15rem', borderColor:'rgba(245,158,11,0.22)', background:'rgba(245,158,11,0.04)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.68rem' }}>
-            <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#F59E0B', textTransform:'uppercase', letterSpacing:'0.07em' }}>PCR Optimization</span>
-          </div>
+        <div className="pc" style={{ borderColor:'rgba(245,158,11,0.22)', background:'rgba(245,158,11,0.04)' }}>
+          <div style={{ fontSize:'0.9rem', fontWeight:600, color:'#F59E0B', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.68rem' }}>PCR Optimization</div>
           {primers.optimization_tips.map((t,i) => (
             <div key={i} className="tip-card">
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.35rem', flexWrap:'wrap', gap:'0.38rem' }}>
-                <div style={{ display:'flex', alignItems:'center', gap:'0.42rem' }}>
-                  <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#FCD34D' }}>{t.title}</span>
-                </div>
+                <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#FCD34D' }}>{t.title}</span>
                 <span style={{ background:`${URG_COL[t.urgency]}15`, color:URG_COL[t.urgency], fontSize:'0.74rem', fontWeight:600, padding:'0.2rem 0.52rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>{t.urgency}</span>
               </div>
               <p style={{ fontSize:'0.92rem', color:'#8a8f9e', lineHeight:1.68, margin:0 }}>{t.recommendation}</p>
@@ -709,11 +1107,11 @@ export default function PrimerDesigner() {
         </div>
       )}
 
-      {/* PRIMERS */}
-      <div style={{ marginTop:'1.15rem' }}>
+      {/* PRIMER PAIR CARDS */}
+      <div style={{ marginBottom:'0.52rem' }}>
         <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>Recommended Primers</span>
       </div>
-      <div className="primer-grid" style={{ marginTop:'0.52rem' }}>
+      <div className="primer-grid">
         {[
           primers.forward_primer && { ...primers.forward_primer, label:'Forward' },
           primers.reverse_primer && { ...primers.reverse_primer, label:'Reverse' }
@@ -726,50 +1124,66 @@ export default function PrimerDesigner() {
                 {p.quality_grade} · {p.quality_score}/100
               </span>
             </div>
-            {/* copy + seq */}
+            {/* sequence */}
             <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'0.3rem' }}>
-              <button className="btn-g" onClick={()=>navigator.clipboard?.writeText(p.sequence)}>Copy</button>
+              <button className="btn-g" style={{ fontSize:'0.8rem', padding:'0.35rem 0.72rem' }} onClick={()=>navigator.clipboard?.writeText(p.sequence)}>Copy</button>
             </div>
             <div className="seq-box">{p.sequence}</div>
-            {/* props */}
+
+            {/* core props */}
             <div className="prop-grid" style={{ marginTop:'0.68rem' }}>
-              {[['Length',`${p.length} bp`],['Tm',`${p.tm} °C`],['GC Content',`${p.gc_content} %`],['Position',p.position]].map(([l,v],j) => (
+              {[['Length',`${p.length} bp`],['Tm (NN)',`${p.tm} °C`],['GC Content',`${p.gc_content}%`],['Position',p.position]].map(([l,v],j) => (
                 <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'0.54rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'0.84rem', color:'#6b7080' }}>{l}</span>
-                  <span style={{ fontSize:'0.9rem', color:'#c8cad4', fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
+                  <span style={{ fontSize:'0.8rem', color:'#6b7080' }}>{l}</span>
+                  <span style={{ fontSize:'0.86rem', color:'#c8cad4', fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
                 </div>
               ))}
             </div>
-            {/* quick metrics */}
+
+            {/* extended thermodynamic props */}
+            <div className="ext-prop-grid" style={{ marginTop:'0.45rem' }}>
+              {[
+                ['Hairpin ΔG',    `${p.hairpin?.delta_g} kcal/mol`,       p.hairpin?.delta_g > -2 ? '#00FFC6' : p.hairpin?.delta_g > -3 ? '#F59E0B' : '#EF4444'],
+                ['Self-Dimer ΔG', `${p.self_dimer_dg} kcal/mol`,           p.self_dimer_dg > -3 ? '#00FFC6' : p.self_dimer_dg > -5 ? '#F59E0B' : '#EF4444'],
+                ['3′ Stability ΔG',`${p.three_prime_stability_dg} kcal/mol`,'#a0a3b1'],
+                ['Last 5bp GC',   `${p.last_5bp_gc_percent}%`,             p.last_5bp_gc_percent <= 80 ? '#a0a3b1' : '#F59E0B'],
+              ].map(([l,v,c],j)=>(
+                <div key={j} style={{ background:'#0a0c10', borderRadius:7, padding:'0.48rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <span style={{ fontSize:'0.76rem', color:'#3d4155' }}>{l}</span>
+                  <span style={{ fontSize:'0.8rem', color:c, fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* hairpin + clamp quick metrics */}
             {p.hairpin && p.gc_clamp && (
-              <div className="prop-grid" style={{ marginTop:'0.54rem' }}>
+              <div className="prop-grid" style={{ marginTop:'0.45rem' }}>
                 {[
-                  { l:'Hairpin Risk', v:p.hairpin.risk_level,                          c:RISK_COL[p.hairpin.risk_level] },
-                  { l:'GC Clamp',     v:p.gc_clamp.has_clamp ? 'Present' : 'Missing',  c:p.gc_clamp.has_clamp ? '#00FFC6' : '#F59E0B' }
+                  { l:'Hairpin Risk', v:p.hairpin.risk_level,                         c:RISK_COL[p.hairpin.risk_level] },
+                  { l:'GC Clamp',     v:p.gc_clamp.has_clamp ? 'Present' : 'Missing', c:p.gc_clamp.has_clamp ? '#00FFC6' : '#F59E0B' }
                 ].map((m,j) => (
                   <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'0.46rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <span style={{ fontSize:'0.82rem', color:'#6b7080' }}>{m.l}</span>
-                    <span style={{ fontSize:'0.88rem', color:m.c, fontWeight:600 }}>{m.v}</span>
+                    <span style={{ fontSize:'0.8rem', color:'#6b7080' }}>{m.l}</span>
+                    <span style={{ fontSize:'0.86rem', color:m.c, fontWeight:600 }}>{m.v}</span>
                   </div>
                 ))}
               </div>
             )}
+
             {/* quality flags */}
             {p.detailed_analysis?.length > 0 && (
               <div style={{ marginTop:'0.75rem' }}>
-                <span style={{ fontSize:'0.84rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.06em' }}>Quality Flags</span>
+                <span style={{ fontSize:'0.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.06em' }}>Quality Flags</span>
                 {p.detailed_analysis.map((a,j) => {
                   const col = { error:'#EF4444', warning:'#F59E0B', info:'#60A5FA' }[a.type] || '#6b7080';
                   return (
                     <div key={j} className="a-card" style={{ marginTop:'0.42rem', background:`${col}0e`, border:`1px solid ${col}35` }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:'0.38rem', marginBottom:'0.35rem' }}>
-                        <span style={{ fontSize:'0.88rem', fontWeight:600, color:col }}>{a.title}</span>
-                      </div>
-                      <p style={{ fontSize:'0.86rem', color:'#8a8f9e', lineHeight:1.65, margin:'0 0 0.28rem' }}>{a.issue}</p>
-                      <p style={{ fontSize:'0.84rem', color:'#606878', lineHeight:1.6, margin:'0 0 0.35rem', fontStyle:'italic' }}>{a.impact}</p>
+                      <div style={{ fontSize:'0.86rem', fontWeight:600, color:col, marginBottom:'0.32rem' }}>{a.title}</div>
+                      <p style={{ fontSize:'0.84rem', color:'#8a8f9e', lineHeight:1.65, margin:'0 0 0.28rem' }}>{a.issue}</p>
+                      <p style={{ fontSize:'0.82rem', color:'#606878', lineHeight:1.6, margin:'0 0 0.35rem', fontStyle:'italic' }}>{a.impact}</p>
                       <div style={{ display:'flex', flexDirection:'column', gap:'0.18rem' }}>
                         {a.fixes.map((f,fi) => (
-                          <span key={fi} style={{ fontSize:'0.84rem', color:'#00c9a0', paddingLeft:'0.68rem', position:'relative' }}>
+                          <span key={fi} style={{ fontSize:'0.82rem', color:'#00c9a0', paddingLeft:'0.68rem', position:'relative' }}>
                             <span style={{ position:'absolute', left:0, color:'#00FFC660' }}>›</span>{f}
                           </span>
                         ))}
@@ -787,12 +1201,10 @@ export default function PrimerDesigner() {
 
       {/* PCR PROTOCOL */}
       {primers.pcr_protocol && (
-        <div className="pc" style={{ marginTop:'1.15rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.65rem' }}>
-            <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'0.07em' }}>Recommended Protocol</span>
-          </div>
+        <div className="pc" style={{ marginTop:'0.55rem' }}>
+          <div style={{ fontSize:'0.9rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.65rem' }}>Recommended Protocol</div>
           <div className="proto-grid" style={{ marginBottom:'0.75rem' }}>
-            {[['Annealing Temp',`${primers.pcr_protocol.annealing_temp} °C`],['Extension Time',`${primers.pcr_protocol.extension_time} s`],['Cycles',primers.pcr_protocol.cycles]].map(([l,v],i) => (
+            {[['Annealing Temp',`${primers.pcr_protocol.annealing_temp} °C`],['Extension Time',`${primers.pcr_protocol.extension_time} s`],['Cycles',primers.pcr_protocol.cycles]].map(([l,v],i)=>(
               <div key={i} className="proto-box">
                 <div style={{ fontSize:'0.79rem', color:'#6b7080', marginBottom:'0.24rem', textTransform:'uppercase', letterSpacing:'0.06em' }}>{l}</div>
                 <div style={{ fontSize:'1.2rem', color:'#00FFC6', fontWeight:600 }}>{v}</div>
@@ -802,34 +1214,87 @@ export default function PrimerDesigner() {
           <div style={{ fontSize:'0.92rem', color:'#8a8f9e', marginBottom:'0.35rem' }}>
             <span style={{ color:'#6b7080' }}>Polymerase: </span>{primers.pcr_protocol.polymerase}
           </div>
-          {primers.pcr_protocol.notes?.map((n,i) => (
+          {primers.pcr_protocol.notes?.map((n,i)=>(
             <div key={i} style={{ fontSize:'0.9rem', color:'#F59E0B', marginBottom:'0.22rem' }}>• {n}</div>
           ))}
         </div>
       )}
 
+      {/* JSON OUTPUT */}
+      <div className="pc" style={{ marginTop:'0.55rem' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: showJSON ? '0.65rem' : 0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.65rem' }}>
+            <button className="btn-g" onClick={()=>setShowJSON(v=>!v)} style={{ fontSize:'0.84rem' }}>
+              {showJSON ? '▲ Hide' : '▼ Show'} Structured JSON Output
+            </button>
+          </div>
+          {showJSON && (
+            <button className="btn-g" style={{ fontSize:'0.8rem', padding:'0.35rem 0.72rem' }}
+              onClick={()=>navigator.clipboard?.writeText(JSON.stringify(primers, null, 2))}>
+              📋 Copy JSON
+            </button>
+          )}
+        </div>
+        <div className={`json-wrap ${showJSON?'open':'closed'}`}>
+          <div className="json-block">
+            <PrimerJsonRenderer data={primers}/>
+          </div>
+        </div>
+      </div>
+
       {/* ALTERNATIVE CANDIDATES */}
       {primers.all_candidates?.length > 0 && (
-        <div className="pc" style={{ marginTop:'1.15rem' }}>
+        <div className="pc" style={{ marginTop:'0.55rem' }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.48rem' }}>
             <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>Alternative Candidates</span>
             <button className="btn-g" onClick={()=>setShowCand(v=>!v)}>{showCand ? 'Hide' : 'Show'} ({primers.all_candidates.length})</button>
           </div>
-          {showCand && primers.all_candidates.map((c,i) => (
+          {showCand && primers.all_candidates.map((c,i)=>(
             <div key={i} className="cand-row">
               <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.3rem' }}>
                 <span style={{ fontSize:'0.92rem', color:'#00FFC6', fontWeight:600 }}>{c.type}</span>
-                <span style={{ fontSize:'0.88rem', color:QUAL_COL[c.quality_grade] }}>{c.quality_grade}</span>
+                <span style={{ fontSize:'0.88rem', color:QUAL_COL[c.quality_grade] }}>{c.quality_grade} · {c.quality_score}/100</span>
               </div>
               <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'0.88rem', color:'#c8cad4', marginBottom:'0.3rem' }}>{c.sequence}</div>
-              <div style={{ fontSize:'0.84rem', color:'#6b7080' }}>Tm {c.tm} °C · GC {c.gc_content} % · {c.length} bp</div>
+              <div style={{ fontSize:'0.84rem', color:'#6b7080' }}>Tm {c.tm} °C · GC {c.gc_content}% · {c.length} bp</div>
             </div>
           ))}
         </div>
       )}
-    </>)}
+
+    </div>
+    )}
 
   </div>
   </div>
   );
+}
+
+/* ─── JSON SYNTAX HIGHLIGHTER ──────────────────────────────────────────────── */
+function PrimerJsonRenderer({ data, indent = 0 }) {
+  const pad  = '  '.repeat(indent);
+  const pad1 = '  '.repeat(indent + 1);
+
+  if (Array.isArray(data)) {
+    if (!data.length) return <span style={{color:'#3d4155'}}>[]</span>;
+    return <>
+      <span style={{color:'#3d4155'}}>{'['}</span>{'\n'}
+      {data.map((v,i)=><span key={i}>{pad1}<PrimerJsonRenderer data={v} indent={indent+1}/>{i<data.length-1?',':''}{'\n'}</span>)}
+      {pad}<span style={{color:'#3d4155'}}>{']'}</span>
+    </>;
+  }
+  if (data !== null && typeof data === 'object') {
+    const keys = Object.keys(data);
+    if (!keys.length) return <span style={{color:'#3d4155'}}>{'{}'}</span>;
+    return <>
+      <span style={{color:'#3d4155'}}>{'{'}</span>{'\n'}
+      {keys.map((k,i)=><span key={k}>{pad1}<span className="json-key">"{k}"</span><span style={{color:'#3d4155'}}>: </span><PrimerJsonRenderer data={data[k]} indent={indent+1}/>{i<keys.length-1?',':''}{'\n'}</span>)}
+      {pad}<span style={{color:'#3d4155'}}>{'}'}</span>
+    </>;
+  }
+  if (typeof data === 'string')  return <span className="json-str">"{data}"</span>;
+  if (typeof data === 'number')  return <span className="json-num">{data}</span>;
+  if (typeof data === 'boolean') return <span style={{color:'#F87171'}}>{String(data)}</span>;
+  if (data === null)             return <span style={{color:'#F87171'}}>null</span>;
+  return <span>{String(data)}</span>;
 }
