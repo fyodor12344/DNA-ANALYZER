@@ -332,6 +332,9 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     const avgGC = ((fwdGC + revGC) / 2).toFixed(1);
     if (avgGC >= 40 && avgGC <= 60) summaryPoints.push('GC content optimal');
     else summaryPoints.push(`GC content ${avgGC}% (outside 40-60% ideal)`);
+
+    // Calculate worstDimer specifically for the summary
+    const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
     if (worstDimer > -3) summaryPoints.push('No significant dimer formation');
     else summaryPoints.push(`Dimer risk detected (dG ${worstDimer} kcal/mol)`);
     if (!autoRejected && triggers.length === 0) summaryPoints.push('All safety gates passed');
