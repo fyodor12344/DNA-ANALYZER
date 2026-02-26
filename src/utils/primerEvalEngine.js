@@ -219,97 +219,71 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         if (fwdHairpin < -6 || revHairpin < -6) triggers.push(`Hairpin dG ${Math.min(fwdHairpin, revHairpin)} kcal/mol below -6 kcal/mol`);
     }
 
+    const thermoStatus = hasThermoError ? 'FAILED' : 'VALID';
+    if (thermoStatus === 'FAILED') {
+        // Overwrite triggers with the specific failure message requested by user
+        triggers.length = 0;
+        triggers.push('FAILED — Structural parameters could not be computed.');
+    }
     const autoRejected = triggers.length > 0;
 
-    // ─── STEP 2: WEIGHTED SCIENTIFIC SCORE ──────────────────────────────
-    let weightedScore = 0;
-    if (!autoRejected) {
-        const tmScore = Math.max(0, 1 - tmDiff / 10) * 20;
-        const gcAvg = (fwdGC + revGC) / 2;
-        const gcScore = Math.max(0, 1 - Math.abs(gcAvg - 50) / 25) * 10;
-        const avgThreePrime = (fwd3DG + rev3DG) / 2;
-        const threePrimeScore = (avgThreePrime < -10 ? 1.0 : avgThreePrime < -7 ? 0.7 : 0.4) * 15;
-        const worstHairpin = Math.min(fwdHairpin, revHairpin);
-        const hairpinScore = (worstHairpin > -1 ? 1.0 : worstHairpin > -3 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 15;
-        const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
-        const dimerScore = (worstDimer > -2 ? 1.0 : worstDimer > -5 ? 0.7 : worstDimer > -7 ? 0.4 : 0.1) * 15;
-        const annealScore = (annealingTemp >= 55 && annealingTemp <= 65 ? 1.0 : annealingTemp >= 50 && annealingTemp <= 70 ? 0.6 : 0.2) * 15;
-        const last2Fwd = fwdSeq.slice(-2);
-        const last2Rev = revSeq.slice(-2);
-        const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length >= 1;
-        const revClamp = (last2Rev.match(/[GC]/g) || []).length >= 1;
-        const constraintScore = ((fwdClamp ? 5 : 0) + (revClamp ? 5 : 0));
-        weightedScore = Math.round(tmScore + gcScore + threePrimeScore + hairpinScore + dimerScore + annealScore + constraintScore);
-    }
+    let weightedScore = 'Unavailable';
+    let combinedStructureScore = 'Unavailable';
+    let structureInterpretation = 'Unavailable';
+    let threePrimeInterference = false;
+    let successProbability = thermoStatus === 'FAILED' ? 'Not Computed' : 0;
+    let riskTier = thermoStatus === 'FAILED' ? 'Model Invalid' : 'Low';
+    let failureProbability = null;
+    let fwdMeltQuality = 'Unavailable';
+    let revMeltQuality = 'Unavailable';
+    let overallMeltQuality = thermoStatus === 'FAILED'
+        ? 'Simulation unavailable due to thermodynamic calculation error.'
+        : 'Unavailable';
+    let asymmetricMelting = false;
+    let classification = 'Auto-Rejected';
+    let classColor = '#EF4444';
+    const summaryPoints = [];
 
-    // ─── SECONDARY STRUCTURE SCORE (Needed early for Bayes rules) ───────
-    const combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
-    let structureInterpretation = 'Minimal secondary structure risk.';
-    if (combinedStructureScore >= 6) structureInterpretation = 'High interference risk from secondary structures.';
-    else if (combinedStructureScore >= 3) structureInterpretation = 'Moderate secondary structure presence.';
-    const threePrimeInterference = fwdStructure.threePrimeInvolved || revStructure.threePrimeInvolved;
-
-    // ─── STEP 3: BAYESIAN RISK MODELING ─────────────────────────────────
-    let successProbability = 0;
-    if (!autoRejected) {
-        if (weightedScore >= 85) {
-            successProbability = combinedStructureScore <= 4 ? Math.max(85, Math.min(99, weightedScore)) : Math.floor(65 + Math.random() * 15);
-        } else if (weightedScore >= 70) {
-            successProbability = combinedStructureScore <= 4 ? Math.floor(75 + Math.random() * 10) : Math.floor(60 + Math.random() * 15);
-        } else {
-            successProbability = Math.floor(40 + Math.random() * 24);
-        }
-    }
-    const failureProbability = 1 - (successProbability / 100);
-
-    let riskTier = 'Low';
-    if (failureProbability > 0.70) riskTier = 'Critical';
-    else if (failureProbability > 0.40) riskTier = 'High';
-    else if (failureProbability > 0.20) riskTier = 'Moderate';
-
-    // ─── STEP 4: MELTING CURVE SIMULATION ───────────────────────────────
-    const fwdSpread = fwdGC > 65 || fwdGC < 35 ? 4.5 : fwdGC > 55 || fwdGC < 40 ? 2.8 : 1.5;
-    const revSpread = revGC > 65 || revGC < 35 ? 4.5 : revGC > 55 || revGC < 40 ? 2.8 : 1.5;
-    const fwdMeltQuality = fwdSpread > 3 ? 'Broad / Unstable' : fwdSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
-    const revMeltQuality = revSpread > 3 ? 'Broad / Unstable' : revSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
-    const asymmetricMelting = tmDiff > 3;
-
-    let overallMeltQuality = 'Sharp melting profile. Symmetric primer dissociation expected.';
-    if (tmDiff <= 1 && combinedStructureScore <= 4) {
-        overallMeltQuality = 'Sharp symmetric melting';
-    } else if (combinedStructureScore >= 6) {
-        overallMeltQuality = 'Potential broadening due to secondary structure';
-    } else {
-        if (fwdMeltQuality !== 'Sharp & Specific' || revMeltQuality !== 'Sharp & Specific') {
-            overallMeltQuality = `Forward: ${fwdMeltQuality}. Reverse: ${revMeltQuality}.`;
-        }
-        if (asymmetricMelting) overallMeltQuality += ' Asymmetric melting behavior detected.';
-    }
-
-    // ─── STEP 5: CLASSIFICATION LOGIC ───────────────────────────────────
-    let classification, classColor;
-    if (autoRejected) {
-        classification = 'Auto-Rejected'; classColor = '#EF4444';
-    } else {
-        if (weightedScore >= 90 && riskTier === 'Low') {
-            classification = 'Excellent';
-        } else if (weightedScore >= 80 && (riskTier === 'Low' || riskTier === 'Moderate')) {
-            classification = 'Very Good';
-        } else if (weightedScore >= 70) {
-            classification = 'Acceptable';
-        } else if (weightedScore >= 50) {
-            classification = 'Borderline';
-        } else {
-            classification = 'Not Recommended';
+    if (thermoStatus === 'VALID') {
+        // ─── STEP 2: WEIGHTED SCIENTIFIC SCORE ──────────────────────────────
+        if (!autoRejected) {
+            const tmScore = Math.max(0, 1 - tmDiff / 10) * 20;
+            const gcAvg = (fwdGC + revGC) / 2;
+            const gcScore = Math.max(0, 1 - Math.abs(gcAvg - 50) / 25) * 10;
+            const avgThreePrime = (fwd3DG + rev3DG) / 2;
+            const threePrimeScore = (avgThreePrime < -10 ? 1.0 : avgThreePrime < -7 ? 0.7 : 0.4) * 15;
+            const worstHairpin = Math.min(fwdHairpin, revHairpin);
+            const hairpinScore = (worstHairpin > -1 ? 1.0 : worstHairpin > -3 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 15;
+            const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
+            const dimerScore = (worstDimer > -2 ? 1.0 : worstDimer > -5 ? 0.7 : worstDimer > -7 ? 0.4 : 0.1) * 15;
+            const annealScore = (annealingTemp >= 55 && annealingTemp <= 65 ? 1.0 : annealingTemp >= 50 && annealingTemp <= 70 ? 0.6 : 0.2) * 15;
+            const last2Fwd = fwdSeq.slice(-2);
+            const last2Rev = revSeq.slice(-2);
+            const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length >= 1;
+            const revClamp = (last2Rev.match(/[GC]/g) || []).length >= 1;
+            const constraintScore = ((fwdClamp ? 5 : 0) + (revClamp ? 5 : 0));
+            weightedScore = Math.round(tmScore + gcScore + threePrimeScore + hairpinScore + dimerScore + annealScore + constraintScore);
         }
 
-        // Constraints
-        if (combinedStructureScore >= 8 && (classification === 'Excellent' || classification === 'Very Good')) {
-            classification = 'Very Good'; // Max allowed Very Good
+        // ─── SECONDARY STRUCTURE SCORE ───────────────────────────────────────
+        combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
+        structureInterpretation = 'Minimal secondary structure risk.';
+        if (combinedStructureScore >= 6) structureInterpretation = 'High interference risk from secondary structures.';
+        else if (combinedStructureScore >= 3) structureInterpretation = 'Moderate secondary structure presence.';
+        threePrimeInterference = fwdStructure.threePrimeInvolved || revStructure.threePrimeInvolved;
+
+        // ─── STEP 3: BAYESIAN RISK MODELING ─────────────────────────────────
+        if (!autoRejected) {
+            if (weightedScore >= 85) {
+                successProbability = combinedStructureScore <= 4 ? Math.max(85, Math.min(99, weightedScore)) : Math.floor(65 + Math.random() * 15);
+            } else if (weightedScore >= 70) {
+                successProbability = combinedStructureScore <= 4 ? Math.floor(75 + Math.random() * 10) : Math.floor(60 + Math.random() * 15);
+            } else {
+                successProbability = Math.floor(40 + Math.random() * 24);
+            }
         }
-        if (hasThermoError && (classification === 'Excellent' || classification === 'Very Good' || classification === 'Acceptable')) {
-            classification = 'Borderline'; // Max allowed Borderline
-        }
+        failureProbability = 1 - (successProbability / 100);
+
         if (successProbability < 80 && classification === 'Excellent') {
             classification = 'Very Good';
         }
@@ -322,27 +296,32 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
             'Not Recommended': '#EF4444'
         };
         classColor = C_MAP[classification] || '#F59E0B';
+
+        // Scientific summary points
+        if (tmDiff <= 2) summaryPoints.push(`Balanced Tm (Delta ${tmDiff} C)`);
+        else if (tmDiff <= 5) summaryPoints.push(`Moderate Tm gap (Delta ${tmDiff} C)`);
+        else summaryPoints.push(`Large Tm mismatch (Delta ${tmDiff} C)`);
+
+        const avgGC = ((fwdGC + revGC) / 2).toFixed(1);
+        if (avgGC >= 40 && avgGC <= 60) summaryPoints.push('GC content optimal');
+        else summaryPoints.push(`GC content ${avgGC}% (outside 40-60% ideal)`);
+
+        const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
+        if (worstDimer > -3) summaryPoints.push('No significant dimer formation');
+        else summaryPoints.push(`Dimer risk detected (dG ${worstDimer} kcal/mol)`);
+
+        if (!autoRejected && triggers.length === 0) summaryPoints.push('All safety gates passed');
+        if (annealingTemp >= 55 && annealingTemp <= 65) summaryPoints.push('Optimal annealing range');
+    } else {
+        classification = 'Auto-Rejected';
+        classColor = '#EF4444';
+        summaryPoints.push('Thermodynamic nearest-neighbor calculations returned invalid values.');
+        summaryPoints.push('Re-evaluate ΔG computation engine before primer assessment.');
     }
-
-    // Scientific summary points
-    const summaryPoints = [];
-    if (tmDiff <= 2) summaryPoints.push(`Balanced Tm (Delta ${tmDiff} C)`);
-    else if (tmDiff <= 5) summaryPoints.push(`Moderate Tm gap (Delta ${tmDiff} C)`);
-    else summaryPoints.push(`Large Tm mismatch (Delta ${tmDiff} C)`);
-    const avgGC = ((fwdGC + revGC) / 2).toFixed(1);
-    if (avgGC >= 40 && avgGC <= 60) summaryPoints.push('GC content optimal');
-    else summaryPoints.push(`GC content ${avgGC}% (outside 40-60% ideal)`);
-
-    // Calculate worstDimer specifically for the summary
-    const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
-    if (worstDimer > -3) summaryPoints.push('No significant dimer formation');
-    else summaryPoints.push(`Dimer risk detected (dG ${worstDimer} kcal/mol)`);
-    if (!autoRejected && triggers.length === 0) summaryPoints.push('All safety gates passed');
-    if (annealingTemp >= 55 && annealingTemp <= 65) summaryPoints.push('Optimal annealing range');
 
     return {
         autoRejected, triggers, classification, classColor, weightedScore,
-        successProbability, riskTier, failureProbability,
+        successProbability, riskTier, failureProbability, thermoStatus,
         meltingCurve: { fwdMeltQuality, revMeltQuality, overallMeltQuality, asymmetricMelting },
         structureScore: combinedStructureScore, structureInterpretation, threePrimeInterference,
         fwdStructure, revStructure, summaryPoints, thermoData

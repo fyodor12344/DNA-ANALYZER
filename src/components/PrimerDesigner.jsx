@@ -4,24 +4,69 @@ import { evaluatePrimerPair, calcSecondaryStructureScore } from '../utils/primer
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
 
-/* ─── SAMPLE SEQUENCES ───────────────────────────────────────────────────── */
-const SAMPLE_SEQUENCES = {
-  'Default (Unknown)': [
-    'ATGGAGGAGCCGCAGTCAGATCCTAGCGTGAGTTTGCCTGTCCTGGGAGAGACCGGCGC',
-    'ACAGAGGAAGAGAATCTCCGCAAGAAAGTGGGGTTTGTCTCCTTCCAGCCAAGGTCTGA',
-    'GCCTGCAGTTCAACTGACTGTTTCAAGTTATAGGGTGACAGGTTTCATCTGGCAAGCCA',
-    'GGCTTCGGGCTCAGTGGAACTCGGAGGAAAGTGAGGCTTTGCTCAGGAGAGGGGTTGCT',
-    'GATCTGCCCCCGGGCTCTCCCAGGACACCTATGGAAACTACTTCCTGAAACAACGTTCTG',
-    'TGTTTGTGTCCCCTTCGGTGGCCCCTGCACCAGAAGAAACCCCGCGGGAGCGCCCCTCCC',
-    'CCATCCCCCTCCCCCAAGAGATTCGTTGCCCTCCCAGGGTGGGCTGGCCCACTCGAACCC',
-    'CCATCCGGGTTCTTCACCTGTTTGGCTTCCTGGAAGGTGGAGACTCAGCCCAGCCCCCAA',
-    'GGTGAACTCAATCTCAAGGTCAATGGCAGGCCGTCCCCTTCCAGGTTCTTCGCCTGCAGC',
-    'CCCGGCACTGCCTCAGCCCTCAGCCCTAAGCCCAGTGCCAACTCAGCCCCCGGCCCCCAG'
-  ].join(''),
-  'BRCA1 (Breast Cancer 1)': 'GCTAACTCTTCTAGCCTTCAAACAACTAATGATGGTTAAAACAACCAGATAAATAAACAAGAACAGAATTTTAGGAAGCAAACTAGAACTATGTAAGAAACGATAATAATTAAAACAAAAAGAAT',
-  'EGFR (Epidermal Growth Factor)': 'TGCCTTCCAAGACTTCAGGTAACCACTCGCATCACTGTCCTCATCATCTTCATCATCTTCCTGCTCCTCATCGTCACCTACCTGCTGCTCATCCTCCTCCTC',
-  'GAPDH (Stable Reference)': 'ATGGGGAAGGTGAAGGTCGGAGTCAACGGATTTGGTCGTATTGGGCGCCTGGTCACCAGGGCTGCTTTTAACTCTGGTAAAGTGGATATTGTTGCCATCAATGACCCCTTCATTGACCTCAACTACATGGTTTACATGTTCCAATATGATTCCACCCATGGCAAATTCCATGGCACCGTCAAGGCTGAGAACGGGAAGCTTGTCATCAATGGAAATCCCATCACCATCTTCCAGGAGCGAGATCCCTCCAAAATCAAGTGGGGCGATGCTGGCGCTGAGTACGTCGTGGAGTCCACTGGCGTCTTCACCACCATGGAGAAGGC'
-};
+/* ─── CURATED SAMPLES ──────────────────────────────────────────────────────── */
+const CURATED_SAMPLES = [
+  {
+    name: "Ideal Diagnostic Case",
+    context: "Balanced primers for high-specificity diagnostic PCR",
+    application_mode: "diagnostic",
+    sequence: "ATACGGACCCCGCAAAAGCGGATATTCTGGCCGCAAAAGCGGATAC".repeat(5),
+    primer_pair: {
+      forward: "ATACGGACCCCGCAAAAGCGGATAT",
+      reverse: "GTATCCGCTTTTGCGGGGATCCGTA" // perfectly matching, balanced
+    },
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "Borderline Optimization Case",
+    context: "Tm difference 3-4°C, slight GC imbalance, mild hairpin formation",
+    application_mode: "cloning",
+    sequence: "ATACGGTCCAGCGCGAAAAAGCGCGCATGCTATTTAATACCGCAAAAGCGGATACTG".repeat(4),
+    primer_pair: {
+      forward: "ATACGGTCCAGCGCGAAAAAGCGC",
+      reverse: "GTATCCGCTTTTGCGGTATTAAATA" // Lower Tm, asymmetric
+    },
+    relaxLevel: 0,
+    isBorderline: true
+  },
+  {
+    name: "High Dimer Risk Case",
+    context: "Cross-dimer ΔG < -9 kcal/mol, 3′ complementarity",
+    application_mode: "diagnostic",
+    sequence: "ATACGGACCCCGCAAAAGCGGGCGCGCGCAAAAACTATCCTGGCCGCAAAAGCGGGCGCGCGC".repeat(3),
+    primer_pair: {
+      forward: "ATACGGACCCCGCAAAAGCGGGCGCGCGC",
+      reverse: "GTATCCTGGCCGCAAAAGCGGGCGCGCGC" // Severe 3' dimer
+    },
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "Thermodynamic Failure Case",
+    context: "ΔG returns 0 (Model integrity failure)",
+    application_mode: "mutation",
+    sequence: "ATACGGACCGATCAATCGATTGTATCCAAAGGATCCTGGGATCAATCGATTATACTA".repeat(4),
+    primer_pair: {
+      forward: "ATACGGACCGATCAATCGATTGTAT", // No hairpin = 0
+      reverse: "GTATAATCGATTGATCCCAGGATCA" // No hairpin = 0
+    },
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "Research-Only Relaxed Case",
+    context: "Relaxation pass = 2, Tm diff > 4°C, structure moderate",
+    application_mode: "qpcr",
+    sequence: "ATACGGACCCCGCAAAAGCGGATATGGACTCTGGCCGCAAAAGCGGATACGGA".repeat(6),
+    primer_pair: {
+      forward: "ATACGGACCCCGCAAAAGCGGATAT",
+      reverse: "GTATCCGCTTTTGCGGTATTAAATA"
+    },
+    relaxLevel: 2,
+    isBorderline: true
+  }
+];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THERMODYNAMIC ENGINE — SantaLucia 1998 Nearest-Neighbor
@@ -464,6 +509,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
       riskTier: ev ? ev.riskTier : 'High',
       safetyTriggers: ev ? ev.triggers : safetyTriggers,
       safetyPassed: !autoRejected,
+      thermoStatus: ev ? ev.thermoStatus : 'VALID',
       meltingCurve: ev ? { fwdMeltQ: ev.meltingCurve.fwdMeltQuality, revMeltQ: ev.meltingCurve.revMeltQuality, summary: ev.meltingCurve.overallMeltQuality, asymmetric: ev.meltingCurve.asymmetricMelting } : {},
       structureScore: ev ? ev.structureScore : 10,
       structureInterpretation: ev ? ev.structureInterpretation : 'Unknown risk',
@@ -663,19 +709,27 @@ export default function PrimerDesigner() {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
-  const [sampleIdx, setSampleIdx] = useState(0);
+  const [activeSample, setActiveSample] = useState(null);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
 
-  const loadSample = () => {
-    const keys = Object.keys(SAMPLE_SEQUENCES);
-    const key = keys[sampleIdx % keys.length];
-    setSequence(SAMPLE_SEQUENCES[key]);
+  const handleSampleSelect = (e) => {
+    const sName = e.target.value;
+    if (!sName) {
+      setActiveSample(null);
+      setSequence('');
+      setPrimers(null);
+      return;
+    }
+    const sample = CURATED_SAMPLES.find(s => s.name === sName);
+    setActiveSample(sample);
+    setSequence(sample.sequence);
+    setAppMode(sample.application_mode);
     setError('');
     setPrimers(null);
     setAiExplanation('');
-    setSampleIdx(s => s + 1);
+    setTimeout(() => handleDesignFn(sample), 0);
   };
 
   useEffect(() => {
@@ -858,27 +912,57 @@ export default function PrimerDesigner() {
   };
 
   /* ── submit ── */
-  const handleDesign = async () => {
-    if (!sequence.trim()) { setError('Please enter a DNA sequence.'); return; }
-    const v = validateSequence(sequence);
+  const handleDesignFn = async (overrideSample = null) => {
+    const targetSeq = overrideSample ? overrideSample.sequence : sequence;
+    const targetMode = overrideSample ? APP_MODES[overrideSample.application_mode] : mode;
+
+    if (!targetSeq.trim()) { setError('Please enter a DNA sequence.'); return; }
+    const v = validateSequence(targetSeq);
     if (!v.valid) { setError(v.error); return; }
+
     setLoading(true); setError(''); setPrimers(null); setAiExplanation('');
+
     try {
-      const res = await designPrimers(v.cleaned, mode);
-      setLoading(false);
-      if (res.success) {
-        res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
-        res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
-        res.data.optimization_tips = buildTips(res.data, mode);
-        setPrimers(res.data);
+      if (overrideSample) {
+        // Direct evaluation for Curated Samples bypassing the sliding-window search
+        const fStr = overrideSample.primer_pair.forward;
+        const rStr = overrideSample.primer_pair.reverse;
+        const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin_dg: calcHairpinDG(fStr), self_dimer_dg: calcSelfDimerDG(fStr), three_prime_dg: calc3PrimeDG(fStr), last_5bp_gc: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
+        const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin_dg: calcHairpinDG(rStr), self_dimer_dg: calcSelfDimerDG(rStr), three_prime_dg: calc3PrimeDG(rStr), last_5bp_gc: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
+        const cd = calcCrossDimerDG(fStr, rStr);
+        let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline);
+        f.quality_score = scorePrimerFull(f, v.cleaned, targetMode);
+        f.quality_grade = classifyScore(f.quality_score);
+        r.quality_score = scorePrimerFull(r, v.cleaned, targetMode);
+        r.quality_grade = classifyScore(r.quality_score);
+        resData.forward_primer = f;
+        resData.reverse_primer = r;
+        resData.forward_primer.detailed_analysis = buildAnalysis(resData.forward_primer);
+        resData.reverse_primer.detailed_analysis = buildAnalysis(resData.reverse_primer);
+        resData.optimization_tips = buildTips(resData, targetMode);
+
+        // Brief timeout for visual loading cue
+        await new Promise(res => setTimeout(res, 800));
+        setPrimers(resData);
       } else {
-        setError(res.error);
+        const res = await designPrimers(v.cleaned, targetMode);
+        if (res.success) {
+          res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
+          res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
+          res.data.optimization_tips = buildTips(res.data, targetMode);
+          setPrimers(res.data);
+        } else {
+          setError(res.error);
+        }
       }
     } catch (e) {
-      setLoading(false);
       setError(`An unexpected evaluation engine error occurred: ${e.message}`);
+    } finally {
+      setLoading(false);
     }
   };
+
+  const handleDesign = () => handleDesignFn(null);
 
   /* ── AI explain ── */
   const handleAI = async () => {
@@ -1261,9 +1345,20 @@ export default function PrimerDesigner() {
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <button className="btn-sample" onClick={loadSample}>Next Sample Data</button>
+              <select className="btn-sample" value={activeSample ? activeSample.name : ''} onChange={handleSampleSelect} style={{ outline: 'none', cursor: 'pointer', appearance: 'none', paddingRight: '1rem', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2360A5FA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right .7rem top 50%', backgroundSize: '.65rem auto' }}>
+                <option value="" disabled selected={!activeSample}>Load Sample ▼</option>
+                {CURATED_SAMPLES.map(s => (
+                  <option key={s.name} value={s.name}>{s.name}</option>
+                ))}
+              </select>
             </div>
           </div>
+          {activeSample && (
+            <div style={{ background: 'rgba(96,165,250,0.06)', borderLeft: '3px solid #60A5FA', padding: '0.65rem 0.85rem', marginBottom: '0.65rem', borderRadius: 4 }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#60A5FA', marginBottom: '0.2rem' }}>Sample Loaded: {activeSample.name}</div>
+              <div style={{ fontSize: '0.84rem', color: '#8a8f9e' }}>{activeSample.context}</div>
+            </div>
+          )}
           <textarea rows={5} value={sequence} onChange={e => setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
           {sequence && (
             <div style={{ marginTop: '0.45rem', fontSize: '0.88rem', color: '#6b7080', fontFamily: '"JetBrains Mono",monospace', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
@@ -1359,7 +1454,43 @@ export default function PrimerDesigner() {
             </div>
 
             {/* ═══ EVALUATION ENGINE RESULTS ═══ */}
-            {primers.evaluation && (
+            {primers.evaluation && primers.evaluation.thermoStatus === 'FAILED' && (
+              <div className="pc" style={{ borderColor: 'rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.05)', marginBottom: '1.1rem' }}>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#EF4444', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span>❌</span> Auto-Rejected (Thermodynamic Engine Failure)
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Safety Gate Status</div>
+                  <div style={{ color: '#FCA5A5', fontWeight: 600 }}>FAILED — Structural parameters could not be computed.</div>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>PCR Success Probability</div>
+                  <div style={{ color: '#8a8f9e' }}>Not Computed (Model integrity failure)</div>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Melting Behavior</div>
+                  <div style={{ color: '#8a8f9e' }}>Unavailable</div>
+                </div>
+
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Secondary Structure</div>
+                  <div style={{ color: '#8a8f9e' }}>Unavailable</div>
+                </div>
+
+                <div>
+                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Explanation</div>
+                  <div style={{ color: '#e2e4e9', lineHeight: 1.6, fontSize: '0.9rem' }}>
+                    Thermodynamic nearest-neighbor calculations returned invalid values.<br />
+                    Re-evaluate ΔG computation engine before primer assessment.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {primers.evaluation && primers.evaluation.thermoStatus !== 'FAILED' && (
               <div style={{ marginBottom: '1.1rem' }}>
 
                 {/* Risk Assessment */}
