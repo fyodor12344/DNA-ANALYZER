@@ -1230,16 +1230,48 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         const STEP = Math.max(2, Math.floor(pts.length / 140));
         const STEP_MOB = Math.max(3, Math.floor(pts.length / 55)); // fewer atoms on mobile
 
-        /* ── MOBILE: Cα-only trace with large visible spheres ── */
+        /* ── MOBILE: Backbone + side chains (lighter than desktop but enough for Ball+Stick/CPK) ── */
         if (isMobile) {
           pts.forEach((p, pi) => {
             if (pi % STEP_MOB !== 0) return;
-            if (!p.domain) return;
-            addAtom(p.x, p.y, p.z, 'CA', 0.75);
+            if (!p.domain && p.ss === 'loop') return;
+            const { x, y, z } = p;
+            const pp = pts[Math.max(0, pi - STEP_MOB)];
+
+            // Ca backbone atom
+            addAtom(x, y, z, 'CA', 0.65);
+
+            // Backbone bond to previous Ca
             if (pi > 0 && pi % STEP_MOB === 0) {
               const pp2 = pts[Math.max(0, pi - STEP_MOB)];
-              if (pp2.domain) addBond(pp2.x, pp2.y, pp2.z, p.x, p.y, p.z, 0.18);
+              addBond(pp2.x, pp2.y, pp2.z, x, y, z, 0.15);
             }
+
+            // Amide N between this and previous Ca
+            const nx = (x + pp.x) / 2, ny = (y + pp.y) / 2 + 0.5, nz = (z + pp.z) / 2;
+            addAtom(nx, ny, nz, 'N', 0.38);
+            addBond(nx, ny, nz, x, y, z, 0.12);
+
+            // Carbonyl C=O
+            const pn = pts[Math.min(pts.length - 1, pi + STEP_MOB)];
+            const cx = (x + pn.x) / 2, cy = (y + pn.y) / 2 - 0.3, cz = (z + pn.z) / 2;
+            addAtom(cx, cy, cz, 'C', 0.32);
+            addBond(x, y, z, cx, cy, cz, 0.12);
+            const ox = cx + (rng2(pi * 13.1) - 0.5) * 0.8;
+            const oy = cy - 0.7;
+            const oz = cz + (rng2(pi * 7.9) - 0.5) * 0.8;
+            addAtom(ox, oy, oz, 'O', 0.38);
+            addBond(cx, cy, cz, ox, oy, oz, 0.10);
+
+            // Side chain (Cb)
+            const ang = rng2(pi * 7.3) * Math.PI * 2;
+            const scL = 1.1 + rng2(pi * 3.7) * 1.0;
+            const sc1x = x + Math.cos(ang) * scL * 0.6;
+            const sc1y = y + (rng2(pi * 5.2) - 0.3) * scL + 1.2;
+            const sc1z = z + Math.sin(ang) * scL * 0.6;
+            const e1 = SC_ELEMS[pi % SC_ELEMS.length];
+            addAtom(sc1x, sc1y, sc1z, e1, 0.38);
+            addBond(x, y, z, sc1x, sc1y, sc1z, 0.10);
           });
         }
 
@@ -1698,11 +1730,11 @@ Provide a rigorous structural explanation covering: secondary structure elements
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
           <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer"
             style={{ padding: '.45rem .9rem', background: 'rgba(6,182,212,.1)', border: '1px solid rgba(6,182,212,.35)', borderRadius: 8, color: '#67E8F9', fontSize: '.84rem', fontWeight: 700, textDecoration: 'none' }}>
-            PDB {gene.pdb.id} →
+            PDB {gene.pdb.id}
           </a>
           <button onClick={() => setShowRCSB(v => !v)}
             style={{ padding: '.45rem .9rem', background: showRCSB ? 'rgba(99,102,241,.3)' : 'rgba(99,102,241,.12)', border: '1px solid rgba(99,102,241,.5)', borderRadius: 8, color: '#A78BFA', fontSize: '.84rem', fontWeight: 700, cursor: 'pointer' }}>
-            {showRCSB ? '▲ Hide' : '▼ Show'} 3D
+            {showRCSB ? 'Hide 3D Viewer' : 'Show 3D Viewer'}
           </button>
         </div>
       </div>
@@ -1712,7 +1744,7 @@ Provide a rigorous structural explanation covering: secondary structure elements
           <span style={{ fontSize: '1rem', flexShrink: 0, fontFamily: 'monospace', color: '#fbbf24', fontWeight: 700 }}>[i]</span>
           <div>
             <div style={{ fontSize: '.79rem', fontWeight: 700, color: '#fbbf24', marginBottom: '.12rem' }}>Best viewed on Desktop</div>
-            <div style={{ fontSize: '.73rem', color: '#8a7040', lineHeight: 1.55 }}>The 3D viewer works on mobile but for full interactivity (click-to-inspect, smooth rotation, CPK atoms) use <strong style={{ color: '#fbbf24' }}>Desktop Mode</strong> in your browser — Settings → Request Desktop Site. On mobile, tap coloured segments to inspect domains.</div>
+            <div style={{ fontSize: '.73rem', color: '#8a7040', lineHeight: 1.55 }}>The 3D viewer works on mobile but for the best experience (click-to-inspect, smooth rotation, full CPK atoms) use <strong style={{ color: '#fbbf24' }}>Desktop Mode</strong> in your browser. On mobile, tap coloured segments to inspect domains.</div>
           </div>
         </div>
       )}
@@ -1740,7 +1772,7 @@ Provide a rigorous structural explanation covering: secondary structure elements
             {!isSpinning && (
               <button onClick={handleResume}
                 style={{ padding: '.22rem .6rem', background: 'rgba(6,182,212,.15)', border: '1px solid rgba(6,182,212,.4)', color: '#67E8F9', fontSize: '.72rem', fontWeight: 700, borderRadius: 5, cursor: 'pointer' }}>
-                ▶ Resume
+                Resume Rotation
               </button>
             )}
             {mutPins && mutPins.length > 0 && (
@@ -1748,15 +1780,6 @@ Provide a rigorous structural explanation covering: secondary structure elements
                 {mutPins.length} mutation{mutPins.length !== 1 ? 's' : ''} pinned
               </span>
             )}
-          </div>
-
-          <div style={{ padding: '.48rem .9rem', background: 'rgba(20,184,166,.05)', borderBottom: '1px solid rgba(20,184,166,.14)', display: 'flex', alignItems: 'center', gap: '.55rem', flexWrap: 'wrap' }}>
-            <button onClick={handleStructureAI} disabled={structureAILoading}
-              style={{ display: 'flex', alignItems: 'center', gap: '.38rem', padding: '.35rem .8rem', background: structureAILoading ? 'rgba(20,184,166,.07)' : 'linear-gradient(135deg,rgba(20,184,166,.18),rgba(6,182,212,.12))', border: '1px solid rgba(20,184,166,.42)', borderRadius: 7, color: structureAILoading ? '#3a7a72' : '#2dd4bf', fontSize: '.77rem', fontWeight: 700, cursor: structureAILoading ? 'wait' : 'pointer' }}>
-              {structureAILoading ? <><span style={{ display: 'inline-block', width: 10, height: 10, border: '2px solid rgba(45,212,191,.3)', borderTopColor: '#2dd4bf', borderRadius: '50%', animation: 'spin .5s linear infinite' }}></span>Analyzing...</> : <>Explain This 3D Structure</>}
-            </button>
-            <span style={{ fontSize: '.71rem', color: '#2a4840' }}>{clickedDomain?.domain ? `Will explain ${clickedDomain.domain.name} + overall structure` : 'Click a domain first, or explain full protein structure'}</span>
-            {structureAI && <button onClick={() => setStructureAI(null)} style={{ marginLeft: 'auto', background: 'none', border: '1px solid #1e2535', color: '#4a4d5a', fontSize: '.68rem', padding: '.12rem .4rem', borderRadius: 5, cursor: 'pointer' }}>Clear</button>}
           </div>
 
           {/* Canvas */}
@@ -1890,30 +1913,22 @@ Provide a rigorous structural explanation covering: secondary structure elements
           </div>
         </div>
 
-        {structureAI && (
-          <div style={{ background: 'rgba(20,184,166,.04)', border: '1px solid rgba(20,184,166,.28)', borderRadius: 11, overflow: 'hidden', marginBottom: '1rem', animation: 'fadeSlideIn .3s ease-out' }}>
-            <div style={{ padding: '.52rem .9rem', background: 'rgba(20,184,166,.08)', borderBottom: '1px solid rgba(20,184,166,.18)', display: 'flex', alignItems: 'center', gap: '.42rem' }}>
 
-              <span style={{ fontSize: '.8rem', fontWeight: 700, color: '#2dd4bf', letterSpacing: '.04em' }}>STRUCTURAL AI ANALYSIS</span>
-              <span style={{ fontSize: '.69rem', color: '#2a5550', marginLeft: '.2rem' }}>{clickedDomain?.domain ? `· ${clickedDomain.domain.name} focused` : '· Full protein overview'}</span>
-            </div>
-            <div style={{ padding: '.8rem 1rem', maxHeight: 420, overflowY: 'auto', background: '#030608' }}>
-              <pre style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: '.77rem', color: '#5aaaa0', lineHeight: 1.85, whiteSpace: 'pre-wrap', margin: 0 }}>{structureAI}</pre>
+      </>)
+      }
+
+      {
+        !showRCSB && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.85rem 1rem', background: '#0b0e18', border: '1px dashed #1e2535', borderRadius: 10 }}>
+            <div style={{ width: 24, height: 24, borderRadius: 4, background: 'rgba(6,182,212,.15)', border: '1px solid rgba(6,182,212,.3)', flexShrink: 0 }}></div>
+            <div>
+              <div style={{ fontSize: '.88rem', color: '#5a6070' }}>Click <strong style={{ color: '#A78BFA' }}>Show 3D</strong> to launch the molecular viewer for <strong style={{ color: gene.color }}>{gene.symbol}</strong></div>
+              <div style={{ fontSize: '.75rem', color: '#2e3245', marginTop: '.18rem' }}>Ribbon, Ball+Stick, CPK view modes available. Click segments to zoom and inspect. <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer" style={{ color: '#67e8f9', textDecoration: 'none' }}>View PDB {gene.pdb.id}</a></div>
             </div>
           </div>
-        )}
-      </>)}
-
-      {!showRCSB && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.85rem 1rem', background: '#0b0e18', border: '1px dashed #1e2535', borderRadius: 10 }}>
-          <div style={{ width: 24, height: 24, borderRadius: 4, background: 'rgba(6,182,212,.15)', border: '1px solid rgba(6,182,212,.3)', flexShrink: 0 }}></div>
-          <div>
-            <div style={{ fontSize: '.88rem', color: '#5a6070' }}>Click <strong style={{ color: '#A78BFA' }}>Show 3D</strong> to launch the molecular viewer for <strong style={{ color: gene.color }}>{gene.symbol}</strong></div>
-            <div style={{ fontSize: '.75rem', color: '#2e3245', marginTop: '.18rem' }}>Ribbon · Ball+Stick · CPK modes · Click-to-zoom · <a href={gene.pdb.url} target="_blank" rel="noopener noreferrer" style={{ color: '#67e8f9', textDecoration: 'none' }}>PDB {gene.pdb.id} →</a></div>
-          </div>
-        </div>
-      )}
-    </div>
+        )
+      }
+    </div >
   );
 }
 
