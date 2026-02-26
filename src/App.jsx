@@ -8,6 +8,7 @@ import MutationFinder from './components/MutationFinder';
 import SequenceAlignment from './components/SequenceAlignment';
 import CRISPRFinder from './components/CRISPRFinder';
 import PrimerDesigner from './components/PrimerDesigner';
+import PrimerEvaluator from './components/PrimerEvaluator';
 
 // Loading Spinner Component
 const LoadingSpinner = () => (
@@ -48,12 +49,13 @@ function App() {
   // stored at the App level instead of within individual components.
   // This ensures results persist when switching between tools.
   // ============================================================
-  
+
   const [overviewResult, setOverviewResult] = useState(null);
   const [mutationResult, setMutationResult] = useState(null);
   const [alignmentResult, setAlignmentResult] = useState(null);
   const [crisprResult, setCrisprResult] = useState(null);
   const [primerResult, setPrimerResult] = useState(null);
+  const [primerEvalResult, setPrimerEvalResult] = useState(null);
 
   // Close sample menu when clicking outside
   useEffect(() => {
@@ -67,7 +69,7 @@ function App() {
   const handleAnalyze = () => {
     setError("");
     setLoading(true);
-    
+
     if (!dna.trim()) {
       setError("Please enter a DNA sequence");
       setLoading(false);
@@ -89,7 +91,7 @@ function App() {
 
     try {
       setTimeout(() => {
-       const res = summary(cleaned);
+        const res = summary(cleaned);
         setOverviewResult(res); // Store in centralized state
         setActiveTab("overview");
         setLoading(false);
@@ -132,13 +134,14 @@ function App() {
     setAlignmentResult(null);
     setCrisprResult(null);
     setPrimerResult(null);
+    setPrimerEvalResult(null);
     setError("");
     setActiveTab("overview");
   };
 
   // Individual tool clear functions (optional - for per-tool clearing)
   const clearToolResult = (toolName) => {
-    switch(toolName) {
+    switch (toolName) {
       case 'overview':
         setOverviewResult(null);
         break;
@@ -153,6 +156,9 @@ function App() {
         break;
       case 'primers':
         setPrimerResult(null);
+        break;
+      case 'pcr-eval':
+        setPrimerEvalResult(null);
         break;
       default:
         break;
@@ -498,7 +504,7 @@ function App() {
           }
         }
       `}</style>
-      
+
       <div className="container">
         <header className="header fade-in">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '1rem' }}>
@@ -511,7 +517,7 @@ function App() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-              <button 
+              <button
                 onClick={() => setShowHelp(true)}
                 className="quick-action-btn"
                 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
@@ -562,7 +568,7 @@ function App() {
               </label>
             </div>
           </div>
-          
+
           <textarea
             value={dna}
             onChange={(e) => setDna(e.target.value)}
@@ -572,7 +578,7 @@ function App() {
             disabled={loading}
             style={{ fontFamily: 'monospace' }}
           />
-          
+
           {dna && (
             <div className="stats-bar slide-down">
               <div className="stat-item">
@@ -592,10 +598,10 @@ function App() {
               </div>
             </div>
           )}
-          
+
           <div className="input-footer" style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-            <button 
-              onClick={handleAnalyze} 
+            <button
+              onClick={handleAnalyze}
               className="analyze-btn"
               disabled={loading}
               style={{ flex: 1, minWidth: '200px' }}
@@ -605,21 +611,21 @@ function App() {
             </button>
             {dna && (
               <>
-                <button 
+                <button
                   onClick={copySequence}
                   className="quick-action-btn"
                   title="Copy to clipboard"
                 >
                   Copy
                 </button>
-                <button 
+                <button
                   onClick={downloadSequence}
                   className="quick-action-btn"
                   title="Download sequence"
                 >
                   Download
                 </button>
-                <button 
+                <button
                   onClick={clearSequence}
                   className="quick-action-btn"
                   title="Clear sequence and all results"
@@ -680,6 +686,12 @@ function App() {
             >
               Primers
             </button>
+            <button
+              onClick={() => setActiveTab("pcr-eval")}
+              className={`tab-btn ${activeTab === "pcr-eval" ? "active" : ""}`}
+            >
+              PCR Evaluator
+            </button>
           </div>
 
           {/* ============================================================ */}
@@ -689,8 +701,8 @@ function App() {
           {/* ============================================================ */}
           <div className="tab-content">
             {activeTab === "overview" && overviewResult && (
-              <OverviewTab 
-                result={overviewResult} 
+              <OverviewTab
+                result={overviewResult}
                 originalSequence={dna}
                 onClear={() => clearToolResult('overview')}
               />
@@ -706,31 +718,38 @@ function App() {
               </div>
             )}
             {activeTab === "mutations" && (
-              <MutationFinder 
+              <MutationFinder
                 result={mutationResult}
                 setResult={setMutationResult}
                 onClear={() => clearToolResult('mutations')}
               />
             )}
             {activeTab === "alignment" && (
-              <SequenceAlignment 
+              <SequenceAlignment
                 result={alignmentResult}
                 setResult={setAlignmentResult}
                 onClear={() => clearToolResult('alignment')}
               />
             )}
             {activeTab === "crispr" && (
-              <CRISPRFinder 
+              <CRISPRFinder
                 result={crisprResult}
                 setResult={setCrisprResult}
                 onClear={() => clearToolResult('crispr')}
               />
             )}
             {activeTab === "primers" && (
-              <PrimerDesigner 
+              <PrimerDesigner
                 result={primerResult}
                 setResult={setPrimerResult}
                 onClear={() => clearToolResult('primers')}
+              />
+            )}
+            {activeTab === "pcr-eval" && (
+              <PrimerEvaluator
+                result={primerEvalResult}
+                setResult={setPrimerEvalResult}
+                onClear={() => clearToolResult('pcr-eval')}
               />
             )}
           </div>
@@ -744,12 +763,12 @@ function App() {
                 <h2 style={{ fontFamily: 'Montserrat, sans-serif', margin: 0, color: '#00BFA5' }}>
                   🧬 Help & Guide
                 </h2>
-                <button 
+                <button
                   onClick={() => setShowHelp(false)}
-                  style={{ 
-                    background: 'none', 
-                    border: 'none', 
-                    fontSize: '1.5rem', 
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '1.5rem',
                     cursor: 'pointer',
                     color: '#94a3b8'
                   }}
@@ -757,7 +776,7 @@ function App() {
                   ×
                 </button>
               </div>
-              
+
               <div style={{ lineHeight: '1.8' }}>
                 <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Available Tools
@@ -768,8 +787,9 @@ function App() {
                   <li><strong>Alignment:</strong> Perform global (Needleman-Wunsch) or local (Smith-Waterman) sequence alignment</li>
                   <li><strong>CRISPR:</strong> Find PAM sites for CRISPR-Cas9/Cas12a gene editing with multiple enzyme support</li>
                   <li><strong>Primers:</strong> Design optimized PCR primers with application-specific parameters (qPCR, cloning, diagnostic)</li>
+                  <li><strong>PCR Evaluator:</strong> Evaluate primer pairs with hard safety gates, Bayesian risk modeling, melting simulation, and secondary structure analysis</li>
                 </ul>
-                
+
                 <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Quick Tips
                 </h3>
@@ -783,7 +803,7 @@ function App() {
                   <li>Real-time sequence statistics update as you type (A, T, G, C counts)</li>
                   <li>Use "Clear All" to reset all sequences and results at once</li>
                 </ul>
-                
+
                 <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>
                   Supported Formats
                 </h3>
@@ -804,8 +824,8 @@ function App() {
                   <li>All analyses include actionable recommendations for experimental optimization</li>
                 </ul>
               </div>
-              
-              <button 
+
+              <button
                 onClick={() => setShowHelp(false)}
                 style={{
                   width: '100%',
