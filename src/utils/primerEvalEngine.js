@@ -56,66 +56,111 @@ export function calc3PrimeDG(seq) {
 export function calcHairpinDG(seq) {
     seq = seq.toUpperCase();
     const n = seq.length;
-    let best = 0;
-    for (let stemLen = 3; stemLen <= 7; stemLen++) {
-        for (let loopLen = 3; loopLen <= 6; loopLen++) {
+    let bestDG = 0.5; // Ensure small positive default for no structure
+
+    for (let stemLen = 3; stemLen <= 10; stemLen++) {
+        for (let loopLen = 3; loopLen <= Math.min(10, n - 2 * stemLen); loopLen++) {
             for (let i = 0; i <= n - 2 * stemLen - loopLen; i++) {
                 const stem1 = seq.slice(i, i + stemLen);
                 const j = i + stemLen + loopLen;
-                if (j + stemLen > n) continue;
                 const stem2rc = revComp(seq.slice(j, j + stemLen));
-                if (stem1 !== stem2rc) continue;
+                if (stem1 !== stem2rc) continue; // Must be valid contiguous stem
+
                 let dH = 0, dS = 0;
                 for (let k = 0; k < stemLen - 1; k++) {
                     const p = stem1[k] + stem1[k + 1];
                     if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
                 }
-                const loopPen = loopLen === 3 ? 5.4 : loopLen === 4 ? 4.5 : 4.0;
+
+                [stem1[0], stem1[stemLen - 1]].forEach(b => {
+                    if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
+                    else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
+                });
+
+                dS += 0.368 * (stemLen - 1) * Math.log(0.05); // Salt correction (50 mM)
+
+                let loopPen = 3.5;
+                if (loopLen === 3) loopPen = 5.4;
+                else if (loopLen === 4) loopPen = 4.5;
+                else if (loopLen === 5) loopPen = 4.0;
+
                 const dG = dH - 310.15 * (dS / 1000) + loopPen;
-                if (dG < best) best = dG;
+                if (dG < bestDG) bestDG = dG;
             }
         }
     }
-    return parseFloat(best.toFixed(2));
+
+    // Bounds check and precise zero-avoidance
+    if (bestDG < -20 || bestDG > 5) return null; // Anomaly outside realistic range
+    if (bestDG === 0) return 0.1;
+    return parseFloat(bestDG.toFixed(2));
+}
+
+function calculateDimerDG(seq1, seq2, isCross) {
+    seq1 = seq1.toUpperCase();
+    seq2 = seq2.toUpperCase();
+    const rc2 = revComp(seq2);
+    let bestDG = 0.5; // Small positive default
+
+    const len1 = seq1.length;
+    const len2 = rc2.length;
+
+    // Sliding alignment across full length
+    for (let shift = -len2 + 2; shift < len1 - 1; shift++) {
+        let currentBlock = "";
+        let is3PrimeInvolved = false;
+
+        const evaluateBlock = (block, involved3P) => {
+            if (block.length >= 2) {
+                let dH = 0, dS = 0;
+                for (let k = 0; k < block.length - 1; k++) {
+                    const p = block[k] + block[k + 1];
+                    if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
+                }
+                [block[0], block[block.length - 1]].forEach(b => {
+                    if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
+                    else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
+                });
+
+                dS += 0.368 * (block.length - 1) * Math.log(0.05); // Salt correction (50 mM)
+                let dG = dH - 310.15 * (dS / 1000);
+
+                if (isCross && involved3P) {
+                    dG -= 2.0; // Cross-dimer 3' end penalty weight
+                }
+
+                if (dG < bestDG) bestDG = dG;
+            }
+        };
+
+        for (let i = 0; i < len1; i++) {
+            const j = i - shift;
+            if (j >= 0 && j < len2) {
+                if (seq1[i] === rc2[j]) {
+                    currentBlock += seq1[i];
+                    if (i === len1 - 1 || j === 0) is3PrimeInvolved = true;
+                } else {
+                    evaluateBlock(currentBlock, is3PrimeInvolved);
+                    currentBlock = "";
+                    is3PrimeInvolved = false;
+                }
+            }
+        }
+        evaluateBlock(currentBlock, is3PrimeInvolved);
+    }
+
+    // Safety boundaries
+    if (bestDG < -20 || bestDG > 5) return null;
+    if (bestDG === 0) return 0.1;
+    return parseFloat(bestDG.toFixed(2));
 }
 
 export function calcSelfDimerDG(seq) {
-    seq = seq.toUpperCase();
-    let best = 0;
-    for (let endLen = 4; endLen <= 10; endLen++) {
-        if (endLen > seq.length) continue;
-        const end = seq.slice(-endLen);
-        for (let i = 0; i <= seq.length - endLen; i++) {
-            if (i === seq.length - endLen) continue;
-            if (end !== revComp(seq.slice(i, i + endLen))) continue;
-            let dH = 0, dS = 0;
-            for (let k = 0; k < endLen - 1; k++) {
-                const p = end[k] + end[k + 1];
-                if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-            }
-            const dG = dH - 310.15 * (dS / 1000);
-            if (dG < best) best = dG;
-        }
-    }
-    return parseFloat(best.toFixed(2));
+    return calculateDimerDG(seq, seq, false);
 }
 
 export function calcCrossDimerDG(fwd, rev) {
-    fwd = fwd.toUpperCase(); rev = rev.toUpperCase();
-    let best = 0;
-    for (let endLen = 4; endLen <= 10; endLen++) {
-        if (endLen > fwd.length || endLen > rev.length) continue;
-        const fEnd = fwd.slice(-endLen);
-        if (fEnd !== revComp(rev.slice(-endLen))) continue;
-        let dH = 0, dS = 0;
-        for (let k = 0; k < endLen - 1; k++) {
-            const p = fEnd[k] + fEnd[k + 1];
-            if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-        }
-        const dG = dH - 310.15 * (dS / 1000);
-        if (dG < best) best = dG;
-    }
-    return parseFloat(best.toFixed(2));
+    return calculateDimerDG(fwd, rev, true);
 }
 
 /* ─── SECONDARY STRUCTURE ANALYSIS ─────────────────────────────────────── */
@@ -223,7 +268,7 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     if (thermoStatus === 'FAILED') {
         // Overwrite triggers with the specific failure message requested by user
         triggers.length = 0;
-        triggers.push('FAILED — Structural parameters could not be computed.');
+        triggers.push('Thermodynamic calculation could not be completed.');
     }
     const autoRejected = triggers.length > 0;
 
