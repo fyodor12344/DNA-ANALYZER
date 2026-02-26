@@ -1071,16 +1071,17 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
 
         /* ── Renderer ── */
         const renderer = new THREE.WebGLRenderer({
-          antialias: !isMobile, alpha: false,
+          antialias: false, alpha: false,
           powerPreference: isMobile ? 'low-power' : 'high-performance'
         });
         renderer.setSize(W, H);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 2 : 2));
+        // Mobile: cap pixel ratio at 1.0 to prevent GPU overload & lag
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1.0 : 2));
         renderer.setClearColor(0x04060f, 1);
         renderer.shadowMap.enabled = false;
         container.innerHTML = '';
         container.appendChild(renderer.domElement);
-        Object.assign(renderer.domElement.style, { width: '100%', height: H + 'px', display: 'block' });
+        Object.assign(renderer.domElement.style, { width: '100%', height: H + 'px', display: 'block', touchAction: 'none' });
 
         /* ── Scene & Camera ── */
         const scene = new THREE.Scene();
@@ -1120,8 +1121,9 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         const makeTube = (vpts, r, col, emiss = 0.18, opacity = 1, shine = 140) => {
           if (vpts.length < 2) return null;
           const curve = new THREE.CatmullRomCurve3(vpts, false, 'catmullrom', 0.5);
-          const segs = Math.max(vpts.length * (isMobile ? 2 : 5), isMobile ? 8 : 24);
-          const geo = new THREE.TubeGeometry(curve, segs, r, isMobile ? 6 : 12, false);
+          // Mobile: fewer path segments AND radial segments (4 vs 12) for huge perf gain
+          const segs = Math.max(vpts.length * (isMobile ? 1 : 5), isMobile ? 4 : 24);
+          const geo = new THREE.TubeGeometry(curve, segs, r, isMobile ? 4 : 12, false);
           const mat = new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: emiss, shininess: shine, specular: 0x4488aa, transparent: opacity < 1, opacity });
           return new THREE.Mesh(geo, mat);
         };
@@ -1185,7 +1187,8 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
            ───────────────────────────────────────────────────────────────── */
         const CPK = { CA: 0x22d3ee, C: 0x2dd4bf, N: 0x3b82f6, O: 0xef4444, S: 0xfbbf24, H: 0xe2e8f0 };
         const sCache = {};
-        const sphereGeo = r => { const k = r.toFixed(2); if (!sCache[k]) sCache[k] = new THREE.SphereGeometry(r, isMobile ? 8 : 14, isMobile ? 8 : 14); return sCache[k]; };
+        // Mobile: very low sphere detail (4 segments) — still looks spherical at small sizes
+        const sphereGeo = r => { const k = r.toFixed(2); if (!sCache[k]) sCache[k] = new THREE.SphereGeometry(r, isMobile ? 4 : 14, isMobile ? 4 : 14); return sCache[k]; };
         const atomMat = col => new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.45, shininess: 300, specular: 0xbbddff });
         const bondMat = new THREE.MeshPhongMaterial({ color: 0x1e4a6a, emissive: 0x0c2030, emissiveIntensity: 0.18, shininess: 100 });
 
@@ -1198,7 +1201,7 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         const addBond = (x1, y1, z1, x2, y2, z2, r = 0.14) => {
           const dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
           const len = Math.sqrt(dx * dx + dy * dy + dz * dz); if (len < 0.01) return;
-          const geo = new THREE.CylinderGeometry(r, r, len, isMobile ? 4 : 6, 1);
+          const geo = new THREE.CylinderGeometry(r, r, len, isMobile ? 3 : 6, 1);
           const m = new THREE.Mesh(geo, bondMat);
           m.position.set((x1 + x2) / 2, (y1 + y2) / 2, (z1 + z2) / 2);
           m.quaternion.setFromUnitVectors(
@@ -1451,17 +1454,26 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
           e.preventDefault();
           // Guard: skip if drag, use try/catch to prevent mobile crash
           if (dragDist > 8) return;
-          try {
-            toNDC(e.clientX, e.clientY);
-            raycaster.setFromCamera(mouse, camera);
-            // Mobile: only raycast domain meshes (skip linkers) to reduce WebGL load
-            const targets = isMobile
-              ? clickableMeshes.filter(m => !m.mesh.userData.isLinker).map(m => m.mesh)
-              : clickableMeshes.map(m => m.mesh);
-            const hits = raycaster.intersectObjects(targets, false);
-            if (hits.length > 0 && !hits[0].object.userData.isGlow) select(hits[0].object, hits[0].point);
-            else deselect();
-          } catch (err) { deselect(); } // swallow WebGL errors on mobile
+          const cx = e.clientX, cy = e.clientY;
+          // Mobile: defer raycasting to idle callback so the UI thread stays responsive
+          const doRaycast = () => {
+            try {
+              toNDC(cx, cy);
+              raycaster.setFromCamera(mouse, camera);
+              // Mobile: only raycast domain meshes (skip linkers) to reduce WebGL load
+              const targets = isMobile
+                ? clickableMeshes.filter(m => !m.mesh.userData.isLinker).map(m => m.mesh)
+                : clickableMeshes.map(m => m.mesh);
+              const hits = raycaster.intersectObjects(targets, false);
+              if (hits.length > 0 && !hits[0].object.userData.isGlow) select(hits[0].object, hits[0].point);
+              else deselect();
+            } catch (err) { deselect(); }
+          };
+          if (isMobile && typeof requestIdleCallback === 'function') {
+            requestIdleCallback(doRaycast, { timeout: 100 });
+          } else {
+            doRaycast();
+          }
         };
 
         const el = renderer.domElement;
@@ -1488,8 +1500,10 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
             dragging = false;
             if (!touchMoved && dragDist < 8) {
               const t = e.changedTouches[0];
-              // Defer to next tick — prevents iOS page freeze on tap
-              setTimeout(() => handleClick({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => { } }), 16);
+              // Defer to next rAF + idle callback chain to prevent iOS/Android page freeze on tap
+              requestAnimationFrame(() => {
+                handleClick({ clientX: t.clientX, clientY: t.clientY, preventDefault: () => { } });
+              });
             }
           }, { passive: true });
         } else {
@@ -1520,9 +1534,15 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
 
         /* ── Animate ── */
         let pulseT = 0;
+        let frameCount = 0;
         const animate = () => {
           frameRef.current = requestAnimationFrame(animate);
-          if (autoSpin.v) rotY += 0.005;
+          // Mobile: skip every other frame (~30fps) to reduce GPU load
+          if (isMobile) {
+            frameCount++;
+            if (frameCount % 2 !== 0) return;
+          }
+          if (autoSpin.v) rotY += isMobile ? 0.004 : 0.005;
           root.rotation.y = rotY;
           root.rotation.x = rotX;
 
@@ -1573,8 +1593,20 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
     return () => {
       clearTimeout(timer);
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
-      if (frameRef._cleanup) { frameRef._cleanup(); frameRef._cleanup = null; }
+      // Properly dispose all geometries, materials, and textures to free GPU memory
+      if (frameRef._cleanup) {
+        frameRef._cleanup();
+        frameRef._cleanup = null;
+      }
+      if (sceneRef.current?.renderer) {
+        try {
+          const r = sceneRef.current.renderer;
+          r.dispose();
+          r.forceContextLoss && r.forceContextLoss();
+        } catch (_) { /* ignore */ }
+      }
       if (containerRef.current) containerRef.current.innerHTML = '';
+      sceneRef.current = {};
       setClickedDomain(null); setIsSpinning(true); setTooltip(null);
     };
   }, [showRCSB, gene, mutPins, buildBackbone]);

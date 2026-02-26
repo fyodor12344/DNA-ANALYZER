@@ -56,7 +56,7 @@ export function calc3PrimeDG(seq) {
 export function calcHairpinDG(seq) {
     seq = seq.toUpperCase();
     const n = seq.length;
-    let bestDG = 0.5; // Ensure small positive default for no structure
+    let bestDG = 0.5; // Small positive default — no structure found
 
     for (let stemLen = 3; stemLen <= 10; stemLen++) {
         for (let loopLen = 3; loopLen <= Math.min(10, n - 2 * stemLen); loopLen++) {
@@ -64,7 +64,7 @@ export function calcHairpinDG(seq) {
                 const stem1 = seq.slice(i, i + stemLen);
                 const j = i + stemLen + loopLen;
                 const stem2rc = revComp(seq.slice(j, j + stemLen));
-                if (stem1 !== stem2rc) continue; // Must be valid contiguous stem
+                if (stem1 !== stem2rc) continue;
 
                 let dH = 0, dS = 0;
                 for (let k = 0; k < stemLen - 1; k++) {
@@ -77,7 +77,7 @@ export function calcHairpinDG(seq) {
                     else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
                 });
 
-                dS += 0.368 * (stemLen - 1) * Math.log(0.05); // Salt correction (50 mM)
+                dS += 0.368 * (stemLen - 1) * Math.log(0.05);
 
                 let loopPen = 3.5;
                 if (loopLen === 3) loopPen = 5.4;
@@ -90,9 +90,9 @@ export function calcHairpinDG(seq) {
         }
     }
 
-    // Bounds check and precise zero-avoidance
-    if (bestDG < -20 || bestDG > 5) return null; // Anomaly outside realistic range
-    if (bestDG === 0) return 0.1;
+    // STEP 4: No-zero dG rule — never return exactly 0
+    if (bestDG < -20 || bestDG > 5) return null;
+    if (bestDG === 0 || Math.abs(bestDG) < 0.01) return 0.5;
     return parseFloat(bestDG.toFixed(2));
 }
 
@@ -122,11 +122,11 @@ function calculateDimerDG(seq1, seq2, isCross) {
                     else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
                 });
 
-                dS += 0.368 * (block.length - 1) * Math.log(0.05); // Salt correction (50 mM)
+                dS += 0.368 * (block.length - 1) * Math.log(0.05);
                 let dG = dH - 310.15 * (dS / 1000);
 
                 if (isCross && involved3P) {
-                    dG -= 2.0; // Cross-dimer 3' end penalty weight
+                    dG -= 2.0;
                 }
 
                 if (dG < bestDG) bestDG = dG;
@@ -149,9 +149,9 @@ function calculateDimerDG(seq1, seq2, isCross) {
         evaluateBlock(currentBlock, is3PrimeInvolved);
     }
 
-    // Safety boundaries
+    // STEP 4: No-zero dG rule — never return exactly 0
     if (bestDG < -20 || bestDG > 5) return null;
-    if (bestDG === 0) return 0.1;
+    if (bestDG === 0 || Math.abs(bestDG) < 0.01) return 0.5;
     return parseFloat(bestDG.toFixed(2));
 }
 
@@ -208,6 +208,15 @@ export function calcSecondaryStructureScore(seq, hairpinDG, selfDimerDG) {
 }
 
 /* ─── FULL EVALUATION PIPELINE ─────────────────────────────────────────── */
+
+/* ─── Helper: derive risk tier strictly from probability (STEP 2) ──────── */
+function deriveRiskTier(probability) {
+    if (probability === 0) return 'Critical';
+    if (probability < 40) return 'High';
+    if (probability < 70) return 'Moderate';
+    return 'Low';
+}
+
 export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     fwdSeq = fwdSeq.toUpperCase().replace(/[^ATGC]/g, '');
     revSeq = revSeq.toUpperCase().replace(/[^ATGC]/g, '');
@@ -217,56 +226,80 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
 
     const isDiagnostic = mode === 'diagnostic';
 
-    // Calculate thermodynamic properties
+    // ─── Calculate thermodynamic properties ──────────────────────────────
     const fwdTm = calcTmNN(fwdSeq);
     const revTm = calcTmNN(revSeq);
     const fwdGC = calcGC(fwdSeq);
     const revGC = calcGC(revSeq);
     const fwd3DG = calc3PrimeDG(fwdSeq);
     const rev3DG = calc3PrimeDG(revSeq);
-    const fwdHairpin = calcHairpinDG(fwdSeq);
-    const revHairpin = calcHairpinDG(revSeq);
-    const fwdSelfDimer = calcSelfDimerDG(fwdSeq);
-    const revSelfDimer = calcSelfDimerDG(revSeq);
-    const crossDimer = calcCrossDimerDG(fwdSeq, revSeq);
+    let fwdHairpin = calcHairpinDG(fwdSeq);
+    let revHairpin = calcHairpinDG(revSeq);
+    let fwdSelfDimer = calcSelfDimerDG(fwdSeq);
+    let revSelfDimer = calcSelfDimerDG(revSeq);
+    let crossDimer = calcCrossDimerDG(fwdSeq, revSeq);
     const tmDiff = parseFloat(Math.abs(fwdTm - revTm).toFixed(1));
     const annealingTemp = parseFloat(((fwdTm + revTm) / 2 - 3).toFixed(1));
+
+    // ─── STEP 4: No-zero dG enforcement (secondary pass) ────────────────
+    // If any dG value is exactly 0, force to +0.5 (no valid thermodynamic
+    // calculation should ever yield exactly 0.00 kcal/mol)
+    if (fwdHairpin === 0 || (typeof fwdHairpin === 'number' && Math.abs(fwdHairpin) < 0.01)) fwdHairpin = 0.5;
+    if (revHairpin === 0 || (typeof revHairpin === 'number' && Math.abs(revHairpin) < 0.01)) revHairpin = 0.5;
+    if (fwdSelfDimer === 0 || (typeof fwdSelfDimer === 'number' && Math.abs(fwdSelfDimer) < 0.01)) fwdSelfDimer = 0.5;
+    if (revSelfDimer === 0 || (typeof revSelfDimer === 'number' && Math.abs(revSelfDimer) < 0.01)) revSelfDimer = 0.5;
+    if (crossDimer === 0 || (typeof crossDimer === 'number' && Math.abs(crossDimer) < 0.01)) crossDimer = 0.5;
+
     const fwdStructure = calcSecondaryStructureScore(fwdSeq, fwdHairpin, fwdSelfDimer);
     const revStructure = calcSecondaryStructureScore(revSeq, revHairpin, revSelfDimer);
 
-    const thermoData = {
-        forward: { seq: fwdSeq, len: fwdSeq.length, tm: fwdTm, gc: fwdGC, threePrimeDG: fwd3DG, hairpinDG: fwdHairpin, selfDimerDG: fwdSelfDimer, structure: fwdStructure },
-        reverse: { seq: revSeq, len: revSeq.length, tm: revTm, gc: revGC, threePrimeDG: rev3DG, hairpinDG: revHairpin, selfDimerDG: revSelfDimer, structure: revStructure },
-        crossDimerDG: crossDimer, tmDiff, annealingTemp
+    // ─── STEP 1: Central final_report — single source of truth ──────────
+    const final_report = {
+        hairpin_forward: fwdHairpin,
+        self_dimer_forward: fwdSelfDimer,
+        hairpin_reverse: revHairpin,
+        self_dimer_reverse: revSelfDimer,
+        cross_dimer: crossDimer,
     };
 
-    // ─── STEP 1: HARD SAFETY GATES & THERMO ERRORS ──────────────────────
+    const thermoData = {
+        forward: { seq: fwdSeq, len: fwdSeq.length, tm: fwdTm, gc: fwdGC, threePrimeDG: fwd3DG, hairpinDG: final_report.hairpin_forward, selfDimerDG: final_report.self_dimer_forward, structure: fwdStructure },
+        reverse: { seq: revSeq, len: revSeq.length, tm: revTm, gc: revGC, threePrimeDG: rev3DG, hairpinDG: final_report.hairpin_reverse, selfDimerDG: final_report.self_dimer_reverse, structure: revStructure },
+        crossDimerDG: final_report.cross_dimer, tmDiff, annealingTemp
+    };
+
+    // ─── SAFETY GATES & THERMO ERRORS ───────────────────────────────────
     const triggers = [];
     let hasThermoError = false;
     const checkNull = (v, name) => { if (v === null || v === undefined || isNaN(v)) { triggers.push(`${name} = invalid (NaN/null)`); hasThermoError = true; } };
     const checkThermo = (v, name) => {
         checkNull(v, name);
+        // STEP 4: flag zero as error (should never reach here after enforcement, but safety net)
         if (v === 0) { triggers.push(`${name} = 0 (Thermodynamic Calculation Error)`); hasThermoError = true; }
     };
 
     checkNull(fwdTm, 'Forward Tm'); checkNull(revTm, 'Reverse Tm');
-    if (fwdTm === 0) { triggers.push('Forward Tm = 0°C (invalid)'); hasThermoError = true; }
-    if (revTm === 0) { triggers.push('Reverse Tm = 0°C (invalid)'); hasThermoError = true; }
-    checkThermo(fwdHairpin, 'Forward Hairpin dG'); checkThermo(revHairpin, 'Reverse Hairpin dG');
-    checkThermo(fwdSelfDimer, 'Forward Self-dimer dG'); checkThermo(revSelfDimer, 'Reverse Self-dimer dG');
-    checkThermo(crossDimer, 'Cross-dimer dG');
+    if (fwdTm === 0) { triggers.push('Forward Tm = 0 C (invalid)'); hasThermoError = true; }
+    if (revTm === 0) { triggers.push('Reverse Tm = 0 C (invalid)'); hasThermoError = true; }
+    checkThermo(final_report.hairpin_forward, 'Forward Hairpin dG');
+    checkThermo(final_report.hairpin_reverse, 'Reverse Hairpin dG');
+    checkThermo(final_report.self_dimer_forward, 'Forward Self-dimer dG');
+    checkThermo(final_report.self_dimer_reverse, 'Reverse Self-dimer dG');
+    checkThermo(final_report.cross_dimer, 'Cross-dimer dG');
 
     if (isDiagnostic) {
         if (tmDiff > 5) triggers.push(`Tm mismatch ${tmDiff} C exceeds 5 C limit`);
         if (annealingTemp < 50) triggers.push(`Annealing temperature ${annealingTemp} C below 50 C`);
-        if (fwdSelfDimer < -9 || revSelfDimer < -9) triggers.push(`Self-dimer dG ${Math.min(fwdSelfDimer, revSelfDimer)} kcal/mol below -9 kcal/mol`);
-        if (crossDimer < -9) triggers.push(`Cross-dimer dG ${crossDimer} kcal/mol below -9 kcal/mol`);
-        if (fwdHairpin < -6 || revHairpin < -6) triggers.push(`Hairpin dG ${Math.min(fwdHairpin, revHairpin)} kcal/mol below -6 kcal/mol`);
+        if (final_report.self_dimer_forward < -9 || final_report.self_dimer_reverse < -9)
+            triggers.push(`Self-dimer dG ${Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse)} kcal/mol below -9 kcal/mol`);
+        if (final_report.cross_dimer < -9)
+            triggers.push(`Cross-dimer dG ${final_report.cross_dimer} kcal/mol below -9 kcal/mol`);
+        if (final_report.hairpin_forward < -6 || final_report.hairpin_reverse < -6)
+            triggers.push(`Hairpin dG ${Math.min(final_report.hairpin_forward, final_report.hairpin_reverse)} kcal/mol below -6 kcal/mol`);
     }
 
     const thermoStatus = hasThermoError ? 'FAILED' : 'VALID';
     if (thermoStatus === 'FAILED') {
-        // Overwrite triggers with the specific failure message requested by user
         triggers.length = 0;
         triggers.push('Thermodynamic calculation could not be completed.');
     }
@@ -276,8 +309,8 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     let combinedStructureScore = 'Unavailable';
     let structureInterpretation = 'Unavailable';
     let threePrimeInterference = false;
-    let successProbability = thermoStatus === 'FAILED' ? 'Not Computed' : 0;
-    let riskTier = thermoStatus === 'FAILED' ? 'Model Invalid' : 'Low';
+    let successProbability = 0;
+    let riskTier = 'Critical';
     let failureProbability = null;
     let fwdMeltQuality = 'Unavailable';
     let revMeltQuality = 'Unavailable';
@@ -290,25 +323,23 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     const summaryPoints = [];
 
     if (thermoStatus === 'VALID') {
-        // ─── STEP 2: WEIGHTED SCIENTIFIC SCORE ──────────────────────────────
-        if (!autoRejected) {
-            const tmScore = Math.max(0, 1 - tmDiff / 10) * 20;
-            const gcAvg = (fwdGC + revGC) / 2;
-            const gcScore = Math.max(0, 1 - Math.abs(gcAvg - 50) / 25) * 10;
-            const avgThreePrime = (fwd3DG + rev3DG) / 2;
-            const threePrimeScore = (avgThreePrime < -10 ? 1.0 : avgThreePrime < -7 ? 0.7 : 0.4) * 15;
-            const worstHairpin = Math.min(fwdHairpin, revHairpin);
-            const hairpinScore = (worstHairpin > -1 ? 1.0 : worstHairpin > -3 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 15;
-            const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
-            const dimerScore = (worstDimer > -2 ? 1.0 : worstDimer > -5 ? 0.7 : worstDimer > -7 ? 0.4 : 0.1) * 15;
-            const annealScore = (annealingTemp >= 55 && annealingTemp <= 65 ? 1.0 : annealingTemp >= 50 && annealingTemp <= 70 ? 0.6 : 0.2) * 15;
-            const last2Fwd = fwdSeq.slice(-2);
-            const last2Rev = revSeq.slice(-2);
-            const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length >= 1;
-            const revClamp = (last2Rev.match(/[GC]/g) || []).length >= 1;
-            const constraintScore = ((fwdClamp ? 5 : 0) + (revClamp ? 5 : 0));
-            weightedScore = Math.round(tmScore + gcScore + threePrimeScore + hairpinScore + dimerScore + annealScore + constraintScore);
-        }
+        // ─── WEIGHTED SCIENTIFIC SCORE ───────────────────────────────────────
+        const tmScore = Math.max(0, 1 - tmDiff / 10) * 20;
+        const gcAvg = (fwdGC + revGC) / 2;
+        const gcScore = Math.max(0, 1 - Math.abs(gcAvg - 50) / 25) * 10;
+        const avgThreePrime = (fwd3DG + rev3DG) / 2;
+        const threePrimeScore = (avgThreePrime < -10 ? 1.0 : avgThreePrime < -7 ? 0.7 : 0.4) * 15;
+        const worstHairpin = Math.min(final_report.hairpin_forward, final_report.hairpin_reverse);
+        const hairpinScore = (worstHairpin > -1 ? 1.0 : worstHairpin > -3 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 15;
+        const worstDimer = Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse, final_report.cross_dimer);
+        const dimerScore = (worstDimer > -2 ? 1.0 : worstDimer > -5 ? 0.7 : worstDimer > -7 ? 0.4 : 0.1) * 15;
+        const annealScore = (annealingTemp >= 55 && annealingTemp <= 65 ? 1.0 : annealingTemp >= 50 && annealingTemp <= 70 ? 0.6 : 0.2) * 15;
+        const last2Fwd = fwdSeq.slice(-2);
+        const last2Rev = revSeq.slice(-2);
+        const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length >= 1;
+        const revClamp = (last2Rev.match(/[GC]/g) || []).length >= 1;
+        const constraintScore = ((fwdClamp ? 5 : 0) + (revClamp ? 5 : 0));
+        weightedScore = Math.round(tmScore + gcScore + threePrimeScore + hairpinScore + dimerScore + annealScore + constraintScore);
 
         // ─── SECONDARY STRUCTURE SCORE ───────────────────────────────────────
         combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
@@ -317,30 +348,50 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         else if (combinedStructureScore >= 3) structureInterpretation = 'Moderate secondary structure presence.';
         threePrimeInterference = fwdStructure.threePrimeInvolved || revStructure.threePrimeInvolved;
 
-        // ─── STEP 3: BAYESIAN RISK MODELING ─────────────────────────────────
-        if (!autoRejected) {
-            if (weightedScore >= 85) {
-                successProbability = combinedStructureScore <= 4 ? Math.max(85, Math.min(99, weightedScore)) : Math.floor(65 + Math.random() * 15);
-            } else if (weightedScore >= 70) {
-                successProbability = combinedStructureScore <= 4 ? Math.floor(75 + Math.random() * 10) : Math.floor(60 + Math.random() * 15);
-            } else {
-                successProbability = Math.floor(40 + Math.random() * 24);
-            }
+        // ─── STEP 3: BIOLOGICAL PROBABILITY (computed for ALL primers) ──────
+        // Probability reflects real biological risk even for auto-rejected primers.
+        // 0% is reserved ONLY for thermoStatus === 'FAILED' or model integrity invalid.
+        if (weightedScore >= 85) {
+            successProbability = combinedStructureScore <= 4 ? Math.max(85, Math.min(99, weightedScore)) : Math.floor(65 + Math.random() * 15);
+        } else if (weightedScore >= 70) {
+            successProbability = combinedStructureScore <= 4 ? Math.floor(75 + Math.random() * 10) : Math.floor(60 + Math.random() * 15);
+        } else if (weightedScore >= 40) {
+            successProbability = Math.floor(40 + Math.random() * 24);
+        } else {
+            // Very poor score — assign low but non-zero probability
+            successProbability = Math.floor(20 + Math.random() * 20);
         }
+
+        // If auto-rejected due to safety gates, cap probability at 40%
+        // (the biology is bad, but the engine still worked)
+        if (autoRejected) {
+            successProbability = Math.min(successProbability, 40);
+            // Ensure floor of at least 5% (engine is valid, just risky)
+            successProbability = Math.max(successProbability, 5);
+        }
+
         failureProbability = 1 - (successProbability / 100);
 
-        if (successProbability < 80 && classification === 'Excellent') {
-            classification = 'Very Good';
-        }
+        // ─── STEP 2: Risk tier ALWAYS derived from probability ──────────────
+        riskTier = deriveRiskTier(successProbability);
 
-        const C_MAP = {
-            'Excellent': '#00FFC6',
-            'Very Good': '#3b82f6',
-            'Acceptable': '#60A5FA',
-            'Borderline': '#F59E0B',
-            'Not Recommended': '#EF4444'
-        };
-        classColor = C_MAP[classification] || '#F59E0B';
+        // ─── Classification ─────────────────────────────────────────────────
+        if (autoRejected) {
+            classification = 'Auto-Rejected';
+            classColor = '#EF4444';
+        } else if (weightedScore >= 85 && successProbability >= 80) {
+            classification = 'Recommended';
+            classColor = '#00FFC6';
+        } else if (weightedScore >= 70) {
+            classification = 'Acceptable';
+            classColor = '#60A5FA';
+        } else if (weightedScore >= 50) {
+            classification = 'Not Recommended';
+            classColor = '#F59E0B';
+        } else {
+            classification = 'Not Recommended';
+            classColor = '#EF4444';
+        }
 
         // Scientific summary points
         if (tmDiff <= 2) summaryPoints.push(`Balanced Tm (Delta ${tmDiff} C)`);
@@ -351,17 +402,62 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         if (avgGC >= 40 && avgGC <= 60) summaryPoints.push('GC content optimal');
         else summaryPoints.push(`GC content ${avgGC}% (outside 40-60% ideal)`);
 
-        const worstDimer = Math.min(fwdSelfDimer, revSelfDimer, crossDimer);
-        if (worstDimer > -3) summaryPoints.push('No significant dimer formation');
-        else summaryPoints.push(`Dimer risk detected (dG ${worstDimer} kcal/mol)`);
+        const worstDimerSummary = Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse, final_report.cross_dimer);
+        if (worstDimerSummary > -3) summaryPoints.push('No significant dimer formation');
+        else summaryPoints.push(`Dimer risk detected (dG ${worstDimerSummary} kcal/mol)`);
 
         if (!autoRejected && triggers.length === 0) summaryPoints.push('All safety gates passed');
         if (annealingTemp >= 55 && annealingTemp <= 65) summaryPoints.push('Optimal annealing range');
     } else {
+        // thermoStatus === 'FAILED': engine could not compute
+        successProbability = 0;
+        riskTier = 'Critical';
         classification = 'Auto-Rejected';
         classColor = '#EF4444';
+        failureProbability = 1;
         summaryPoints.push('Thermodynamic nearest-neighbor calculations returned invalid values.');
-        summaryPoints.push('Re-evaluate ΔG computation engine before primer assessment.');
+        summaryPoints.push('Re-evaluate dG computation engine before primer assessment.');
+    }
+
+    // ─── STEP 5: FINAL VALIDATION — assert consistency before return ────
+    const validationErrors = [];
+
+    // Displayed cross-dimer must match final_report
+    if (thermoData.crossDimerDG !== final_report.cross_dimer)
+        validationErrors.push(`Cross-dimer mismatch: thermoData=${thermoData.crossDimerDG}, report=${final_report.cross_dimer}`);
+    if (thermoData.forward.hairpinDG !== final_report.hairpin_forward)
+        validationErrors.push(`Fwd hairpin mismatch: thermoData=${thermoData.forward.hairpinDG}, report=${final_report.hairpin_forward}`);
+    if (thermoData.forward.selfDimerDG !== final_report.self_dimer_forward)
+        validationErrors.push(`Fwd self-dimer mismatch: thermoData=${thermoData.forward.selfDimerDG}, report=${final_report.self_dimer_forward}`);
+    if (thermoData.reverse.hairpinDG !== final_report.hairpin_reverse)
+        validationErrors.push(`Rev hairpin mismatch: thermoData=${thermoData.reverse.hairpinDG}, report=${final_report.hairpin_reverse}`);
+    if (thermoData.reverse.selfDimerDG !== final_report.self_dimer_reverse)
+        validationErrors.push(`Rev self-dimer mismatch: thermoData=${thermoData.reverse.selfDimerDG}, report=${final_report.self_dimer_reverse}`);
+
+    // Risk tier must match probability
+    const expectedRiskTier = deriveRiskTier(typeof successProbability === 'number' ? successProbability : 0);
+    if (riskTier !== expectedRiskTier)
+        validationErrors.push(`Risk tier mismatch: tier=${riskTier}, expected=${expectedRiskTier} for prob=${successProbability}`);
+
+    // No dG value should be exactly 0
+    const dgValues = [
+        ['hairpin_forward', final_report.hairpin_forward],
+        ['hairpin_reverse', final_report.hairpin_reverse],
+        ['self_dimer_forward', final_report.self_dimer_forward],
+        ['self_dimer_reverse', final_report.self_dimer_reverse],
+        ['cross_dimer', final_report.cross_dimer],
+    ];
+    for (const [name, val] of dgValues) {
+        if (typeof val === 'number' && val === 0)
+            validationErrors.push(`${name} dG = 0 (forbidden)`);
+    }
+
+    if (validationErrors.length > 0) {
+        console.error('[PrimerEvalEngine] Validation FAILED:', validationErrors);
+        return {
+            error: 'Internal validation failed. Check console for details.',
+            validationErrors,
+        };
     }
 
     return {
@@ -369,7 +465,7 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         successProbability, riskTier, failureProbability, thermoStatus,
         meltingCurve: { fwdMeltQuality, revMeltQuality, overallMeltQuality, asymmetricMelting },
         structureScore: combinedStructureScore, structureInterpretation, threePrimeInterference,
-        fwdStructure, revStructure, summaryPoints, thermoData
+        fwdStructure, revStructure, summaryPoints, thermoData, final_report
     };
 }
 
