@@ -319,7 +319,10 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   const tmDiff = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
   const annealT = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
   const gcMax = Math.max(fwd.gc_content, rev.gc_content);
-  const overallScore = Math.round((fwd.quality_score + rev.quality_score) / 2);
+  // NaN guard: if quality_score is NaN/undefined, default to 0
+  const fwdScore = isNaN(fwd.quality_score) || fwd.quality_score == null ? 0 : fwd.quality_score;
+  const revScore = isNaN(rev.quality_score) || rev.quality_score == null ? 0 : rev.quality_score;
+  const overallScore = Math.round((fwdScore + revScore) / 2);
   const hpRisk = dg => dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
 
   // Warnings — include relaxation info
@@ -336,13 +339,45 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (fwdRep > 5) warnings.push({ urgency: 'medium', text: `Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
   if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
-  // Classification
-  let classification = overallScore >= 85 ? 'Excellent' : overallScore >= 70 ? 'Good' : overallScore >= 60 ? 'Fair' : 'Poor';
-  if (isBorderline) classification = 'Borderline';
-  else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Good';
-  else if (relaxLevel > 0 && classification === 'Good') classification = 'Fair';
-  else if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
-  else if (tmDiff > 3 && classification === 'Good') classification = 'Fair';
+  // ─── SAFETY GATE CHECK (must come BEFORE classification) ────────────────
+  const safetyTriggers = [];
+  // NaN/null/0 thermodynamic value check
+  const thermoVals = [fwd.tm, rev.tm, fwd.hairpin_dg, rev.hairpin_dg, fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg];
+  const thermoNames = ['Forward Tm', 'Reverse Tm', 'Forward Hairpin ΔG', 'Reverse Hairpin ΔG', 'Forward Self-dimer ΔG', 'Reverse Self-dimer ΔG', 'Cross-dimer ΔG'];
+  thermoVals.forEach((v, i) => {
+    if (v === null || v === undefined || isNaN(v)) safetyTriggers.push(`${thermoNames[i]} = invalid (NaN/null)`);
+  });
+  if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff}°C exceeds 5°C limit`);
+  if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT}°C below 50°C`);
+  if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer ΔG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
+  if (cross_dimer_dg < -9) safetyTriggers.push(`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol below -9 kcal/mol`);
+  const worstHairpin = Math.min(fwd.hairpin_dg, rev.hairpin_dg);
+  if (worstHairpin < -6) safetyTriggers.push(`Hairpin ΔG ${worstHairpin} kcal/mol below -6 kcal/mol`);
+  if (relaxLevel >= 3) safetyTriggers.push(`Relaxation pass ${relaxLevel} reached`);
+
+  const autoRejected = safetyTriggers.length > 0;
+
+  // Classification — safety gates override everything
+  let classification;
+  if (autoRejected) {
+    classification = 'Auto-Rejected';
+  } else if (overallScore >= 85) {
+    classification = 'Excellent';
+  } else if (overallScore >= 70) {
+    classification = 'Good';
+  } else if (overallScore >= 60) {
+    classification = 'Fair';
+  } else {
+    classification = 'Poor';
+  }
+  // Downgrade for relaxation (only if not auto-rejected)
+  if (!autoRejected) {
+    if (isBorderline) classification = 'Borderline';
+    else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Good';
+    else if (relaxLevel > 0 && classification === 'Good') classification = 'Fair';
+    else if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
+    else if (tmDiff > 3 && classification === 'Good') classification = 'Fair';
+  }
 
   const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
 
@@ -373,7 +408,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   const worstDimer = Math.min(fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg);
   if (worstDimer < -9) riskFactors.push(0.60);
   else if (worstDimer < -5) riskFactors.push(0.30);
-  const worstHairpin = Math.min(fwd.hairpin_dg, rev.hairpin_dg);
+  // worstHairpin already declared above in safety gate section
   if (worstHairpin < -6) riskFactors.push(0.50);
   else if (worstHairpin < -3) riskFactors.push(0.20);
   const failProb = riskFactors.length > 0 ? 1 - riskFactors.reduce((p, r) => p * (1 - r), 1) : 0.05;
@@ -403,15 +438,6 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   else if (structScore >= 3) structInterp = 'Moderate secondary structure presence.';
   const threePrimeInterference = fwdStruct.threePrimeInvolved || revStruct.threePrimeInvolved;
 
-  // Safety Gate Check
-  const safetyTriggers = [];
-  if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff} C exceeds 5 C limit`);
-  if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT} C below 50 C`);
-  if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer dG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
-  if (cross_dimer_dg < -9) safetyTriggers.push(`Cross-dimer dG ${cross_dimer_dg} kcal/mol below -9 kcal/mol`);
-  if (worstHairpin < -6) safetyTriggers.push(`Hairpin dG ${worstHairpin} kcal/mol below -6 kcal/mol`);
-  if (relaxLevel >= 3) safetyTriggers.push(`Relaxation pass ${relaxLevel} reached`);
-
   return {
     forward_primer: mkPrimer(fwd, false),
     reverse_primer: mkPrimer(rev, true),
@@ -422,6 +448,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     specificity_score: specScore,
     overall_score: overallScore,
     classification,
+    autoRejected,
     warnings,
     isBorderline,
     relaxLevel,
@@ -431,7 +458,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
       successProbability: successProb,
       riskTier,
       safetyTriggers,
-      safetyPassed: safetyTriggers.length === 0,
+      safetyPassed: !autoRejected,
       meltingCurve: { fwdMeltQ, revMeltQ, summary: meltSummary, asymmetric: asymMelt },
       structureScore: structScore,
       structureInterpretation: structInterp,
@@ -613,8 +640,8 @@ const APP_MODES = {
 const QUAL_COL = { Excellent: '#00FFC6', Good: '#00c9a0', Fair: '#F59E0B', Poor: '#EF4444' };
 const RISK_COL = { low: '#00FFC6', medium: '#F59E0B', high: '#EF4444' };
 const URG_COL = { high: '#EF4444', medium: '#F59E0B', low: '#00FFC6' };
-const CLASS_COL = { Excellent: '#00FFC6', Good: '#60A5FA', Fair: '#F59E0B', Poor: '#EF4444', Borderline: '#F87171' };
-const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', Good: 'rgba(96,165,250,0.1)', Fair: 'rgba(245,158,11,0.1)', Poor: 'rgba(239,68,68,0.1)', Borderline: 'rgba(248,113,113,0.1)' };
+const CLASS_COL = { Excellent: '#00FFC6', Good: '#60A5FA', Fair: '#F59E0B', Poor: '#EF4444', Borderline: '#F87171', 'Auto-Rejected': '#DC2626' };
+const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', Good: 'rgba(96,165,250,0.1)', Fair: 'rgba(245,158,11,0.1)', Poor: 'rgba(239,68,68,0.1)', Borderline: 'rgba(248,113,113,0.1)', 'Auto-Rejected': 'rgba(220,38,38,0.15)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -1195,8 +1222,14 @@ export default function PrimerDesigner() {
                 }}>
                   {primers.classification}
                 </span>
-                <span style={{ fontSize: '1.15rem', fontWeight: 700, color: CLASS_COL[primers.classification] }}>{primers.overall_score}</span>
-                <span style={{ fontSize: '0.78rem', color: '#6b7080' }}>/100 overall</span>
+                {primers.autoRejected ? (
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#DC2626' }}>Safety Gate Triggered</span>
+                ) : (
+                  <>
+                    <span style={{ fontSize: '1.15rem', fontWeight: 700, color: CLASS_COL[primers.classification] }}>{primers.overall_score}</span>
+                    <span style={{ fontSize: '0.78rem', color: '#6b7080' }}>/100 overall</span>
+                  </>
+                )}
                 <span style={{ fontSize: '0.78rem', color: '#818cf8' }}>Specificity: {primers.specificity_score}/100</span>
               </div>
               <div style={{ position: 'relative' }}>
