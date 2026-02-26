@@ -8,7 +8,7 @@ import MutationFinder from './components/MutationFinder';
 import SequenceAlignment from './components/SequenceAlignment';
 import CRISPRFinder from './components/CRISPRFinder';
 import PrimerDesigner from './components/PrimerDesigner';
-import PrimerEvaluator from './components/PrimerEvaluator';
+
 
 // Loading Spinner Component
 const LoadingSpinner = () => (
@@ -55,7 +55,7 @@ function App() {
   const [alignmentResult, setAlignmentResult] = useState(null);
   const [crisprResult, setCrisprResult] = useState(null);
   const [primerResult, setPrimerResult] = useState(null);
-  const [primerEvalResult, setPrimerEvalResult] = useState(null);
+
 
   // Close sample menu when clicking outside
   useEffect(() => {
@@ -157,9 +157,7 @@ function App() {
       case 'primers':
         setPrimerResult(null);
         break;
-      case 'pcr-eval':
-        setPrimerEvalResult(null);
-        break;
+
       default:
         break;
     }
@@ -686,12 +684,7 @@ function App() {
             >
               Primers
             </button>
-            <button
-              onClick={() => setActiveTab("pcr-eval")}
-              className={`tab-btn ${activeTab === "pcr-eval" ? "active" : ""}`}
-            >
-              PCR Evaluator
-            </button>
+
           </div>
 
           {/* ============================================================ */}
@@ -745,13 +738,6 @@ function App() {
                 onClear={() => clearToolResult('primers')}
               />
             )}
-            {activeTab === "pcr-eval" && (
-              <PrimerEvaluator
-                result={primerEvalResult}
-                setResult={setPrimerEvalResult}
-                onClear={() => clearToolResult('pcr-eval')}
-              />
-            )}
           </div>
         </div>
 
@@ -787,7 +773,7 @@ function App() {
                   <li><strong>Alignment:</strong> Perform global (Needleman-Wunsch) or local (Smith-Waterman) sequence alignment</li>
                   <li><strong>CRISPR:</strong> Find PAM sites for CRISPR-Cas9/Cas12a gene editing with multiple enzyme support</li>
                   <li><strong>Primers:</strong> Design optimized PCR primers with application-specific parameters (qPCR, cloning, diagnostic)</li>
-                  <li><strong>PCR Evaluator:</strong> Evaluate primer pairs with hard safety gates, Bayesian risk modeling, melting simulation, and secondary structure analysis</li>
+
                 </ul>
 
                 <h3 style={{ fontFamily: 'Montserrat, sans-serif', color: '#00BFA5', marginTop: '1.5rem' }}>

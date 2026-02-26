@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { evaluatePrimerPair, calcSecondaryStructureScore } from '../utils/primerEvalEngine';
 
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
@@ -358,6 +359,59 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     issues: [], warnings: []
   });
 
+  // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
+  // Run the full 6-step evaluation pipeline on the designed primer pair
+  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic');
+  const evalData = evalResult.error ? null : evalResult;
+
+  // Bayesian Risk
+  const riskFactors = [];
+  if (tmDiff > 5) riskFactors.push(0.65);
+  else if (tmDiff > 3) riskFactors.push(0.30);
+  if (annealT < 50) riskFactors.push(0.55);
+  else if (annealT < 55) riskFactors.push(0.25);
+  const worstDimer = Math.min(fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg);
+  if (worstDimer < -9) riskFactors.push(0.60);
+  else if (worstDimer < -5) riskFactors.push(0.30);
+  const worstHairpin = Math.min(fwd.hairpin_dg, rev.hairpin_dg);
+  if (worstHairpin < -6) riskFactors.push(0.50);
+  else if (worstHairpin < -3) riskFactors.push(0.20);
+  const failProb = riskFactors.length > 0 ? 1 - riskFactors.reduce((p, r) => p * (1 - r), 1) : 0.05;
+  const successProb = Math.round((1 - failProb) * 100);
+  let riskTier = 'Low';
+  if (failProb > 0.70) riskTier = 'Critical';
+  else if (failProb > 0.40) riskTier = 'High';
+  else if (failProb > 0.20) riskTier = 'Moderate';
+
+  // Melting Curve Simulation
+  const fwdGC = fwd.gc_content, revGC = rev.gc_content;
+  const fwdSpread = fwdGC > 65 || fwdGC < 35 ? 4.5 : fwdGC > 55 || fwdGC < 40 ? 2.8 : 1.5;
+  const revSpread = revGC > 65 || revGC < 35 ? 4.5 : revGC > 55 || revGC < 40 ? 2.8 : 1.5;
+  const fwdMeltQ = fwdSpread > 3 ? 'Broad / Unstable' : fwdSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
+  const revMeltQ = revSpread > 3 ? 'Broad / Unstable' : revSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
+  const asymMelt = tmDiff > 3;
+  let meltSummary = 'Sharp melting profile. Symmetric primer dissociation expected.';
+  if (fwdMeltQ !== 'Sharp & Specific' || revMeltQ !== 'Sharp & Specific') meltSummary = `Forward: ${fwdMeltQ}. Reverse: ${revMeltQ}.`;
+  if (asymMelt) meltSummary += ' Asymmetric melting behavior detected.';
+
+  // Secondary Structure
+  const fwdStruct = calcSecondaryStructureScore(fwd.sequence);
+  const revStruct = calcSecondaryStructureScore(rev.sequence);
+  const structScore = Math.min(10, Math.round((fwdStruct.score + revStruct.score) / 2));
+  let structInterp = 'Minimal secondary structure risk.';
+  if (structScore >= 6) structInterp = 'High interference risk from secondary structures.';
+  else if (structScore >= 3) structInterp = 'Moderate secondary structure presence.';
+  const threePrimeInterference = fwdStruct.threePrimeInvolved || revStruct.threePrimeInvolved;
+
+  // Safety Gate Check
+  const safetyTriggers = [];
+  if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff} C exceeds 5 C limit`);
+  if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT} C below 50 C`);
+  if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer dG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
+  if (cross_dimer_dg < -9) safetyTriggers.push(`Cross-dimer dG ${cross_dimer_dg} kcal/mol below -9 kcal/mol`);
+  if (worstHairpin < -6) safetyTriggers.push(`Hairpin dG ${worstHairpin} kcal/mol below -6 kcal/mol`);
+  if (relaxLevel >= 3) safetyTriggers.push(`Relaxation pass ${relaxLevel} reached`);
+
   return {
     forward_primer: mkPrimer(fwd, false),
     reverse_primer: mkPrimer(rev, true),
@@ -372,6 +426,19 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     isBorderline,
     relaxLevel,
     dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
+    // ─── EVALUATION ENGINE DATA ───
+    evaluation: {
+      successProbability: successProb,
+      riskTier,
+      safetyTriggers,
+      safetyPassed: safetyTriggers.length === 0,
+      meltingCurve: { fwdMeltQ, revMeltQ, summary: meltSummary, asymmetric: asymMelt },
+      structureScore: structScore,
+      structureInterpretation: structInterp,
+      threePrimeInterference,
+      fwdStructure: fwdStruct,
+      revStructure: revStruct,
+    },
     pcr_protocol: {
       annealing_temp: annealT,
       extension_time: Math.max(30, Math.ceil(amp / 1000) * 60),
@@ -384,7 +451,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
           ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
           : 'Confirm product size by gel electrophoresis. Sequence before downstream use.',
         `Denaturation: 98°C 30s | Annealing: ${annealT}°C 30s | Extension: 72°C ${Math.max(30, Math.ceil(amp / 1000) * 60)}s`,
-        ...(relaxLevel > 0 ? ['⚠ Relaxed constraints were used — validate these primers empirically before committing to synthesis.'] : [])
+        ...(relaxLevel > 0 ? ['Relaxed constraints were used — validate these primers empirically before committing to synthesis.'] : [])
       ]
     },
     _meta: {
@@ -1180,6 +1247,83 @@ export default function PrimerDesigner() {
                 </div>
               ))}
             </div>
+
+            {/* ═══ EVALUATION ENGINE RESULTS ═══ */}
+            {primers.evaluation && (
+              <div style={{ marginBottom: '1.1rem' }}>
+
+                {/* Risk Assessment */}
+                <div className="pc" style={{ borderColor: primers.evaluation.riskTier === 'Low' ? 'rgba(0,255,198,0.25)' : primers.evaluation.riskTier === 'Moderate' ? 'rgba(245,158,11,0.25)' : 'rgba(239,68,68,0.25)', background: primers.evaluation.riskTier === 'Low' ? 'rgba(0,255,198,0.04)' : primers.evaluation.riskTier === 'Moderate' ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.65rem' }}>
+                    <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#60A5FA', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Risk Assessment (Bayesian Model)</span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.55rem' }}>
+                    <div className="stat-b">
+                      <div className="stat-v" style={{ color: primers.evaluation.riskTier === 'Low' ? '#00FFC6' : primers.evaluation.riskTier === 'Moderate' ? '#F59E0B' : '#EF4444' }}>{primers.evaluation.successProbability}%</div>
+                      <div className="stat-l">PCR Success Probability</div>
+                    </div>
+                    <div className="stat-b">
+                      <div className="stat-v" style={{ fontSize: '1.1rem', color: primers.evaluation.riskTier === 'Low' ? '#00FFC6' : primers.evaluation.riskTier === 'Moderate' ? '#F59E0B' : '#EF4444' }}>{primers.evaluation.riskTier}</div>
+                      <div className="stat-l">Risk Tier</div>
+                    </div>
+                    <div className="stat-b">
+                      <div className="stat-v" style={{ fontSize: '1.1rem', color: primers.evaluation.safetyPassed ? '#00FFC6' : '#EF4444' }}>{primers.evaluation.safetyPassed ? 'All Passed' : 'Failed'}</div>
+                      <div className="stat-l">Safety Gates</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Safety Gate Triggers */}
+                {primers.evaluation.safetyTriggers.length > 0 && (
+                  <div className="pc" style={{ borderColor: 'rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Safety Gate Triggers</div>
+                    {primers.evaluation.safetyTriggers.map((t, i) => (
+                      <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', background: 'rgba(239,68,68,0.08)', borderRadius: 7, padding: '0.5rem 0.75rem', marginBottom: '0.35rem', fontSize: '0.86rem', color: '#FCA5A5', borderLeft: '3px solid #EF4444' }}>
+                        <span>{t}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Melting Behavior */}
+                <div className="pc">
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Melting Curve Simulation</div>
+                  <p style={{ fontSize: '0.92rem', color: '#8a8f9e', lineHeight: 1.75, margin: '0 0 0.65rem' }}>{primers.evaluation.meltingCurve.summary}</p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.45rem' }}>
+                    <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Forward</span>
+                      <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.fwdMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.fwdMeltQ}</span>
+                    </div>
+                    <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Reverse</span>
+                      <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.revMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.revMeltQ}</span>
+                    </div>
+                    {primers.evaluation.meltingCurve.asymmetric && (
+                      <div style={{ background: 'rgba(245,158,11,0.08)', borderRadius: 7, padding: '0.5rem 0.65rem', borderLeft: '3px solid #F59E0B' }}>
+                        <span style={{ fontSize: '0.82rem', color: '#F59E0B', fontWeight: 600 }}>Asymmetric melting detected</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Structural Integrity */}
+                <div className="pc">
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Secondary Structure Analysis</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '0.55rem' }}>
+                    <div style={{ width: 52, height: 52, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.05rem', fontFamily: '"Sora",sans-serif', color: primers.evaluation.structureScore >= 6 ? '#EF4444' : primers.evaluation.structureScore >= 3 ? '#F59E0B' : '#00FFC6', background: primers.evaluation.structureScore >= 6 ? 'rgba(239,68,68,0.1)' : primers.evaluation.structureScore >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(0,255,198,0.1)', border: `2px solid ${primers.evaluation.structureScore >= 6 ? '#EF4444' : primers.evaluation.structureScore >= 3 ? '#F59E0B' : '#00FFC6'}` }}>
+                      {primers.evaluation.structureScore}/10
+                    </div>
+                    <div>
+                      <div style={{ color: '#c8cad4', fontWeight: 600, fontSize: '0.94rem' }}>{primers.evaluation.structureInterpretation}</div>
+                      <div style={{ color: '#6b7080', fontSize: '0.84rem', marginTop: '0.18rem' }}>
+                        {primers.evaluation.threePrimeInterference ? "3' end structural interference DETECTED — severe impact on extension." : "No 3' end structural interference detected."}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
 
             {/* AI EXPLAIN */}
             <div style={{ marginBottom: '1.1rem' }}>
