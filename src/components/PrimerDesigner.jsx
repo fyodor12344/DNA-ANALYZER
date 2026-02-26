@@ -197,7 +197,7 @@ function scorePrimerFull(p, fullSeq, mode) {
   const tmScore = Math.max(0, 1 - Math.abs(p.tm - tmTarget) / 5);
 
   // 20% GC balance
-  const gcScore = Math.max(0, 1 - Math.abs(p.gc - 50) / 15);
+  const gcScore = Math.max(0, 1 - Math.abs(p.gc_content - 50) / 15);
 
   // 20% secondary structure (hairpin)
   const hpScore = p.hairpin_dg > -1 ? 1.0 : p.hairpin_dg > -2 ? 0.8 : p.hairpin_dg > -3 ? 0.55 : 0.0;
@@ -327,8 +327,6 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
 
   // Warnings — include relaxation info
   const warnings = [];
-  if (isBorderline) warnings.push({ urgency: 'high', text: 'Borderline pair — experimental validation strongly recommended before use' });
-  if (relaxLevel >= 1) warnings.push({ urgency: 'medium', text: `Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
   if (tmDiff > 3) warnings.push({ urgency: 'high', text: `Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
   if (gcMax > 70) warnings.push({ urgency: 'high', text: `GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
   if (cross_dimer_dg < -4) warnings.push({ urgency: 'medium', text: `Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold (limit −6)` });
@@ -342,11 +340,15 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   // ─── SAFETY GATE CHECK (must come BEFORE classification) ────────────────
   const safetyTriggers = [];
   // NaN/null/0 thermodynamic value check
+  // Note: ΔG = 0 is scientifically valid (means no stable structure formed), NOT invalid
   const thermoVals = [fwd.tm, rev.tm, fwd.hairpin_dg, rev.hairpin_dg, fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg];
   const thermoNames = ['Forward Tm', 'Reverse Tm', 'Forward Hairpin ΔG', 'Reverse Hairpin ΔG', 'Forward Self-dimer ΔG', 'Reverse Self-dimer ΔG', 'Cross-dimer ΔG'];
   thermoVals.forEach((v, i) => {
     if (v === null || v === undefined || isNaN(v)) safetyTriggers.push(`${thermoNames[i]} = invalid (NaN/null)`);
   });
+  // Tm = 0 IS invalid (no primer has Tm=0)
+  if (fwd.tm === 0) safetyTriggers.push('Forward Tm = 0°C (invalid)');
+  if (rev.tm === 0) safetyTriggers.push('Reverse Tm = 0°C (invalid)');
   if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff}°C exceeds 5°C limit`);
   if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT}°C below 50°C`);
   if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer ΔG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
@@ -377,6 +379,14 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     else if (relaxLevel > 0 && classification === 'Good') classification = 'Fair';
     else if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
     else if (tmDiff > 3 && classification === 'Good') classification = 'Fair';
+  }
+
+  // Context-appropriate warnings (post-classification)
+  if (autoRejected) {
+    warnings.unshift({ urgency: 'high', text: `AUTO-REJECTED: ${safetyTriggers.length} safety gate${safetyTriggers.length > 1 ? 's' : ''} triggered. This primer pair should NOT be used.` });
+  } else {
+    if (isBorderline) warnings.unshift({ urgency: 'high', text: 'Borderline pair — experimental validation strongly recommended before use' });
+    if (relaxLevel >= 1) warnings.push({ urgency: 'medium', text: `Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
   }
 
   const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
@@ -691,48 +701,63 @@ export default function PrimerDesigner() {
     if (!primers) return;
     let c = `PCR Primer Designer Results\n${'='.repeat(50)}\n\n`;
     c += `Application Mode: ${mode.name}\n`;
-    c += `Classification: ${primers.classification}  (${primers.overall_score}/100)\n`;
+    c += `Classification: ${primers.classification}\n`;
+    if (!primers.autoRejected) c += `Overall Score: ${primers.overall_score}/100\n`;
     c += `Product Size: ${primers.expected_product_size} bp\n`;
-    c += `Tm Difference: ${primers.tm_difference} °C\n`;
-    c += `Annealing Temperature: ${primers.annealing_temperature} °C\n`;
+    c += `Tm Difference: ${primers.tm_difference} \u00b0C\n`;
+    c += `Annealing Temperature: ${primers.annealing_temperature} \u00b0C\n`;
     c += `Specificity Score: ${primers.specificity_score}/100\n`;
-    c += `Cross-Dimer ΔG: ${primers.cross_dimer_dg} kcal/mol\n\n`;
+    c += `Cross-Dimer \u0394G: ${primers.cross_dimer_dg} kcal/mol\n\n`;
+    // Evaluation Engine Data
+    if (primers.evaluation) {
+      c += `RISK ASSESSMENT\n`;
+      c += `  PCR Success Probability: ${primers.evaluation.successProbability}%\n`;
+      c += `  Risk Tier: ${primers.evaluation.riskTier}\n`;
+      c += `  Safety Gates: ${primers.evaluation.safetyPassed ? 'All Passed' : 'FAILED'}\n\n`;
+      if (primers.evaluation.safetyTriggers.length > 0) {
+        c += `SAFETY GATE TRIGGERS\n`;
+        primers.evaluation.safetyTriggers.forEach(t => { c += `  - ${t}\n`; });
+        c += '\n';
+      }
+      c += `MELTING CURVE: ${primers.evaluation.meltingCurve.summary}\n`;
+      c += `STRUCTURE SCORE: ${primers.evaluation.structureScore}/10 - ${primers.evaluation.structureInterpretation}\n\n`;
+    }
     if (primers.warnings?.length) {
       c += `WARNINGS:\n`;
-      primers.warnings.forEach(w => { c += `  ⚠ ${w.text}\n`; });
+      primers.warnings.forEach(w => { c += `  ! ${w.text}\n`; });
       c += '\n';
     }
     if (primers.forward_primer) {
-      c += `FORWARD PRIMER:\n`;
+      c += `${primers.autoRejected ? 'REJECTED ' : ''}FORWARD PRIMER:\n`;
       c += `  Sequence: ${primers.forward_primer.sequence}\n`;
       c += `  Length: ${primers.forward_primer.length} bp\n`;
-      c += `  Tm: ${primers.forward_primer.tm} °C\n`;
+      c += `  Tm: ${primers.forward_primer.tm} \u00b0C\n`;
       c += `  GC: ${primers.forward_primer.gc_content}%\n`;
-      c += `  Hairpin ΔG: ${primers.forward_primer.hairpin.delta_g} kcal/mol\n`;
-      c += `  Self-Dimer ΔG: ${primers.forward_primer.self_dimer_dg} kcal/mol\n`;
-      c += `  3′ Stability ΔG: ${primers.forward_primer.three_prime_stability_dg} kcal/mol\n`;
+      c += `  Hairpin \u0394G: ${primers.forward_primer.hairpin.delta_g} kcal/mol\n`;
+      c += `  Self-Dimer \u0394G: ${primers.forward_primer.self_dimer_dg} kcal/mol\n`;
+      c += `  3\u2032 Stability \u0394G: ${primers.forward_primer.three_prime_stability_dg} kcal/mol\n`;
       c += `  Last 5bp GC: ${primers.forward_primer.last_5bp_gc_percent}%\n`;
       c += `  Quality: ${primers.forward_primer.quality_grade} (${primers.forward_primer.quality_score}/100)\n\n`;
     }
     if (primers.reverse_primer) {
-      c += `REVERSE PRIMER:\n`;
+      c += `${primers.autoRejected ? 'REJECTED ' : ''}REVERSE PRIMER:\n`;
       c += `  Sequence: ${primers.reverse_primer.sequence}\n`;
       c += `  Length: ${primers.reverse_primer.length} bp\n`;
-      c += `  Tm: ${primers.reverse_primer.tm} °C\n`;
+      c += `  Tm: ${primers.reverse_primer.tm} \u00b0C\n`;
       c += `  GC: ${primers.reverse_primer.gc_content}%\n`;
-      c += `  Hairpin ΔG: ${primers.reverse_primer.hairpin.delta_g} kcal/mol\n`;
-      c += `  Self-Dimer ΔG: ${primers.reverse_primer.self_dimer_dg} kcal/mol\n`;
-      c += `  3′ Stability ΔG: ${primers.reverse_primer.three_prime_stability_dg} kcal/mol\n`;
+      c += `  Hairpin \u0394G: ${primers.reverse_primer.hairpin.delta_g} kcal/mol\n`;
+      c += `  Self-Dimer \u0394G: ${primers.reverse_primer.self_dimer_dg} kcal/mol\n`;
+      c += `  3\u2032 Stability \u0394G: ${primers.reverse_primer.three_prime_stability_dg} kcal/mol\n`;
       c += `  Last 5bp GC: ${primers.reverse_primer.last_5bp_gc_percent}%\n`;
       c += `  Quality: ${primers.reverse_primer.quality_grade} (${primers.reverse_primer.quality_score}/100)\n\n`;
     }
-    if (detailed && primers.pcr_protocol) {
+    if (!primers.autoRejected && detailed && primers.pcr_protocol) {
       c += `PCR PROTOCOL:\n`;
-      c += `  Annealing Temp: ${primers.pcr_protocol.annealing_temp} °C\n`;
+      c += `  Annealing Temp: ${primers.pcr_protocol.annealing_temp} \u00b0C\n`;
       c += `  Extension Time: ${primers.pcr_protocol.extension_time} s\n`;
       c += `  Cycles: ${primers.pcr_protocol.cycles}\n`;
       c += `  Polymerase: ${primers.pcr_protocol.polymerase}\n`;
-      primers.pcr_protocol.notes?.forEach(n => { c += `  • ${n}\n`; });
+      primers.pcr_protocol.notes?.forEach(n => { c += `  - ${n}\n`; });
     }
     const blob = new Blob([c], { type: 'text/plain' });
     const a = document.createElement('a');
@@ -743,33 +768,60 @@ export default function PrimerDesigner() {
 
   const exportPDF = (detailed = false) => {
     if (!primers) return;
+    const ev = primers.evaluation;
+    const isRejected = primers.autoRejected;
     let h = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>PCR Primer Results</title>
     <style>body{font-family:Arial,sans-serif;margin:40px;color:#333}
-    h1{color:#00FFC6;border-bottom:3px solid #00FFC6;padding-bottom:10px}
+    h1{color:#00897B;border-bottom:3px solid #00897B;padding-bottom:10px}
+    h2{color:#00897B;margin-top:24px}
     .sum{background:#f0fdf4;padding:20px;border-radius:8px;margin:20px 0}
-    .box{margin:20px 0;padding:20px;border-left:4px solid #00FFC6;background:#f9f9f9;border-radius:4px}
+    .rejected-banner{background:#fef2f2;border:2px solid #dc2626;border-radius:8px;padding:16px;margin:16px 0;color:#dc2626;font-weight:bold;font-size:1.1em}
+    .risk-box{background:#f0f9ff;padding:16px;border-radius:8px;margin:12px 0;border-left:4px solid #2563eb}
+    .trigger{background:#fef2f2;padding:8px 12px;border-radius:4px;margin:4px 0;color:#dc2626;border-left:3px solid #dc2626}
+    .box{margin:20px 0;padding:20px;border-left:4px solid #00897B;background:#f9f9f9;border-radius:4px}
+    .box.rejected{border-left-color:#dc2626}
     code{background:#e5e5e5;padding:4px 8px;border-radius:3px;font-family:monospace;font-size:1.05em}
-    .lbl{font-weight:bold;color:#555}.warn{color:#d97706;background:#fef3c7;padding:8px 12px;border-radius:4px;margin:4px 0}
+    .warn{color:#d97706;background:#fef3c7;padding:8px 12px;border-radius:4px;margin:4px 0}
     table{width:100%;border-collapse:collapse;margin:10px 0}th,td{border:1px solid #ddd;padding:8px;text-align:left}
-    th{background:#00FFC6;color:#0c0e14}</style></head><body>
-    <h1>PCR Primer Designer Results</h1>
+    th{background:#00897B;color:white}</style></head><body>
+    <h1>PCR Primer Designer Report</h1>
     <div class="sum">
       <p><b>Mode:</b> ${mode.name}</p>
-      <p><b>Classification:</b> ${primers.classification} (${primers.overall_score}/100)</p>
+      <p><b>Classification:</b> ${primers.classification}${!isRejected ? ` (${primers.overall_score}/100)` : ''}</p>
       <p><b>Product Size:</b> ${primers.expected_product_size} bp</p>
-      <p><b>Annealing Temperature:</b> ${primers.annealing_temperature} °C</p>
       <p><b>Tm Difference:</b> ${primers.tm_difference} °C</p>
       <p><b>Cross-Dimer ΔG:</b> ${primers.cross_dimer_dg} kcal/mol</p>
       <p><b>Generated:</b> ${new Date().toLocaleString()}</p>
     </div>`;
+    // Rejection banner
+    if (isRejected) {
+      h += `<div class="rejected-banner">AUTO-REJECTED: This primer pair failed ${ev?.safetyTriggers?.length || 0} safety gate(s). Do NOT use these primers without redesign.</div>`;
+    }
+    // Risk Assessment
+    if (ev) {
+      h += `<div class="risk-box"><h2 style="margin-top:0;color:#2563eb">Risk Assessment (Bayesian Model)</h2>
+        <table><tr><th>Metric</th><th>Value</th></tr>
+        <tr><td>PCR Success Probability</td><td>${ev.successProbability}%</td></tr>
+        <tr><td>Risk Tier</td><td>${ev.riskTier}</td></tr>
+        <tr><td>Safety Gates</td><td>${ev.safetyPassed ? 'All Passed' : 'FAILED'}</td></tr>
+        <tr><td>Melting Profile</td><td>${ev.meltingCurve.summary}</td></tr>
+        <tr><td>Structure Score</td><td>${ev.structureScore}/10 — ${ev.structureInterpretation}</td></tr>
+        </table></div>`;
+      if (ev.safetyTriggers.length > 0) {
+        h += `<h2 style="color:#dc2626">Safety Gate Triggers</h2>`;
+        ev.safetyTriggers.forEach(t => { h += `<div class="trigger">${t}</div>`; });
+      }
+    }
+    // Warnings
     if (primers.warnings?.length) {
-      h += `<h2>⚠ Warnings</h2>`;
+      h += `<h2>Warnings</h2>`;
       primers.warnings.forEach(w => { h += `<div class="warn">${w.text}</div>`; });
     }
+    // Primer cards
     ['forward_primer', 'reverse_primer'].forEach(key => {
       const p = primers[key];
       if (!p) return;
-      h += `<div class="box"><h2>${key === 'forward_primer' ? 'Forward' : 'Reverse'} Primer</h2>
+      h += `<div class="box${isRejected ? ' rejected' : ''}"><h2>${isRejected ? 'Rejected ' : ''}${key === 'forward_primer' ? 'Forward' : 'Reverse'} Primer</h2>
         <p><b>Sequence:</b> <code>${p.sequence}</code></p>
         <table><tr><th>Parameter</th><th>Value</th></tr>
         <tr><td>Length</td><td>${p.length} bp</td></tr>
@@ -782,13 +834,14 @@ export default function PrimerDesigner() {
         <tr><td>Quality</td><td>${p.quality_grade} (${p.quality_score}/100)</td></tr>
         </table></div>`;
     });
-    if (detailed && primers.pcr_protocol) {
+    // Protocol — only when NOT rejected
+    if (!isRejected && detailed && primers.pcr_protocol) {
       h += `<div class="box"><h2>PCR Protocol</h2>
         <p><b>Annealing Temp:</b> ${primers.pcr_protocol.annealing_temp} °C</p>
         <p><b>Extension Time:</b> ${primers.pcr_protocol.extension_time} s</p>
         <p><b>Cycles:</b> ${primers.pcr_protocol.cycles}</p>
         <p><b>Polymerase:</b> ${primers.pcr_protocol.polymerase}</p>
-        ${primers.pcr_protocol.notes?.map(n => `<p>• ${n}</p>`).join('')}</div>`;
+        ${primers.pcr_protocol.notes?.map(n => `<p>- ${n}</p>`).join('')}</div>`;
     }
     h += `</body></html>`;
     const blob = new Blob([h], { type: 'text/html' });
@@ -823,9 +876,22 @@ export default function PrimerDesigner() {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 60000);
+      // Include evaluation engine data for better AI context
+      const aiData = {
+        ...primers,
+        evaluation_summary: primers.evaluation ? {
+          successProbability: primers.evaluation.successProbability,
+          riskTier: primers.evaluation.riskTier,
+          safetyPassed: primers.evaluation.safetyPassed,
+          safetyTriggers: primers.evaluation.safetyTriggers,
+          meltingProfile: primers.evaluation.meltingCurve?.summary,
+          structureScore: primers.evaluation.structureScore,
+          structureInterpretation: primers.evaluation.structureInterpretation
+        } : null
+      };
       const res = await fetch(`${API_URL}/api/explain`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool: 'PCR Primer Designer', data: primers }), signal: ctrl.signal
+        body: JSON.stringify({ tool: 'PCR Primer Designer', data: aiData }), signal: ctrl.signal
       });
       clearTimeout(t);
       if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'AI failed'); }
@@ -1359,11 +1425,13 @@ export default function PrimerDesigner() {
             )}
 
             {/* AI EXPLAIN */}
-            <div style={{ marginBottom: '1.1rem' }}>
-              <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
-                {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
-              </button>
-            </div>
+            {!primers.autoRejected && (
+              <div style={{ marginBottom: '1.1rem' }}>
+                <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
+                  {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
+                </button>
+              </div>
+            )}
             {aiExplanation && (
               <div className="ai-box">
                 <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#818cf8', marginBottom: '0.65rem' }}>AI Analysis</div>
@@ -1374,7 +1442,7 @@ export default function PrimerDesigner() {
             )}
 
             {/* BORDERLINE PAIRS PANEL */}
-            {primers.isBorderline && primers.borderline_pairs?.length > 0 && (
+            {!primers.autoRejected && primers.isBorderline && primers.borderline_pairs?.length > 0 && (
               <div className="pc" style={{ marginBottom: '0.55rem', borderColor: 'rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.75rem' }}>
                   <span style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', fontSize: '0.62rem', fontWeight: 800, padding: '0.2rem 0.48rem', borderRadius: 6, letterSpacing: '0.04em' }}>WARN</span>
@@ -1418,7 +1486,7 @@ export default function PrimerDesigner() {
             )}
 
             {/* RELAXED CONSTRAINT NOTICE */}
-            {!primers.isBorderline && primers.relaxLevel > 0 && (
+            {!primers.autoRejected && !primers.isBorderline && primers.relaxLevel > 0 && (
               <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.22)', borderRadius: 9, padding: '0.65rem 0.9rem', marginBottom: '0.9rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
                 <span style={{ fontSize: '0.78rem', color: '#F59E0B', fontWeight: 700 }}>NOTE:</span>
                 <div>
@@ -1431,7 +1499,7 @@ export default function PrimerDesigner() {
             )}
 
             {/* OPTIMIZATION TIPS */}
-            {primers.optimization_tips?.length > 0 && (
+            {!primers.autoRejected && primers.optimization_tips?.length > 0 && (
               <div className="pc" style={{ borderColor: 'rgba(245,158,11,0.22)', background: 'rgba(245,158,11,0.04)' }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.68rem' }}>PCR Optimization</div>
                 {primers.optimization_tips.map((t, i) => (
@@ -1448,7 +1516,9 @@ export default function PrimerDesigner() {
 
             {/* PRIMER PAIR CARDS */}
             <div style={{ marginBottom: '0.52rem' }}>
-              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Recommended Primers</span>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: primers.autoRejected ? '#EF4444' : '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                {primers.autoRejected ? 'Rejected Primers (Reference Only)' : 'Designed Primers'}
+              </span>
             </div>
             <div className="primer-grid">
               {[
@@ -1538,8 +1608,8 @@ export default function PrimerDesigner() {
               ))}
             </div>
 
-            {/* PCR PROTOCOL */}
-            {primers.pcr_protocol && (
+            {/* PCR PROTOCOL — only shown when NOT auto-rejected */}
+            {!primers.autoRejected && primers.pcr_protocol && (
               <div className="pc" style={{ marginTop: '0.55rem' }}>
                 <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.65rem' }}>Recommended Protocol</div>
                 <div className="proto-grid" style={{ marginBottom: '0.75rem' }}>
