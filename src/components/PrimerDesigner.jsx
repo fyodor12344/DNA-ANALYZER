@@ -863,14 +863,21 @@ export default function PrimerDesigner() {
     const v = validateSequence(sequence);
     if (!v.valid) { setError(v.error); return; }
     setLoading(true); setError(''); setPrimers(null); setAiExplanation('');
-    const res = await designPrimers(v.cleaned, mode);
-    setLoading(false);
-    if (res.success) {
-      res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
-      res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
-      res.data.optimization_tips = buildTips(res.data, mode);
-      setPrimers(res.data);
-    } else { setError(res.error); }
+    try {
+      const res = await designPrimers(v.cleaned, mode);
+      setLoading(false);
+      if (res.success) {
+        res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
+        res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
+        res.data.optimization_tips = buildTips(res.data, mode);
+        setPrimers(res.data);
+      } else {
+        setError(res.error);
+      }
+    } catch (e) {
+      setLoading(false);
+      setError(`An unexpected evaluation engine error occurred: ${e.message}`);
+    }
   };
 
   /* ── AI explain ── */
