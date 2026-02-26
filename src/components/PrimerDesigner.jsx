@@ -927,8 +927,10 @@ export default function PrimerDesigner() {
         // Direct evaluation for Curated Samples bypassing the sliding-window search
         const fStr = overrideSample.primer_pair.forward;
         const rStr = overrideSample.primer_pair.reverse;
-        const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin_dg: calcHairpinDG(fStr), self_dimer_dg: calcSelfDimerDG(fStr), three_prime_dg: calc3PrimeDG(fStr), last_5bp_gc: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
-        const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin_dg: calcHairpinDG(rStr), self_dimer_dg: calcSelfDimerDG(rStr), three_prime_dg: calc3PrimeDG(rStr), last_5bp_gc: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
+        const fHpDg = calcHairpinDG(fStr);
+        const rHpDg = calcHairpinDG(rStr);
+        const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin: { delta_g: fHpDg, risk_level: fHpDg > -3 ? 'low' : fHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(fStr), three_prime_stability_dg: calc3PrimeDG(fStr), last_5bp_gc_percent: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
+        const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin: { delta_g: rHpDg, risk_level: rHpDg > -3 ? 'low' : rHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(rStr), three_prime_stability_dg: calc3PrimeDG(rStr), last_5bp_gc_percent: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
         const cd = calcCrossDimerDG(fStr, rStr);
         let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline);
         f.quality_score = scorePrimerFull(f, v.cleaned, targetMode);
@@ -1338,14 +1340,14 @@ export default function PrimerDesigner() {
 
         {/* ═══ SEQUENCE INPUT ═══ */}
         <div className="pc">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.42rem' }}>
-            <label className="lbl" style={{ margin: 0 }}>Target DNA Sequence</label>
-            <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap' }}>
-              <label className="btn-sample" style={{ cursor: 'pointer', margin: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.65rem' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Target DNA Sequence</div>
+            <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="btn-sample" style={{ cursor: 'pointer', margin: 0, padding: '0.4rem 0.85rem' }}>
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <select className="btn-sample" value={activeSample ? activeSample.name : ''} onChange={handleSampleSelect} style={{ outline: 'none', cursor: 'pointer', appearance: 'none', paddingRight: '1rem', backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2360A5FA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right .7rem top 50%', backgroundSize: '.65rem auto' }}>
+              <select className="btn-sample" value={activeSample ? activeSample.name : ''} onChange={handleSampleSelect} style={{ outline: 'none', cursor: 'pointer', appearance: 'none', padding: '0.4rem 2rem 0.4rem 0.85rem', margin: 0, backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2360A5FA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right .7rem top 50%', backgroundSize: '.65rem auto' }}>
                 <option value="" disabled selected={!activeSample}>Load Sample ▼</option>
                 {CURATED_SAMPLES.map(s => (
                   <option key={s.name} value={s.name}>{s.name}</option>
