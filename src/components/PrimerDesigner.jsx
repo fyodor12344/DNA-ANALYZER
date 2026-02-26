@@ -23,17 +23,17 @@ const SAMPLE_SEQUENCE = [
 
 // ΔH (kcal/mol), ΔS (cal/mol·K)
 const NN = {
-  AA:[-7.9,-22.2], AT:[-7.2,-20.4], TA:[-7.2,-21.3], CA:[-8.5,-22.7],
-  GT:[-8.4,-22.4], CT:[-7.8,-21.0], GA:[-8.2,-22.2], CG:[-10.6,-27.2],
-  GC:[-9.8,-24.4], GG:[-8.0,-19.9], AC:[-7.8,-21.0], TC:[-8.2,-22.2],
-  TG:[-8.5,-22.7], AG:[-7.8,-21.0], TT:[-7.9,-22.2], CC:[-8.0,-19.9]
+  AA: [-7.9, -22.2], AT: [-7.2, -20.4], TA: [-7.2, -21.3], CA: [-8.5, -22.7],
+  GT: [-8.4, -22.4], CT: [-7.8, -21.0], GA: [-8.2, -22.2], CG: [-10.6, -27.2],
+  GC: [-9.8, -24.4], GG: [-8.0, -19.9], AC: [-7.8, -21.0], TC: [-8.2, -22.2],
+  TG: [-8.5, -22.7], AG: [-7.8, -21.0], TT: [-7.9, -22.2], CC: [-8.0, -19.9]
 };
 const INIT_AT = [2.3, 4.1];
 const INIT_GC = [0.1, -2.8];
-const R_GAS   = 1.987; // cal/mol·K
+const R_GAS = 1.987; // cal/mol·K
 
 const revComp = seq => {
-  const m = { A:'T', T:'A', G:'C', C:'G' };
+  const m = { A: 'T', T: 'A', G: 'C', C: 'G' };
   return seq.split('').reverse().map(b => m[b] || b).join('');
 };
 
@@ -42,13 +42,13 @@ function calcTmNN(seq) {
   seq = seq.toUpperCase();
   let dH = 0, dS = 0;
   for (let i = 0; i < seq.length - 1; i++) {
-    const p = seq[i] + seq[i+1];
+    const p = seq[i] + seq[i + 1];
     if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
   }
   // Initiation penalties
-  [seq[0], seq[seq.length-1]].forEach(b => {
+  [seq[0], seq[seq.length - 1]].forEach(b => {
     if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
-    else                  { dH += INIT_GC[0]; dS += INIT_GC[1]; }
+    else { dH += INIT_GC[0]; dS += INIT_GC[1]; }
   });
   // Salt correction for 50 mM NaCl
   dS += 0.368 * (seq.length - 1) * Math.log(0.05);
@@ -67,7 +67,7 @@ function calc3PrimeDG(seq) {
   const end = seq.slice(-5).toUpperCase();
   let dH = 0, dS = 0;
   for (let i = 0; i < end.length - 1; i++) {
-    const p = end[i] + end[i+1];
+    const p = end[i] + end[i + 1];
     if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
   }
   return parseFloat((dH - 310.15 * (dS / 1000)).toFixed(2));
@@ -85,15 +85,15 @@ function calcHairpinDG(seq) {
   let best = 0;
   for (let stemLen = 3; stemLen <= 7; stemLen++) {
     for (let loopLen = 3; loopLen <= 6; loopLen++) {
-      for (let i = 0; i <= n - 2*stemLen - loopLen; i++) {
-        const stem1  = seq.slice(i, i + stemLen);
-        const j      = i + stemLen + loopLen;
+      for (let i = 0; i <= n - 2 * stemLen - loopLen; i++) {
+        const stem1 = seq.slice(i, i + stemLen);
+        const j = i + stemLen + loopLen;
         if (j + stemLen > n) continue;
         const stem2rc = revComp(seq.slice(j, j + stemLen));
         if (stem1 !== stem2rc) continue;
         let dH = 0, dS = 0;
         for (let k = 0; k < stemLen - 1; k++) {
-          const p = stem1[k] + stem1[k+1];
+          const p = stem1[k] + stem1[k + 1];
           if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
         }
         const loopPen = loopLen === 3 ? 5.4 : loopLen === 4 ? 4.5 : 4.0;
@@ -117,7 +117,7 @@ function calcSelfDimerDG(seq) {
       if (end !== revComp(seq.slice(i, i + endLen))) continue;
       let dH = 0, dS = 0;
       for (let k = 0; k < endLen - 1; k++) {
-        const p = end[k] + end[k+1];
+        const p = end[k] + end[k + 1];
         if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
       }
       const dG = dH - 310.15 * (dS / 1000);
@@ -137,7 +137,7 @@ function calcCrossDimerDG(fwd, rev) {
     if (fEnd !== revComp(rev.slice(-endLen))) continue;
     let dH = 0, dS = 0;
     for (let k = 0; k < endLen - 1; k++) {
-      const p = fEnd[k] + fEnd[k+1];
+      const p = fEnd[k] + fEnd[k + 1];
       if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
     }
     const dG = dH - 310.15 * (dS / 1000);
@@ -147,7 +147,7 @@ function calcCrossDimerDG(fwd, rev) {
 }
 
 function hasRuns(seq, n = 4) {
-  return ['A','T','G','C'].some(b => seq.toUpperCase().includes(b.repeat(n)));
+  return ['A', 'T', 'G', 'C'].some(b => seq.toUpperCase().includes(b.repeat(n)));
 }
 
 function hasGCClamp(seq) {
@@ -165,7 +165,7 @@ function hasInternalComplementarity(seq) {
   seq = seq.toUpperCase();
   const n = seq.length;
   for (let len = 5; len <= 8; len++) {
-    for (let i = 0; i <= n - 2*len; i++) {
+    for (let i = 0; i <= n - 2 * len; i++) {
       const sub = seq.slice(i, i + len);
       for (let j = i + len; j <= n - len; j++) {
         if (seq.slice(j, j + len) === revComp(sub)) return true;
@@ -211,7 +211,7 @@ function scorePrimerFull(p, fullSeq, mode) {
   const rep = countRepeatHits(p.sequence, fullSeq);
   const specScore = rep <= 2 ? 1.0 : rep <= 5 ? 0.7 : rep <= 10 ? 0.35 : 0.1;
 
-  const total = 0.25*tmScore + 0.20*gcScore + 0.20*hpScore + 0.15*sdScore + 0.10*clampScore + 0.10*specScore;
+  const total = 0.25 * tmScore + 0.20 * gcScore + 0.20 * hpScore + 0.15 * sdScore + 0.10 * clampScore + 0.10 * specScore;
   return Math.round(total * 100);
 }
 
@@ -251,7 +251,7 @@ function scanCandidates(seq, mode, ampMin, ampMax, th) {
       hairpin_dg: hp, self_dimer_dg: sd,
       three_prime_dg: calc3PrimeDG(p),
       last_5bp_gc: calcLast5GC(p),
-      gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g)||[]).length }
+      gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g) || []).length }
     };
   };
 
@@ -315,33 +315,33 @@ function pickBorderlinePairs(fwds, revs, ampMin, ampMax) {
    Shared result builder for both strict and borderline paths.
    ─────────────────────────────────────────────────────────────────────────── */
 function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline) {
-  const tmDiff    = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
-  const annealT   = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
-  const gcMax     = Math.max(fwd.gc_content, rev.gc_content);
+  const tmDiff = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
+  const annealT = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
+  const gcMax = Math.max(fwd.gc_content, rev.gc_content);
   const overallScore = Math.round((fwd.quality_score + rev.quality_score) / 2);
-  const hpRisk    = dg => dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
+  const hpRisk = dg => dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
 
   // Warnings — include relaxation info
   const warnings = [];
-  if (isBorderline) warnings.push({ urgency:'high', text:'Borderline pair — experimental validation strongly recommended before use' });
-  if (relaxLevel >= 1) warnings.push({ urgency:'medium', text:`Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
-  if (tmDiff > 3)    warnings.push({ urgency:'high',   text:`Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
-  if (gcMax > 70)    warnings.push({ urgency:'high',   text:`GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
-  if (cross_dimer_dg < -4) warnings.push({ urgency:'medium', text:`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold (limit −6)` });
-  if (fwd.hairpin_dg < -3) warnings.push({ urgency:'medium', text:`Forward hairpin ΔG ${fwd.hairpin_dg} kcal/mol — relaxed threshold applied` });
-  if (rev.hairpin_dg < -3) warnings.push({ urgency:'medium', text:`Reverse hairpin ΔG ${rev.hairpin_dg} kcal/mol — relaxed threshold applied` });
+  if (isBorderline) warnings.push({ urgency: 'high', text: 'Borderline pair — experimental validation strongly recommended before use' });
+  if (relaxLevel >= 1) warnings.push({ urgency: 'medium', text: `Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
+  if (tmDiff > 3) warnings.push({ urgency: 'high', text: `Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
+  if (gcMax > 70) warnings.push({ urgency: 'high', text: `GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
+  if (cross_dimer_dg < -4) warnings.push({ urgency: 'medium', text: `Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold (limit −6)` });
+  if (fwd.hairpin_dg < -3) warnings.push({ urgency: 'medium', text: `Forward hairpin ΔG ${fwd.hairpin_dg} kcal/mol — relaxed threshold applied` });
+  if (rev.hairpin_dg < -3) warnings.push({ urgency: 'medium', text: `Reverse hairpin ΔG ${rev.hairpin_dg} kcal/mol — relaxed threshold applied` });
   const fwdRep = countRepeatHits(fwd.sequence, seq);
   const revRep = countRepeatHits(rev.sequence, seq);
-  if (fwdRep > 5) warnings.push({ urgency:'medium', text:`Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
-  if (revRep > 5) warnings.push({ urgency:'medium', text:`Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
+  if (fwdRep > 5) warnings.push({ urgency: 'medium', text: `Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
+  if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
   // Classification
   let classification = overallScore >= 85 ? 'Excellent' : overallScore >= 70 ? 'Good' : overallScore >= 60 ? 'Fair' : 'Poor';
-  if (isBorderline)                                              classification = 'Borderline';
-  else if (relaxLevel > 0 && classification === 'Excellent')     classification = 'Good';
-  else if (relaxLevel > 0 && classification === 'Good')          classification = 'Fair';
-  else if (tmDiff > 3 && classification === 'Excellent')         classification = 'Good';
-  else if (tmDiff > 3 && classification === 'Good')              classification = 'Fair';
+  if (isBorderline) classification = 'Borderline';
+  else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Good';
+  else if (relaxLevel > 0 && classification === 'Good') classification = 'Fair';
+  else if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
+  else if (tmDiff > 3 && classification === 'Good') classification = 'Fair';
 
   const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
 
@@ -359,23 +359,23 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   });
 
   return {
-    forward_primer:        mkPrimer(fwd, false),
-    reverse_primer:        mkPrimer(rev, true),
+    forward_primer: mkPrimer(fwd, false),
+    reverse_primer: mkPrimer(rev, true),
     cross_dimer_dg,
     expected_product_size: amp,
-    tm_difference:         tmDiff,
+    tm_difference: tmDiff,
     annealing_temperature: annealT,
-    specificity_score:     specScore,
-    overall_score:         overallScore,
+    specificity_score: specScore,
+    overall_score: overallScore,
     classification,
     warnings,
     isBorderline,
     relaxLevel,
     dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
     pcr_protocol: {
-      annealing_temp:  annealT,
-      extension_time:  Math.max(30, Math.ceil(amp / 1000) * 60),
-      cycles:          35,
+      annealing_temp: annealT,
+      extension_time: Math.max(30, Math.ceil(amp / 1000) * 60),
+      cycles: 35,
       polymerase: mode.name === 'qPCR (Real-Time)'
         ? 'SYBR Green Master Mix (high-fidelity)'
         : 'Phusion or Q5 High-Fidelity Polymerase',
@@ -424,7 +424,7 @@ async function designPrimers(seq, mode) {
 
   // ── PASS 0: Strict ────────────────────────────────────────────────────────
   {
-    const th = { gcMax:65, tmMin:58, tmMax:65, hpMin:-3, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:false };
+    const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 3, -6);
@@ -437,7 +437,7 @@ async function designPrimers(seq, mode) {
 
   // ── PASS 1: Relax Tm difference to 5°C ───────────────────────────────────
   {
-    const th = { gcMax:65, tmMin:58, tmMax:65, hpMin:-3, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:false };
+    const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
@@ -450,7 +450,7 @@ async function designPrimers(seq, mode) {
 
   // ── PASS 2: Relax GC to 70% and hairpin to -4 kcal/mol ───────────────────
   {
-    const th = { gcMax:70, tmMin:56, tmMax:67, hpMin:-4, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:true };
+    const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
@@ -465,7 +465,7 @@ async function designPrimers(seq, mode) {
   {
     const ampMin = Math.max(40, mode.prodMin - 50);
     const ampMax = mode.prodMax + 50;
-    const th = { gcMax:70, tmMin:56, tmMax:67, hpMin:-4, sdMin:-5, allowNoClamp:false, allowRuns3:false, relaxed:true };
+    const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
     const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6);
@@ -480,7 +480,7 @@ async function designPrimers(seq, mode) {
   {
     const ampMin = Math.max(40, mode.prodMin - 100);
     const ampMax = mode.prodMax + 100;
-    const th = { gcMax:75, tmMin:50, tmMax:70, hpMin:-5, sdMin:-6, allowNoClamp:true, allowRuns3:true, relaxed:true };
+    const th = { gcMax: 75, tmMin: 50, tmMax: 70, hpMin: -5, sdMin: -6, allowNoClamp: true, allowRuns3: true, relaxed: true };
     const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
     scoreAll(fwds, seq); scoreAll(revs, seq);
 
@@ -530,43 +530,43 @@ function buildAltCandidates(fwds, revs, best) {
 function validateSequence(seq) {
   const cleaned = seq.toUpperCase().replace(/[^ATGC]/g, '');
   if (cleaned.length === 0) return { valid: false, error: 'No valid DNA bases found.' };
-  if (cleaned.length < 40)  return { valid: false, error: 'Sequence must be at least 40 bp.' };
+  if (cleaned.length < 40) return { valid: false, error: 'Sequence must be at least 40 bp.' };
   return { valid: true, cleaned };
 }
 
 /* ─── APP MODES ──────────────────────────────────────────────────────────── */
 const APP_MODES = {
-  diagnostic: { name:'Diagnostic PCR',     desc:'Standard detection & identification',  prodMin:200,  prodMax:800,  tmMin:55, tmMax:65 },
-  cloning:    { name:'Cloning',            desc:'Gene cloning & subcloning',             prodMin:100,  prodMax:3000, tmMin:58, tmMax:68 },
-  qpcr:       { name:'qPCR (Real-Time)',   desc:'Quantitative real-time PCR',            prodMin:70,   prodMax:200,  tmMin:58, tmMax:62 },
-  mutation:   { name:'Mutation Detection', desc:'SNP detection & mutagenesis',           prodMin:150,  prodMax:500,  tmMin:60, tmMax:68 }
+  diagnostic: { name: 'Diagnostic PCR', desc: 'Standard detection & identification', prodMin: 200, prodMax: 800, tmMin: 55, tmMax: 65 },
+  cloning: { name: 'Cloning', desc: 'Gene cloning & subcloning', prodMin: 100, prodMax: 3000, tmMin: 58, tmMax: 68 },
+  qpcr: { name: 'qPCR (Real-Time)', desc: 'Quantitative real-time PCR', prodMin: 70, prodMax: 200, tmMin: 58, tmMax: 62 },
+  mutation: { name: 'Mutation Detection', desc: 'SNP detection & mutagenesis', prodMin: 150, prodMax: 500, tmMin: 60, tmMax: 68 }
 };
 
 /* ─── COLOURS ────────────────────────────────────────────────────────────── */
-const QUAL_COL = { Excellent:'#00FFC6', Good:'#00c9a0', Fair:'#F59E0B', Poor:'#EF4444' };
-const RISK_COL = { low:'#00FFC6', medium:'#F59E0B', high:'#EF4444' };
-const URG_COL  = { high:'#EF4444', medium:'#F59E0B', low:'#00FFC6' };
-const CLASS_COL = { Excellent:'#00FFC6', Good:'#60A5FA', Fair:'#F59E0B', Poor:'#EF4444', Borderline:'#F87171' };
-const CLASS_BG  = { Excellent:'rgba(0,255,198,0.1)', Good:'rgba(96,165,250,0.1)', Fair:'rgba(245,158,11,0.1)', Poor:'rgba(239,68,68,0.1)', Borderline:'rgba(248,113,113,0.1)' };
+const QUAL_COL = { Excellent: '#00FFC6', Good: '#00c9a0', Fair: '#F59E0B', Poor: '#EF4444' };
+const RISK_COL = { low: '#00FFC6', medium: '#F59E0B', high: '#EF4444' };
+const URG_COL = { high: '#EF4444', medium: '#F59E0B', low: '#00FFC6' };
+const CLASS_COL = { Excellent: '#00FFC6', Good: '#60A5FA', Fair: '#F59E0B', Poor: '#EF4444', Borderline: '#F87171' };
+const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', Good: 'rgba(96,165,250,0.1)', Fair: 'rgba(245,158,11,0.1)', Poor: 'rgba(239,68,68,0.1)', Borderline: 'rgba(248,113,113,0.1)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ════════════════════════════════════════════════════════════════════════════ */
 export default function PrimerDesigner() {
-  const [sequence, setSequence]           = useState('');
-  const [appMode, setAppMode]             = useState('diagnostic');
-  const [primers, setPrimers]             = useState(null);
-  const [loading, setLoading]             = useState(false);
-  const [error, setError]                 = useState('');
-  const [showCand, setShowCand]           = useState(false);
-  const [showInfo, setShowInfo]           = useState(false);
-  const [showJSON, setShowJSON]           = useState(false);
+  const [sequence, setSequence] = useState('');
+  const [appMode, setAppMode] = useState('diagnostic');
+  const [primers, setPrimers] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showCand, setShowCand] = useState(false);
+  const [showInfo, setShowInfo] = useState(false);
+  const [showJSON, setShowJSON] = useState(false);
   const [aiExplanation, setAiExplanation] = useState('');
-  const [loadingAI, setLoadingAI]         = useState(false);
+  const [loadingAI, setLoadingAI] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
 
-  const mode     = APP_MODES[appMode];
-  const bpCount  = sequence.toUpperCase().replace(/[^ATGC]/g,'').length;
+  const mode = APP_MODES[appMode];
+  const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
 
   const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPrimers(null); setAiExplanation(''); };
 
@@ -585,7 +585,7 @@ export default function PrimerDesigner() {
     const reader = new FileReader();
     reader.onload = (evt) => {
       if (typeof evt.target?.result === 'string') {
-        const clean = evt.target.result.split('\n').filter(l => !l.startsWith('>')).join('').replace(/\s/g,'');
+        const clean = evt.target.result.split('\n').filter(l => !l.startsWith('>')).join('').replace(/\s/g, '');
         setSequence(clean); setError(''); setPrimers(null); setAiExplanation('');
       }
     };
@@ -640,10 +640,10 @@ export default function PrimerDesigner() {
       c += `  Polymerase: ${primers.pcr_protocol.polymerase}\n`;
       primers.pcr_protocol.notes?.forEach(n => { c += `  • ${n}\n`; });
     }
-    const blob = new Blob([c], { type:'text/plain' });
+    const blob = new Blob([c], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `Primer_Results_${detailed?'Detailed_':''}${new Date().toISOString().split('T')[0]}.txt`;
+    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.txt`;
     a.click(); setShowExportMenu(false);
   };
 
@@ -672,7 +672,7 @@ export default function PrimerDesigner() {
       h += `<h2>⚠ Warnings</h2>`;
       primers.warnings.forEach(w => { h += `<div class="warn">${w.text}</div>`; });
     }
-    ['forward_primer','reverse_primer'].forEach(key => {
+    ['forward_primer', 'reverse_primer'].forEach(key => {
       const p = primers[key];
       if (!p) return;
       h += `<div class="box"><h2>${key === 'forward_primer' ? 'Forward' : 'Reverse'} Primer</h2>
@@ -694,13 +694,13 @@ export default function PrimerDesigner() {
         <p><b>Extension Time:</b> ${primers.pcr_protocol.extension_time} s</p>
         <p><b>Cycles:</b> ${primers.pcr_protocol.cycles}</p>
         <p><b>Polymerase:</b> ${primers.pcr_protocol.polymerase}</p>
-        ${primers.pcr_protocol.notes?.map(n=>`<p>• ${n}</p>`).join('')}</div>`;
+        ${primers.pcr_protocol.notes?.map(n => `<p>• ${n}</p>`).join('')}</div>`;
     }
     h += `</body></html>`;
-    const blob = new Blob([h], {type:'text/html'});
+    const blob = new Blob([h], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url;
-    a.download = `Primer_Results_${detailed?'Detailed_':''}${new Date().toISOString().split('T')[0]}.html`;
+    a.download = `Primer_Results_${detailed ? 'Detailed_' : ''}${new Date().toISOString().split('T')[0]}.html`;
     a.click();
     const w = window.open(url); if (w) w.onload = () => setTimeout(() => w.print(), 250);
     setShowExportMenu(false);
@@ -730,16 +730,16 @@ export default function PrimerDesigner() {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), 60000);
       const res = await fetch(`${API_URL}/api/explain`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ tool:'PCR Primer Designer', data: primers }), signal: ctrl.signal
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: 'PCR Primer Designer', data: primers }), signal: ctrl.signal
       });
       clearTimeout(t);
-      if (!res.ok) { const e = await res.json().catch(()=>({})); throw new Error(e.error||'AI failed'); }
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'AI failed'); }
       const data = await res.json();
       const txt = data.explanation || data.output_text || data.data?.explanation || data.choices?.[0]?.message?.content;
       if (!txt) throw new Error('No explanation returned');
       setAiExplanation(txt);
-    } catch(e) { setError(e.name==='AbortError'?'AI timed out':(e.message||'AI failed')); }
+    } catch (e) { setError(e.name === 'AbortError' ? 'AI timed out' : (e.message || 'AI failed')); }
     finally { setLoadingAI(false); }
   };
 
@@ -783,7 +783,7 @@ export default function PrimerDesigner() {
     if (!f || !r) return tips;
     if (data.tm_difference > 3) tips.push({
       category: 'Temperature', title: 'Large Tm Difference Detected',
-      recommendation: `Run gradient PCR between ${Math.min(f.tm,r.tm)-5}°C and ${Math.max(f.tm,r.tm)-3}°C to find optimal annealing temperature.`,
+      recommendation: `Run gradient PCR between ${Math.min(f.tm, r.tm) - 5}°C and ${Math.max(f.tm, r.tm) - 3}°C to find optimal annealing temperature.`,
       urgency: 'high'
     });
     if (data.dimer_analysis?.risk_level !== 'low') tips.push({
@@ -810,8 +810,8 @@ export default function PrimerDesigner() {
      RENDER
      ════════════════════════════════════════════════════════════════════════ */
   return (
-  <div style={{ minHeight:'100vh', background:'#0c0e14', color:'#e2e4e9', fontFamily:'"Sora",sans-serif' }}>
-  <style>{`
+    <div style={{ minHeight: '100vh', background: '#0c0e14', color: '#e2e4e9', fontFamily: '"Sora",sans-serif' }}>
+      <style>{`
     @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
     *{ box-sizing:border-box; margin:0; padding:0; }
     ::-webkit-scrollbar{ width:5px; }
@@ -973,487 +973,490 @@ export default function PrimerDesigner() {
     .spin{ display:inline-block; width:16px; height:16px; border:2px solid rgba(255,255,255,0.25); border-top-color:#fff; border-radius:50%; animation:spin 0.5s linear infinite; }
   `}</style>
 
-  {/* ═══ HEADER ═══ */}
-  <div style={{ background:'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom:'1px solid #1e2130', padding:'1.5rem 1.2rem 1.2rem' }}>
-    <div style={{ maxWidth:860, margin:'0 auto' }}>
-      <div style={{ display:'flex', alignItems:'center', gap:'0.65rem', marginBottom:'0.42rem', flexWrap:'wrap' }}>
-        <h1 style={{ fontFamily:'Sora', fontWeight:700, fontSize:'1.55rem', color:'#fff' }}>PCR Primer Designer</h1>
-        <span style={{ background:'rgba(0,255,198,0.1)', border:'1px solid rgba(0,255,198,0.25)', color:'#00FFC6', fontSize:'0.7rem', fontWeight:600, padding:'0.22rem 0.56rem', borderRadius:20, letterSpacing:'0.08em', textTransform:'uppercase' }}>Research Grade</span>
-        <span style={{ background:'rgba(129,140,248,0.1)', border:'1px solid rgba(129,140,248,0.25)', color:'#818cf8', fontSize:'0.7rem', fontWeight:600, padding:'0.22rem 0.56rem', borderRadius:20, letterSpacing:'0.08em', textTransform:'uppercase' }}>NN Thermodynamics v2</span>
-      </div>
-      <p style={{ color:'#6b7080', fontSize:'0.96rem', lineHeight:1.58, maxWidth:620 }}>
-        Full nearest-neighbor thermodynamic primer design with hairpin, dimer, GC clamp, and specificity analysis across four PCR application modes.
-      </p>
-    </div>
-  </div>
-
-  <div style={{ maxWidth:860, margin:'0 auto', padding:'1.2rem 1.15rem 3rem' }}>
-
-    {/* ═══ INFO TOGGLE ═══ */}
-    <button className="btn-g" onClick={()=>setShowInfo(v=>!v)} style={{ width:'100%', justifyContent:'space-between', marginBottom:'1rem' }}>
-      <span style={{ display:'flex', alignItems:'center', gap:'0.42rem' }}>
-        <span style={{ fontSize:'0.94rem' }}>Why This Tool Matters &amp; How to Use It</span>
-      </span>
-      <span style={{ fontSize:'0.78rem', color:'#6b7080', transition:'transform 0.25s', transform:showInfo?'rotate(180deg)':'rotate(0)', display:'inline-block' }}>▼</span>
-    </button>
-
-    <div className={`info-wrap ${showInfo ? 'open' : 'closed'}`}>
-      <div className="pc" style={{ padding:'1.35rem' }}>
-        <div style={{ marginBottom:'1.15rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.52rem' }}>
-            <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'0.07em' }}>Why This Tool Matters</span>
+      {/* ═══ HEADER ═══ */}
+      <div style={{ background: 'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom: '1px solid #1e2130', padding: '1.5rem 1.2rem 1.2rem' }}>
+        <div style={{ maxWidth: 860, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.42rem', flexWrap: 'wrap' }}>
+            <h1 style={{ fontFamily: 'Sora', fontWeight: 700, fontSize: '1.55rem', color: '#fff' }}>PCR Primer Designer</h1>
+            <span style={{ background: 'rgba(0,255,198,0.1)', border: '1px solid rgba(0,255,198,0.25)', color: '#00FFC6', fontSize: '0.7rem', fontWeight: 600, padding: '0.22rem 0.56rem', borderRadius: 20, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Research Grade</span>
+            <span style={{ background: 'rgba(129,140,248,0.1)', border: '1px solid rgba(129,140,248,0.25)', color: '#818cf8', fontSize: '0.7rem', fontWeight: 600, padding: '0.22rem 0.56rem', borderRadius: 20, letterSpacing: '0.08em', textTransform: 'uppercase' }}>NN Thermodynamics v2</span>
           </div>
-          <p style={{ fontSize:'0.96rem', color:'#8a8f9e', lineHeight:1.78, margin:0 }}>
-            Designing primers by hand is slow and error-prone. A single mismatch at the
-            <strong style={{ color:'#c8cad4' }}> 3′ end </strong>
-            can silently kill your entire PCR run. This tool uses a
-            <strong style={{ color:'#c8cad4' }}> full SantaLucia 1998 nearest-neighbor thermodynamic model </strong>
-            to calculate accurate Tm, and then automatically checks every candidate for
-            <strong style={{ color:'#c8cad4' }}> hairpin formation, self-dimerization, cross-dimer risk, GC clamp quality, </strong> and
-            <strong style={{ color:'#c8cad4' }}> repeat-region specificity</strong>. Primers are scored across 6 weighted dimensions and classified as Excellent, Good, Fair, or Poor.
+          <p style={{ color: '#6b7080', fontSize: '0.96rem', lineHeight: 1.58, maxWidth: 620 }}>
+            Full nearest-neighbor thermodynamic primer design with hairpin, dimer, GC clamp, and specificity analysis across four PCR application modes.
           </p>
         </div>
+      </div>
 
-        {/* Constraint reference */}
-        <div style={{ borderTop:'1px solid #1e2130', paddingTop:'0.9rem', marginBottom:'1rem' }}>
-          <div style={{ fontSize:'0.82rem', fontWeight:700, color:'#4a4d5e', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.55rem' }}>Applied Constraints</div>
-          <div className="constraint-grid">
-            {[
-              ['Length','18–22 bp','#00FFC6'],
-              ['GC Content','40–60%','#00FFC6'],
-              ['Tm Range','58–65 °C','#60A5FA'],
-              ['ΔTm','≤ 3 °C','#60A5FA'],
-              ['Hairpin ΔG','> −3 kcal/mol','#FBBF24'],
-              ['Self-Dimer ΔG','> −5 kcal/mol','#FBBF24'],
-              ['Cross-Dimer ΔG','> −6 kcal/mol','#F87171'],
-              ['GC Clamp 3′','1–2 GC bases','#00FFC6'],
-            ].map(([k,v,c])=>(
-              <div key={k} className="constraint-box">
-                <span style={{ fontSize:'0.65rem', color:'#2e3145', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.05em' }}>{k}</span>
-                <span style={{ fontSize:'0.78rem', color:c, fontFamily:'"JetBrains Mono",monospace', fontWeight:600 }}>{v}</span>
+      <div style={{ maxWidth: 860, margin: '0 auto', padding: '1.2rem 1.15rem 3rem' }}>
+
+        {/* ═══ INFO TOGGLE ═══ */}
+        <button className="btn-g" onClick={() => setShowInfo(v => !v)} style={{ width: '100%', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.42rem' }}>
+            <span style={{ fontSize: '0.94rem' }}>Why This Tool Matters &amp; How to Use It</span>
+          </span>
+          <span style={{ fontSize: '0.78rem', color: '#6b7080', transition: 'transform 0.25s', transform: showInfo ? 'rotate(180deg)' : 'rotate(0)', display: 'inline-block' }}>▼</span>
+        </button>
+
+        <div className={`info-wrap ${showInfo ? 'open' : 'closed'}`}>
+          <div className="pc" style={{ padding: '1.35rem' }}>
+            <div style={{ marginBottom: '1.15rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', marginBottom: '0.52rem' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Why This Tool Matters</span>
               </div>
-            ))}
+              <p style={{ fontSize: '0.96rem', color: '#8a8f9e', lineHeight: 1.78, margin: 0 }}>
+                Designing primers by hand is slow and error-prone. A single mismatch at the
+                <strong style={{ color: '#c8cad4' }}> 3′ end </strong>
+                can silently kill your entire PCR run. This tool uses a
+                <strong style={{ color: '#c8cad4' }}> full SantaLucia 1998 nearest-neighbor thermodynamic model </strong>
+                to calculate accurate Tm, and then automatically checks every candidate for
+                <strong style={{ color: '#c8cad4' }}> hairpin formation, self-dimerization, cross-dimer risk, GC clamp quality, </strong> and
+                <strong style={{ color: '#c8cad4' }}> repeat-region specificity</strong>. Primers are scored across 6 weighted dimensions and classified as Excellent, Good, Fair, or Poor.
+              </p>
+            </div>
+
+            {/* Constraint reference */}
+            <div style={{ borderTop: '1px solid #1e2130', paddingTop: '0.9rem', marginBottom: '1rem' }}>
+              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#4a4d5e', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Applied Constraints</div>
+              <div className="constraint-grid">
+                {[
+                  ['Length', '18–22 bp', '#00FFC6'],
+                  ['GC Content', '40–60%', '#00FFC6'],
+                  ['Tm Range', '58–65 °C', '#60A5FA'],
+                  ['ΔTm', '≤ 3 °C', '#60A5FA'],
+                  ['Hairpin ΔG', '> −3 kcal/mol', '#FBBF24'],
+                  ['Self-Dimer ΔG', '> −5 kcal/mol', '#FBBF24'],
+                  ['Cross-Dimer ΔG', '> −6 kcal/mol', '#F87171'],
+                  ['GC Clamp 3′', '1–2 GC bases', '#00FFC6'],
+                ].map(([k, v, c]) => (
+                  <div key={k} className="constraint-box">
+                    <span style={{ fontSize: '0.65rem', color: '#2e3145', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{k}</span>
+                    <span style={{ fontSize: '0.78rem', color: c, fontFamily: '"JetBrains Mono",monospace', fontWeight: 600 }}>{v}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ borderTop: '1px solid #1e2130', paddingTop: '0.9rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', marginBottom: '0.68rem' }}>
+                <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#60A5FA', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Workflow &amp; Next Steps</span>
+              </div>
+              {[
+                ['Pick Your Application', 'Choose the PCR type below. Each mode pre-tunes amplicon size and Tm window — Diagnostic is broadest; qPCR is tightest.'],
+                ['Paste Your Target Sequence', 'Drop in your gene region (FASTA body or plain text). Headers, line-breaks, and numbers are stripped automatically.'],
+                ['Run the Analysis', 'Hit Design Primers. The NN engine scans all valid candidates, scores each on 6 dimensions, and surfaces the best matching pair.'],
+                ['Use the Results Downstream', 'Copy oligo sequences directly into a synthesis order. The protocol block gives you annealing temp, extension time, and cycle count.']
+              ].map(([title, desc], i) => (
+                <div key={i} className="step-row">
+                  <div className="step-num">{i + 1}</div>
+                  <div>
+                    <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#c8cad4', marginBottom: '0.12rem' }}>{title}</div>
+                    <div style={{ fontSize: '0.9rem', color: '#6b7080', lineHeight: 1.65 }}>{desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div style={{ borderTop:'1px solid #1e2130', paddingTop:'0.9rem' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.42rem', marginBottom:'0.68rem' }}>
-            <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#60A5FA', textTransform:'uppercase', letterSpacing:'0.07em' }}>Workflow &amp; Next Steps</span>
-          </div>
-          {[
-            ['Pick Your Application',      'Choose the PCR type below. Each mode pre-tunes amplicon size and Tm window — Diagnostic is broadest; qPCR is tightest.'],
-            ['Paste Your Target Sequence', 'Drop in your gene region (FASTA body or plain text). Headers, line-breaks, and numbers are stripped automatically.'],
-            ['Run the Analysis',           'Hit Design Primers. The NN engine scans all valid candidates, scores each on 6 dimensions, and surfaces the best matching pair.'],
-            ['Use the Results Downstream', 'Copy oligo sequences directly into a synthesis order. The protocol block gives you annealing temp, extension time, and cycle count.']
-          ].map(([title, desc], i) => (
-            <div key={i} className="step-row">
-              <div className="step-num">{i+1}</div>
-              <div>
-                <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#c8cad4', marginBottom:'0.12rem' }}>{title}</div>
-                <div style={{ fontSize:'0.9rem', color:'#6b7080', lineHeight:1.65 }}>{desc}</div>
-              </div>
+        {/* ═══ MODE SELECTOR ═══ */}
+        <label className="lbl">Application Mode</label>
+        <div className="mode-grid" style={{ marginBottom: '1.15rem' }}>
+          {Object.entries(APP_MODES).map(([k, m]) => (
+            <div key={k} className={`mode-card ${appMode === k ? 'active' : ''}`} onClick={() => { setAppMode(k); setPrimers(null); setError(''); }}>
+              {appMode === k && <span style={{ position: 'absolute', top: '0.52rem', right: '0.52rem', background: '#00FFC6', color: '#0c0e14', fontSize: '0.64rem', fontWeight: 700, width: 19, height: 19, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✓</span>}
+              <div style={{ fontSize: '0.9rem', fontWeight: 600, color: appMode === k ? '#00FFC6' : '#c8cad4', marginBottom: '0.2rem' }}>{m.name}</div>
+              <div style={{ fontSize: '0.82rem', color: '#6b7080', lineHeight: 1.45 }}>{m.desc}</div>
             </div>
           ))}
         </div>
-      </div>
-    </div>
 
-    {/* ═══ MODE SELECTOR ═══ */}
-    <label className="lbl">Application Mode</label>
-    <div className="mode-grid" style={{ marginBottom:'1.15rem' }}>
-      {Object.entries(APP_MODES).map(([k, m]) => (
-        <div key={k} className={`mode-card ${appMode===k?'active':''}`} onClick={()=>{setAppMode(k);setPrimers(null);setError('');}}>
-          {appMode===k && <span style={{ position:'absolute', top:'0.52rem', right:'0.52rem', background:'#00FFC6', color:'#0c0e14', fontSize:'0.64rem', fontWeight:700, width:19, height:19, borderRadius:'50%', display:'flex', alignItems:'center', justifyContent:'center' }}>✓</span>}
-          <div style={{ fontSize:'0.9rem', fontWeight:600, color:appMode===k?'#00FFC6':'#c8cad4', marginBottom:'0.2rem' }}>{m.name}</div>
-          <div style={{ fontSize:'0.82rem', color:'#6b7080', lineHeight:1.45 }}>{m.desc}</div>
+        {/* mode strip */}
+        <div style={{ background: 'rgba(0,255,198,0.06)', border: '1px solid rgba(0,255,198,0.18)', borderRadius: 9, padding: '0.62rem 0.9rem', marginBottom: '1.15rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.92rem', color: '#00FFC6', fontWeight: 600 }}>{mode.name}</span>
+          <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
+          <span style={{ fontSize: '0.9rem', color: '#8a8f9e' }}>Amplicon {mode.prodMin}–{mode.prodMax} bp</span>
+          <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
+          <span style={{ fontSize: '0.9rem', color: '#8a8f9e' }}>Tm {mode.tmMin}–{mode.tmMax} °C</span>
+          <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
+          <span style={{ fontSize: '0.9rem', color: '#818cf8' }}>SantaLucia 1998 NN Model</span>
         </div>
-      ))}
-    </div>
 
-    {/* mode strip */}
-    <div style={{ background:'rgba(0,255,198,0.06)', border:'1px solid rgba(0,255,198,0.18)', borderRadius:9, padding:'0.62rem 0.9rem', marginBottom:'1.15rem', display:'flex', alignItems:'center', gap:'1rem', flexWrap:'wrap' }}>
-      <span style={{ fontSize:'0.92rem', color:'#00FFC6', fontWeight:600 }}>{mode.name}</span>
-      <span style={{ color:'#3a3d4a', fontSize:'0.84rem' }}>|</span>
-      <span style={{ fontSize:'0.9rem', color:'#8a8f9e' }}>Amplicon {mode.prodMin}–{mode.prodMax} bp</span>
-      <span style={{ color:'#3a3d4a', fontSize:'0.84rem' }}>|</span>
-      <span style={{ fontSize:'0.9rem', color:'#8a8f9e' }}>Tm {mode.tmMin}–{mode.tmMax} °C</span>
-      <span style={{ color:'#3a3d4a', fontSize:'0.84rem' }}>|</span>
-      <span style={{ fontSize:'0.9rem', color:'#818cf8' }}>SantaLucia 1998 NN Model</span>
-    </div>
-
-    {/* ═══ SEQUENCE INPUT ═══ */}
-    <div className="pc">
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.45rem', flexWrap:'wrap', gap:'0.42rem' }}>
-        <label className="lbl" style={{ margin:0 }}>Target DNA Sequence</label>
-        <div style={{ display:'flex', gap:'0.42rem', flexWrap:'wrap' }}>
-          <label className="btn-sample" style={{ cursor:'pointer', margin:0 }}>
-            Upload FASTA
-            <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display:'none' }} />
-          </label>
-          <button className="btn-sample" onClick={loadSample}>Load Sample</button>
-        </div>
-      </div>
-      <textarea rows={5} value={sequence} onChange={e=>setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
-      {sequence && (
-        <div style={{ marginTop:'0.45rem', fontSize:'0.88rem', color:'#6b7080', fontFamily:'"JetBrains Mono",monospace', display:'flex', alignItems:'center', gap:'0.75rem', flexWrap:'wrap' }}>
-          <span>{bpCount} bp after cleaning</span>
-          {bpCount < 150 && bpCount > 0 && <span style={{ color:'#F59E0B' }}>Short sequence — fewer candidates available</span>}
-        </div>
-      )}
-    </div>
-
-    {error && (
-      <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.25)', borderRadius:8, padding:'0.65rem 0.88rem', marginBottom:'1rem', display:'flex', alignItems:'center', gap:'0.48rem' }}>
-        <span style={{ fontSize:'0.92rem', color:'#F87171' }}>{error}</span>
-      </div>
-    )}
-
-    {/* ═══ SUBMIT ═══ */}
-    <button className="btn-p" onClick={handleDesign} disabled={loading}>
-      {loading ? <><span className="spin"></span> Running Thermodynamic Analysis…</> : <>Design Primers</>}
-    </button>
-
-    {/* ═══════════════════════════════════════════════════════════════════
-        RESULTS
-        ═══════════════════════════════════════════════════════════════════ */}
-    {primers && (
-    <div className="fade-in">
-
-      {/* CLASSIFICATION BANNER */}
-      <div style={{ marginTop:'1.55rem', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'0.65rem', marginBottom:'0.9rem' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:'0.75rem', flexWrap:'wrap' }}>
-          <span style={{ background:CLASS_BG[primers.classification], border:`1px solid ${CLASS_COL[primers.classification]}44`, color:CLASS_COL[primers.classification],
-            padding:'0.28rem 0.85rem', borderRadius:20, fontSize:'0.78rem', fontWeight:700, letterSpacing:'0.06em', textTransform:'uppercase' }}>
-            {primers.classification === 'Excellent' ? '⭐ ' : primers.classification === 'Good' ? '✅ ' : primers.classification === 'Fair' ? '⚠️ ' : '❌ '}
-            {primers.classification}
-          </span>
-          <span style={{ fontSize:'1.15rem', fontWeight:700, color:CLASS_COL[primers.classification] }}>{primers.overall_score}</span>
-          <span style={{ fontSize:'0.78rem', color:'#6b7080' }}>/100 overall</span>
-          <span style={{ fontSize:'0.78rem', color:'#818cf8' }}>Specificity: {primers.specificity_score}/100</span>
-        </div>
-        <div style={{ position:'relative' }}>
-          <button className="btn-export" onClick={(e)=>{ e.stopPropagation(); setShowExportMenu(v=>!v); }}>
-            Export Results <span style={{ fontSize:'0.76rem', marginLeft:'0.22rem' }}>▼</span>
-          </button>
-          {showExportMenu && (
-            <div className="export-menu" onClick={e=>e.stopPropagation()}>
-              <div className="export-item" onClick={()=>exportTXT(false)}><strong>TXT - Summary</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Primer sequences & key metrics</div></div>
-              <div className="export-item" onClick={()=>exportTXT(true)}><strong>TXT - Detailed</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>All thermodynamic data + protocol</div></div>
-              <div className="export-item" onClick={()=>exportPDF(false)}><strong>PDF - Summary</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Clean report for sharing</div></div>
-              <div className="export-item" onClick={()=>exportPDF(true)}><strong>PDF - Detailed</strong><div style={{ fontSize:'0.78rem', color:'#6b7080', marginTop:'0.16rem' }}>Full report incl. protocol</div></div>
+        {/* ═══ SEQUENCE INPUT ═══ */}
+        <div className="pc">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.45rem', flexWrap: 'wrap', gap: '0.42rem' }}>
+            <label className="lbl" style={{ margin: 0 }}>Target DNA Sequence</label>
+            <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap' }}>
+              <label className="btn-sample" style={{ cursor: 'pointer', margin: 0 }}>
+                Upload FASTA
+                <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
+              </label>
+              <button className="btn-sample" onClick={loadSample}>Load Sample</button>
+            </div>
+          </div>
+          <textarea rows={5} value={sequence} onChange={e => setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
+          {sequence && (
+            <div style={{ marginTop: '0.45rem', fontSize: '0.88rem', color: '#6b7080', fontFamily: '"JetBrains Mono",monospace', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <span>{bpCount} bp after cleaning</span>
+              {bpCount < 150 && bpCount > 0 && <span style={{ color: '#F59E0B' }}>Short sequence — fewer candidates available</span>}
             </div>
           )}
         </div>
-      </div>
 
-      {/* WARNINGS */}
-      {primers.warnings?.length > 0 && (
-        <div style={{ marginBottom:'1rem' }}>
-          {primers.warnings.map((w,i)=>(
-            <div key={i} style={{ display:'flex', gap:'0.5rem', alignItems:'flex-start', background:`${URG_COL[w.urgency]}0a`, border:`1px solid ${URG_COL[w.urgency]}30`, borderRadius:8, padding:'0.55rem 0.78rem', marginBottom:'0.38rem', fontSize:'0.86rem', color:URG_COL[w.urgency] }}>
-              <span>⚠</span><span>{w.text}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* STATS */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.52rem', flexWrap:'wrap', gap:'0.52rem' }}>
-        <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>
-          Results — <span style={{ color:'#00FFC6' }}>{mode.name}</span>
-        </span>
-      </div>
-      <div className="stat-grid" style={{ marginBottom:'1.1rem' }}>
-        {[
-          { l:'Product Size',  v:`${primers.expected_product_size} bp`,          c:'#fff' },
-          { l:'Tm Difference', v:`${primers.tm_difference} °C`,                  c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444' },
-          { l:'Compatibility', v: primers.tm_difference <= 2 ? 'Excellent' : primers.tm_difference <= 3 ? 'Acceptable' : 'Poor',
-                               c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444' },
-          { l:'Cross-Dimer ΔG',v:`${primers.cross_dimer_dg} kcal/mol`,           c: primers.cross_dimer_dg > -3 ? '#00FFC6' : primers.cross_dimer_dg > -5 ? '#F59E0B' : '#EF4444' }
-        ].map((s,i) => (
-          <div key={i} className="stat-b">
-            <div className="stat-v" style={{ color:s.c, fontSize: s.v.length > 8 ? '1.05rem' : '1.42rem' }}>{s.v}</div>
-            <div className="stat-l">{s.l}</div>
+        {error && (
+          <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', borderRadius: 8, padding: '0.65rem 0.88rem', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.48rem' }}>
+            <span style={{ fontSize: '0.92rem', color: '#F87171' }}>{error}</span>
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* AI EXPLAIN */}
-      <div style={{ marginBottom:'1.1rem' }}>
-        <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
-          {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
+        {/* ═══ SUBMIT ═══ */}
+        <button className="btn-p" onClick={handleDesign} disabled={loading}>
+          {loading ? <><span className="spin"></span> Running Thermodynamic Analysis…</> : <>Design Primers</>}
         </button>
-      </div>
-      {aiExplanation && (
-        <div className="ai-box">
-          <div style={{ fontSize:'0.94rem', fontWeight:600, color:'#818cf8', marginBottom:'0.65rem' }}>AI Analysis</div>
-          <div style={{ fontSize:'0.96rem', color:'#e2e4e9', lineHeight:1.82, whiteSpace:'pre-wrap', maxHeight:450, overflowY:'auto', background:'rgba(0,0,0,0.25)', borderRadius:8, padding:'0.8rem', border:'1px solid #24272f' }}>
-            {aiExplanation}
-          </div>
-        </div>
-      )}
 
-      {/* BORDERLINE PAIRS PANEL */}
-      {primers.isBorderline && primers.borderline_pairs?.length > 0 && (
-        <div className="pc" style={{ marginBottom:'0.55rem', borderColor:'rgba(239,68,68,0.35)', background:'rgba(239,68,68,0.04)' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.55rem', marginBottom:'0.75rem' }}>
-            <span style={{ fontSize:'1rem' }}>🧪</span>
-            <span style={{ fontSize:'0.9rem', fontWeight:700, color:'#EF4444', textTransform:'uppercase', letterSpacing:'0.07em' }}>Borderline Results — Experimental Validation Required</span>
-          </div>
-          <p style={{ fontSize:'0.88rem', color:'#8a8f9e', lineHeight:1.7, marginBottom:'0.9rem' }}>
-            No primer pair satisfied strict thermodynamic criteria for this sequence. The engine relaxed all constraints and found <strong style={{color:'#c8cad4'}}>{primers.borderline_pairs.length} borderline pair{primers.borderline_pairs.length > 1 ? 's' : ''}</strong> ranked below. The <strong style={{color:'#c8cad4'}}>best-scoring pair</strong> is shown in the primer cards above. All borderline pairs <strong style={{color:'#F87171'}}>must be validated experimentally</strong> before committing to synthesis.
-          </p>
-          <div style={{ display:'flex', flexDirection:'column', gap:'0.55rem' }}>
-            {primers.borderline_pairs.map((bp, i) => (
-              <div key={i} style={{ background:'#0a0c10', border:`1px solid ${i===0?'rgba(239,68,68,0.4)':'#1a1d26'}`, borderRadius:10, padding:'0.85rem 1rem' }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.55rem', flexWrap:'wrap', gap:'0.38rem' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
-                    <span style={{ background:'rgba(239,68,68,0.15)', border:'1px solid rgba(239,68,68,0.3)', color:'#EF4444', fontSize:'0.65rem', fontWeight:700, padding:'0.18rem 0.5rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>
-                      Rank #{bp.rank}
-                    </span>
-                    {i === 0 && <span style={{ background:'rgba(245,158,11,0.12)', border:'1px solid rgba(245,158,11,0.3)', color:'#F59E0B', fontSize:'0.65rem', fontWeight:700, padding:'0.18rem 0.5rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>Best Available</span>}
-                  </div>
-                  <div style={{ display:'flex', gap:'0.75rem', fontSize:'0.78rem', color:'#6b7080' }}>
-                    <span>Amplicon: <b style={{color:'#a0a3b1'}}>{bp.amplicon_size} bp</b></span>
-                    <span>ΔTm: <b style={{color: bp.tm_difference > 3 ? '#F59E0B' : '#a0a3b1'}}>{bp.tm_difference}°C</b></span>
-                    <span>Score: <b style={{color:'#a0a3b1'}}>{bp.pair_score}</b></span>
-                  </div>
-                </div>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'0.45rem' }}>
-                  {[['→ Forward', bp.forward], ['← Reverse', bp.reverse]].map(([lbl, p])=>(
-                    <div key={lbl} style={{ background:'#12141c', borderRadius:8, padding:'0.55rem 0.7rem' }}>
-                      <div style={{ fontSize:'0.68rem', color:'#3d4155', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:'0.3rem' }}>{lbl}</div>
-                      <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'0.76rem', color:'#00c9a0', wordBreak:'break-all', marginBottom:'0.28rem' }}>{p.sequence}</div>
-                      <div style={{ fontSize:'0.72rem', color:'#6b7080' }}>Tm {p.tm}°C · GC {p.gc}% · Score {p.score}</div>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop:'0.45rem', fontSize:'0.72rem', color: bp.cross_dimer_dg < -5 ? '#F87171' : '#6b7080' }}>
-                  Cross-dimer ΔG: {bp.cross_dimer_dg} kcal/mol {bp.cross_dimer_dg < -5 ? '⚠ High risk' : ''}
-                </div>
+        {/* ═══════════════════════════════════════════════════════════════════
+        RESULTS
+        ═══════════════════════════════════════════════════════════════════ */}
+        {primers && (
+          <div className="fade-in">
+
+            {/* CLASSIFICATION BANNER */}
+            <div style={{ marginTop: '1.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.65rem', marginBottom: '0.9rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span style={{
+                  background: CLASS_BG[primers.classification], border: `1px solid ${CLASS_COL[primers.classification]}44`, color: CLASS_COL[primers.classification],
+                  padding: '0.28rem 0.85rem', borderRadius: 20, fontSize: '0.78rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase'
+                }}>
+                  {primers.classification}
+                </span>
+                <span style={{ fontSize: '1.15rem', fontWeight: 700, color: CLASS_COL[primers.classification] }}>{primers.overall_score}</span>
+                <span style={{ fontSize: '0.78rem', color: '#6b7080' }}>/100 overall</span>
+                <span style={{ fontSize: '0.78rem', color: '#818cf8' }}>Specificity: {primers.specificity_score}/100</span>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* RELAXED CONSTRAINT NOTICE */}
-      {!primers.isBorderline && primers.relaxLevel > 0 && (
-        <div style={{ background:'rgba(245,158,11,0.06)', border:'1px solid rgba(245,158,11,0.22)', borderRadius:9, padding:'0.65rem 0.9rem', marginBottom:'0.9rem', display:'flex', gap:'0.5rem', alignItems:'flex-start' }}>
-          <span style={{ fontSize:'0.88rem' }}>⚠️</span>
-          <div>
-            <span style={{ fontSize:'0.84rem', fontWeight:600, color:'#F59E0B' }}>Relaxed Constraints Applied (Pass {primers.relaxLevel})</span>
-            <div style={{ fontSize:'0.8rem', color:'#8a8f9e', marginTop:'0.18rem', lineHeight:1.6 }}>
-              Strict parameters found no valid pair. Constraints were progressively relaxed — validate these primers empirically before synthesis.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* OPTIMIZATION TIPS */}
-      {primers.optimization_tips?.length > 0 && (
-        <div className="pc" style={{ borderColor:'rgba(245,158,11,0.22)', background:'rgba(245,158,11,0.04)' }}>
-          <div style={{ fontSize:'0.9rem', fontWeight:600, color:'#F59E0B', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.68rem' }}>PCR Optimization</div>
-          {primers.optimization_tips.map((t,i) => (
-            <div key={i} className="tip-card">
-              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.35rem', flexWrap:'wrap', gap:'0.38rem' }}>
-                <span style={{ fontSize:'0.9rem', fontWeight:600, color:'#FCD34D' }}>{t.title}</span>
-                <span style={{ background:`${URG_COL[t.urgency]}15`, color:URG_COL[t.urgency], fontSize:'0.74rem', fontWeight:600, padding:'0.2rem 0.52rem', borderRadius:10, textTransform:'uppercase', letterSpacing:'0.05em' }}>{t.urgency}</span>
+              <div style={{ position: 'relative' }}>
+                <button className="btn-export" onClick={(e) => { e.stopPropagation(); setShowExportMenu(v => !v); }}>
+                  Export Results <span style={{ fontSize: '0.76rem', marginLeft: '0.22rem' }}>▼</span>
+                </button>
+                {showExportMenu && (
+                  <div className="export-menu" onClick={e => e.stopPropagation()}>
+                    <div className="export-item" onClick={() => exportTXT(false)}><strong>TXT - Summary</strong><div style={{ fontSize: '0.78rem', color: '#6b7080', marginTop: '0.16rem' }}>Primer sequences & key metrics</div></div>
+                    <div className="export-item" onClick={() => exportTXT(true)}><strong>TXT - Detailed</strong><div style={{ fontSize: '0.78rem', color: '#6b7080', marginTop: '0.16rem' }}>All thermodynamic data + protocol</div></div>
+                    <div className="export-item" onClick={() => exportPDF(false)}><strong>PDF - Summary</strong><div style={{ fontSize: '0.78rem', color: '#6b7080', marginTop: '0.16rem' }}>Clean report for sharing</div></div>
+                    <div className="export-item" onClick={() => exportPDF(true)}><strong>PDF - Detailed</strong><div style={{ fontSize: '0.78rem', color: '#6b7080', marginTop: '0.16rem' }}>Full report incl. protocol</div></div>
+                  </div>
+                )}
               </div>
-              <p style={{ fontSize:'0.92rem', color:'#8a8f9e', lineHeight:1.68, margin:0 }}>{t.recommendation}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* PRIMER PAIR CARDS */}
-      <div style={{ marginBottom:'0.52rem' }}>
-        <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>Recommended Primers</span>
-      </div>
-      <div className="primer-grid">
-        {[
-          primers.forward_primer && { ...primers.forward_primer, label:'Forward' },
-          primers.reverse_primer && { ...primers.reverse_primer, label:'Reverse' }
-        ].map((p, i) => p ? (
-          <div key={i} className="pc" style={{ padding:'1.2rem' }}>
-            {/* header */}
-            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.65rem', flexWrap:'wrap', gap:'0.38rem' }}>
-              <span style={{ fontSize:'0.98rem', fontWeight:600, color:'#00FFC6' }}>{p.label} Primer</span>
-              <span style={{ background:`${QUAL_COL[p.quality_grade]}18`, color:QUAL_COL[p.quality_grade], border:`1px solid ${QUAL_COL[p.quality_grade]}40`, fontSize:'0.76rem', fontWeight:600, padding:'0.22rem 0.58rem', borderRadius:12 }}>
-                {p.quality_grade} · {p.quality_score}/100
-              </span>
-            </div>
-            {/* sequence */}
-            <div style={{ display:'flex', justifyContent:'flex-end', marginBottom:'0.3rem' }}>
-              <button className="btn-g" style={{ fontSize:'0.8rem', padding:'0.35rem 0.72rem' }} onClick={()=>navigator.clipboard?.writeText(p.sequence)}>Copy</button>
-            </div>
-            <div className="seq-box">{p.sequence}</div>
-
-            {/* core props */}
-            <div className="prop-grid" style={{ marginTop:'0.68rem' }}>
-              {[['Length',`${p.length} bp`],['Tm (NN)',`${p.tm} °C`],['GC Content',`${p.gc_content}%`],['Position',p.position]].map(([l,v],j) => (
-                <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'0.54rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'0.8rem', color:'#6b7080' }}>{l}</span>
-                  <span style={{ fontSize:'0.86rem', color:'#c8cad4', fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
-                </div>
-              ))}
             </div>
 
-            {/* extended thermodynamic props */}
-            <div className="ext-prop-grid" style={{ marginTop:'0.45rem' }}>
-              {[
-                ['Hairpin ΔG',    `${p.hairpin?.delta_g} kcal/mol`,       p.hairpin?.delta_g > -2 ? '#00FFC6' : p.hairpin?.delta_g > -3 ? '#F59E0B' : '#EF4444'],
-                ['Self-Dimer ΔG', `${p.self_dimer_dg} kcal/mol`,           p.self_dimer_dg > -3 ? '#00FFC6' : p.self_dimer_dg > -5 ? '#F59E0B' : '#EF4444'],
-                ['3′ Stability ΔG',`${p.three_prime_stability_dg} kcal/mol`,'#a0a3b1'],
-                ['Last 5bp GC',   `${p.last_5bp_gc_percent}%`,             p.last_5bp_gc_percent <= 80 ? '#a0a3b1' : '#F59E0B'],
-              ].map(([l,v,c],j)=>(
-                <div key={j} style={{ background:'#0a0c10', borderRadius:7, padding:'0.48rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                  <span style={{ fontSize:'0.76rem', color:'#3d4155' }}>{l}</span>
-                  <span style={{ fontSize:'0.8rem', color:c, fontWeight:600, fontFamily:'"JetBrains Mono",monospace' }}>{v}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* hairpin + clamp quick metrics */}
-            {p.hairpin && p.gc_clamp && (
-              <div className="prop-grid" style={{ marginTop:'0.45rem' }}>
-                {[
-                  { l:'Hairpin Risk', v:p.hairpin.risk_level,                         c:RISK_COL[p.hairpin.risk_level] },
-                  { l:'GC Clamp',     v:p.gc_clamp.has_clamp ? 'Present' : 'Missing', c:p.gc_clamp.has_clamp ? '#00FFC6' : '#F59E0B' }
-                ].map((m,j) => (
-                  <div key={j} style={{ background:'#0f1117', borderRadius:7, padding:'0.46rem 0.62rem', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                    <span style={{ fontSize:'0.8rem', color:'#6b7080' }}>{m.l}</span>
-                    <span style={{ fontSize:'0.86rem', color:m.c, fontWeight:600 }}>{m.v}</span>
+            {/* WARNINGS */}
+            {primers.warnings?.length > 0 && (
+              <div style={{ marginBottom: '1rem' }}>
+                {primers.warnings.map((w, i) => (
+                  <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', background: `${URG_COL[w.urgency]}0a`, border: `1px solid ${URG_COL[w.urgency]}30`, borderRadius: 8, padding: '0.55rem 0.78rem', marginBottom: '0.38rem', fontSize: '0.86rem', color: URG_COL[w.urgency] }}>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700 }}>!</span><span>{w.text}</span>
                   </div>
                 ))}
               </div>
             )}
 
-            {/* quality flags */}
-            {p.detailed_analysis?.length > 0 && (
-              <div style={{ marginTop:'0.75rem' }}>
-                <span style={{ fontSize:'0.8rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.06em' }}>Quality Flags</span>
-                {p.detailed_analysis.map((a,j) => {
-                  const col = { error:'#EF4444', warning:'#F59E0B', info:'#60A5FA' }[a.type] || '#6b7080';
-                  return (
-                    <div key={j} className="a-card" style={{ marginTop:'0.42rem', background:`${col}0e`, border:`1px solid ${col}35` }}>
-                      <div style={{ fontSize:'0.86rem', fontWeight:600, color:col, marginBottom:'0.32rem' }}>{a.title}</div>
-                      <p style={{ fontSize:'0.84rem', color:'#8a8f9e', lineHeight:1.65, margin:'0 0 0.28rem' }}>{a.issue}</p>
-                      <p style={{ fontSize:'0.82rem', color:'#606878', lineHeight:1.6, margin:'0 0 0.35rem', fontStyle:'italic' }}>{a.impact}</p>
-                      <div style={{ display:'flex', flexDirection:'column', gap:'0.18rem' }}>
-                        {a.fixes.map((f,fi) => (
-                          <span key={fi} style={{ fontSize:'0.82rem', color:'#00c9a0', paddingLeft:'0.68rem', position:'relative' }}>
-                            <span style={{ position:'absolute', left:0, color:'#00FFC660' }}>›</span>{f}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
+            {/* STATS */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.52rem', flexWrap: 'wrap', gap: '0.52rem' }}>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                Results — <span style={{ color: '#00FFC6' }}>{mode.name}</span>
+              </span>
+            </div>
+            <div className="stat-grid" style={{ marginBottom: '1.1rem' }}>
+              {[
+                { l: 'Product Size', v: `${primers.expected_product_size} bp`, c: '#fff' },
+                { l: 'Tm Difference', v: `${primers.tm_difference} °C`, c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444' },
+                {
+                  l: 'Compatibility', v: primers.tm_difference <= 2 ? 'Excellent' : primers.tm_difference <= 3 ? 'Acceptable' : 'Poor',
+                  c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444'
+                },
+                { l: 'Cross-Dimer ΔG', v: `${primers.cross_dimer_dg} kcal/mol`, c: primers.cross_dimer_dg > -3 ? '#00FFC6' : primers.cross_dimer_dg > -5 ? '#F59E0B' : '#EF4444' }
+              ].map((s, i) => (
+                <div key={i} className="stat-b">
+                  <div className="stat-v" style={{ color: s.c, fontSize: s.v.length > 8 ? '1.05rem' : '1.42rem' }}>{s.v}</div>
+                  <div className="stat-l">{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* AI EXPLAIN */}
+            <div style={{ marginBottom: '1.1rem' }}>
+              <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
+                {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
+              </button>
+            </div>
+            {aiExplanation && (
+              <div className="ai-box">
+                <div style={{ fontSize: '0.94rem', fontWeight: 600, color: '#818cf8', marginBottom: '0.65rem' }}>AI Analysis</div>
+                <div style={{ fontSize: '0.96rem', color: '#e2e4e9', lineHeight: 1.82, whiteSpace: 'pre-wrap', maxHeight: 450, overflowY: 'auto', background: 'rgba(0,0,0,0.25)', borderRadius: 8, padding: '0.8rem', border: '1px solid #24272f' }}>
+                  {aiExplanation}
+                </div>
               </div>
             )}
-          </div>
-        ) : (
-          <div key={i} className="pc" style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:190, color:'#EF4444', fontSize:'0.98rem' }}>No suitable primer found</div>
-        ))}
-      </div>
 
-      {/* PCR PROTOCOL */}
-      {primers.pcr_protocol && (
-        <div className="pc" style={{ marginTop:'0.55rem' }}>
-          <div style={{ fontSize:'0.9rem', fontWeight:600, color:'#00FFC6', textTransform:'uppercase', letterSpacing:'0.07em', marginBottom:'0.65rem' }}>Recommended Protocol</div>
-          <div className="proto-grid" style={{ marginBottom:'0.75rem' }}>
-            {[['Annealing Temp',`${primers.pcr_protocol.annealing_temp} °C`],['Extension Time',`${primers.pcr_protocol.extension_time} s`],['Cycles',primers.pcr_protocol.cycles]].map(([l,v],i)=>(
-              <div key={i} className="proto-box">
-                <div style={{ fontSize:'0.79rem', color:'#6b7080', marginBottom:'0.24rem', textTransform:'uppercase', letterSpacing:'0.06em' }}>{l}</div>
-                <div style={{ fontSize:'1.2rem', color:'#00FFC6', fontWeight:600 }}>{v}</div>
+            {/* BORDERLINE PAIRS PANEL */}
+            {primers.isBorderline && primers.borderline_pairs?.length > 0 && (
+              <div className="pc" style={{ marginBottom: '0.55rem', borderColor: 'rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', marginBottom: '0.75rem' }}>
+                  <span style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', fontSize: '0.62rem', fontWeight: 800, padding: '0.2rem 0.48rem', borderRadius: 6, letterSpacing: '0.04em' }}>WARN</span>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Borderline Results -- Experimental Validation Required</span>
+                </div>
+                <p style={{ fontSize: '0.88rem', color: '#8a8f9e', lineHeight: 1.7, marginBottom: '0.9rem' }}>
+                  No primer pair satisfied strict thermodynamic criteria for this sequence. The engine relaxed all constraints and found <strong style={{ color: '#c8cad4' }}>{primers.borderline_pairs.length} borderline pair{primers.borderline_pairs.length > 1 ? 's' : ''}</strong> ranked below. The <strong style={{ color: '#c8cad4' }}>best-scoring pair</strong> is shown in the primer cards above. All borderline pairs <strong style={{ color: '#F87171' }}>must be validated experimentally</strong> before committing to synthesis.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+                  {primers.borderline_pairs.map((bp, i) => (
+                    <div key={i} style={{ background: '#0a0c10', border: `1px solid ${i === 0 ? 'rgba(239,68,68,0.4)' : '#1a1d26'}`, borderRadius: 10, padding: '0.85rem 1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.55rem', flexWrap: 'wrap', gap: '0.38rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444', fontSize: '0.65rem', fontWeight: 700, padding: '0.18rem 0.5rem', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Rank #{bp.rank}
+                          </span>
+                          {i === 0 && <span style={{ background: 'rgba(245,158,11,0.12)', border: '1px solid rgba(245,158,11,0.3)', color: '#F59E0B', fontSize: '0.65rem', fontWeight: 700, padding: '0.18rem 0.5rem', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Best Available</span>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.78rem', color: '#6b7080' }}>
+                          <span>Amplicon: <b style={{ color: '#a0a3b1' }}>{bp.amplicon_size} bp</b></span>
+                          <span>ΔTm: <b style={{ color: bp.tm_difference > 3 ? '#F59E0B' : '#a0a3b1' }}>{bp.tm_difference}°C</b></span>
+                          <span>Score: <b style={{ color: '#a0a3b1' }}>{bp.pair_score}</b></span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
+                        {[['→ Forward', bp.forward], ['← Reverse', bp.reverse]].map(([lbl, p]) => (
+                          <div key={lbl} style={{ background: '#12141c', borderRadius: 8, padding: '0.55rem 0.7rem' }}>
+                            <div style={{ fontSize: '0.68rem', color: '#3d4155', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>{lbl}</div>
+                            <div style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: '0.76rem', color: '#00c9a0', wordBreak: 'break-all', marginBottom: '0.28rem' }}>{p.sequence}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#6b7080' }}>Tm {p.tm}°C · GC {p.gc}% · Score {p.score}</div>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ marginTop: '0.45rem', fontSize: '0.72rem', color: bp.cross_dimer_dg < -5 ? '#F87171' : '#6b7080' }}>
+                        Cross-dimer ΔG: {bp.cross_dimer_dg} kcal/mol {bp.cross_dimer_dg < -5 ? '-- High risk' : ''}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
-          <div style={{ fontSize:'0.92rem', color:'#8a8f9e', marginBottom:'0.35rem' }}>
-            <span style={{ color:'#6b7080' }}>Polymerase: </span>{primers.pcr_protocol.polymerase}
-          </div>
-          {primers.pcr_protocol.notes?.map((n,i)=>(
-            <div key={i} style={{ fontSize:'0.9rem', color:'#F59E0B', marginBottom:'0.22rem' }}>• {n}</div>
-          ))}
-        </div>
-      )}
+            )}
 
-      {/* JSON OUTPUT */}
-      <div className="pc" style={{ marginTop:'0.55rem' }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: showJSON ? '0.65rem' : 0 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'0.65rem' }}>
-            <button className="btn-g" onClick={()=>setShowJSON(v=>!v)} style={{ fontSize:'0.84rem' }}>
-              {showJSON ? '▲ Hide' : '▼ Show'} Structured JSON Output
-            </button>
-          </div>
-          {showJSON && (
-            <button className="btn-g" style={{ fontSize:'0.8rem', padding:'0.35rem 0.72rem' }}
-              onClick={()=>navigator.clipboard?.writeText(JSON.stringify(primers, null, 2))}>
-              📋 Copy JSON
-            </button>
-          )}
-        </div>
-        <div className={`json-wrap ${showJSON?'open':'closed'}`}>
-          <div className="json-block">
-            <PrimerJsonRenderer data={primers}/>
-          </div>
-        </div>
-      </div>
-
-      {/* ALTERNATIVE CANDIDATES */}
-      {primers.all_candidates?.length > 0 && (
-        <div className="pc" style={{ marginTop:'0.55rem' }}>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'0.48rem' }}>
-            <span style={{ fontSize:'0.88rem', fontWeight:600, color:'#6b7080', textTransform:'uppercase', letterSpacing:'0.07em' }}>Alternative Candidates</span>
-            <button className="btn-g" onClick={()=>setShowCand(v=>!v)}>{showCand ? 'Hide' : 'Show'} ({primers.all_candidates.length})</button>
-          </div>
-          {showCand && primers.all_candidates.map((c,i)=>(
-            <div key={i} className="cand-row">
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'0.3rem' }}>
-                <span style={{ fontSize:'0.92rem', color:'#00FFC6', fontWeight:600 }}>{c.type}</span>
-                <span style={{ fontSize:'0.88rem', color:QUAL_COL[c.quality_grade] }}>{c.quality_grade} · {c.quality_score}/100</span>
+            {/* RELAXED CONSTRAINT NOTICE */}
+            {!primers.isBorderline && primers.relaxLevel > 0 && (
+              <div style={{ background: 'rgba(245,158,11,0.06)', border: '1px solid rgba(245,158,11,0.22)', borderRadius: 9, padding: '0.65rem 0.9rem', marginBottom: '0.9rem', display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                <span style={{ fontSize: '0.78rem', color: '#F59E0B', fontWeight: 700 }}>NOTE:</span>
+                <div>
+                  <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#F59E0B' }}>Relaxed Constraints Applied (Pass {primers.relaxLevel})</span>
+                  <div style={{ fontSize: '0.8rem', color: '#8a8f9e', marginTop: '0.18rem', lineHeight: 1.6 }}>
+                    Strict parameters found no valid pair. Constraints were progressively relaxed — validate these primers empirically before synthesis.
+                  </div>
+                </div>
               </div>
-              <div style={{ fontFamily:'"JetBrains Mono",monospace', fontSize:'0.88rem', color:'#c8cad4', marginBottom:'0.3rem' }}>{c.sequence}</div>
-              <div style={{ fontSize:'0.84rem', color:'#6b7080' }}>Tm {c.tm} °C · GC {c.gc_content}% · {c.length} bp</div>
+            )}
+
+            {/* OPTIMIZATION TIPS */}
+            {primers.optimization_tips?.length > 0 && (
+              <div className="pc" style={{ borderColor: 'rgba(245,158,11,0.22)', background: 'rgba(245,158,11,0.04)' }}>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.68rem' }}>PCR Optimization</div>
+                {primers.optimization_tips.map((t, i) => (
+                  <div key={i} className="tip-card">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem', flexWrap: 'wrap', gap: '0.38rem' }}>
+                      <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#FCD34D' }}>{t.title}</span>
+                      <span style={{ background: `${URG_COL[t.urgency]}15`, color: URG_COL[t.urgency], fontSize: '0.74rem', fontWeight: 600, padding: '0.2rem 0.52rem', borderRadius: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t.urgency}</span>
+                    </div>
+                    <p style={{ fontSize: '0.92rem', color: '#8a8f9e', lineHeight: 1.68, margin: 0 }}>{t.recommendation}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* PRIMER PAIR CARDS */}
+            <div style={{ marginBottom: '0.52rem' }}>
+              <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Recommended Primers</span>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="primer-grid">
+              {[
+                primers.forward_primer && { ...primers.forward_primer, label: 'Forward' },
+                primers.reverse_primer && { ...primers.reverse_primer, label: 'Reverse' }
+              ].map((p, i) => p ? (
+                <div key={i} className="pc" style={{ padding: '1.2rem' }}>
+                  {/* header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.38rem' }}>
+                    <span style={{ fontSize: '0.98rem', fontWeight: 600, color: '#00FFC6' }}>{p.label} Primer</span>
+                    <span style={{ background: `${QUAL_COL[p.quality_grade]}18`, color: QUAL_COL[p.quality_grade], border: `1px solid ${QUAL_COL[p.quality_grade]}40`, fontSize: '0.76rem', fontWeight: 600, padding: '0.22rem 0.58rem', borderRadius: 12 }}>
+                      {p.quality_grade} · {p.quality_score}/100
+                    </span>
+                  </div>
+                  {/* sequence */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.3rem' }}>
+                    <button className="btn-g" style={{ fontSize: '0.8rem', padding: '0.35rem 0.72rem' }} onClick={() => navigator.clipboard?.writeText(p.sequence)}>Copy</button>
+                  </div>
+                  <div className="seq-box">{p.sequence}</div>
 
+                  {/* core props */}
+                  <div className="prop-grid" style={{ marginTop: '0.68rem' }}>
+                    {[['Length', `${p.length} bp`], ['Tm (NN)', `${p.tm} °C`], ['GC Content', `${p.gc_content}%`], ['Position', p.position]].map(([l, v], j) => (
+                      <div key={j} style={{ background: '#0f1117', borderRadius: 7, padding: '0.54rem 0.62rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>{l}</span>
+                        <span style={{ fontSize: '0.86rem', color: '#c8cad4', fontWeight: 600, fontFamily: '"JetBrains Mono",monospace' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* extended thermodynamic props */}
+                  <div className="ext-prop-grid" style={{ marginTop: '0.45rem' }}>
+                    {[
+                      ['Hairpin ΔG', `${p.hairpin?.delta_g} kcal/mol`, p.hairpin?.delta_g > -2 ? '#00FFC6' : p.hairpin?.delta_g > -3 ? '#F59E0B' : '#EF4444'],
+                      ['Self-Dimer ΔG', `${p.self_dimer_dg} kcal/mol`, p.self_dimer_dg > -3 ? '#00FFC6' : p.self_dimer_dg > -5 ? '#F59E0B' : '#EF4444'],
+                      ['3′ Stability ΔG', `${p.three_prime_stability_dg} kcal/mol`, '#a0a3b1'],
+                      ['Last 5bp GC', `${p.last_5bp_gc_percent}%`, p.last_5bp_gc_percent <= 80 ? '#a0a3b1' : '#F59E0B'],
+                    ].map(([l, v, c], j) => (
+                      <div key={j} style={{ background: '#0a0c10', borderRadius: 7, padding: '0.48rem 0.62rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.76rem', color: '#3d4155' }}>{l}</span>
+                        <span style={{ fontSize: '0.8rem', color: c, fontWeight: 600, fontFamily: '"JetBrains Mono",monospace' }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* hairpin + clamp quick metrics */}
+                  {p.hairpin && p.gc_clamp && (
+                    <div className="prop-grid" style={{ marginTop: '0.45rem' }}>
+                      {[
+                        { l: 'Hairpin Risk', v: p.hairpin.risk_level, c: RISK_COL[p.hairpin.risk_level] },
+                        { l: 'GC Clamp', v: p.gc_clamp.has_clamp ? 'Present' : 'Missing', c: p.gc_clamp.has_clamp ? '#00FFC6' : '#F59E0B' }
+                      ].map((m, j) => (
+                        <div key={j} style={{ background: '#0f1117', borderRadius: 7, padding: '0.46rem 0.62rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>{m.l}</span>
+                          <span style={{ fontSize: '0.86rem', color: m.c, fontWeight: 600 }}>{m.v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* quality flags */}
+                  {p.detailed_analysis?.length > 0 && (
+                    <div style={{ marginTop: '0.75rem' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Quality Flags</span>
+                      {p.detailed_analysis.map((a, j) => {
+                        const col = { error: '#EF4444', warning: '#F59E0B', info: '#60A5FA' }[a.type] || '#6b7080';
+                        return (
+                          <div key={j} className="a-card" style={{ marginTop: '0.42rem', background: `${col}0e`, border: `1px solid ${col}35` }}>
+                            <div style={{ fontSize: '0.86rem', fontWeight: 600, color: col, marginBottom: '0.32rem' }}>{a.title}</div>
+                            <p style={{ fontSize: '0.84rem', color: '#8a8f9e', lineHeight: 1.65, margin: '0 0 0.28rem' }}>{a.issue}</p>
+                            <p style={{ fontSize: '0.82rem', color: '#606878', lineHeight: 1.6, margin: '0 0 0.35rem', fontStyle: 'italic' }}>{a.impact}</p>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+                              {a.fixes.map((f, fi) => (
+                                <span key={fi} style={{ fontSize: '0.82rem', color: '#00c9a0', paddingLeft: '0.68rem', position: 'relative' }}>
+                                  <span style={{ position: 'absolute', left: 0, color: '#00FFC660' }}>›</span>{f}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div key={i} className="pc" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 190, color: '#EF4444', fontSize: '0.98rem' }}>No suitable primer found</div>
+              ))}
+            </div>
+
+            {/* PCR PROTOCOL */}
+            {primers.pcr_protocol && (
+              <div className="pc" style={{ marginTop: '0.55rem' }}>
+                <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.65rem' }}>Recommended Protocol</div>
+                <div className="proto-grid" style={{ marginBottom: '0.75rem' }}>
+                  {[['Annealing Temp', `${primers.pcr_protocol.annealing_temp} °C`], ['Extension Time', `${primers.pcr_protocol.extension_time} s`], ['Cycles', primers.pcr_protocol.cycles]].map(([l, v], i) => (
+                    <div key={i} className="proto-box">
+                      <div style={{ fontSize: '0.79rem', color: '#6b7080', marginBottom: '0.24rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{l}</div>
+                      <div style={{ fontSize: '1.2rem', color: '#00FFC6', fontWeight: 600 }}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.92rem', color: '#8a8f9e', marginBottom: '0.35rem' }}>
+                  <span style={{ color: '#6b7080' }}>Polymerase: </span>{primers.pcr_protocol.polymerase}
+                </div>
+                {primers.pcr_protocol.notes?.map((n, i) => (
+                  <div key={i} style={{ fontSize: '0.9rem', color: '#F59E0B', marginBottom: '0.22rem' }}>• {n}</div>
+                ))}
+              </div>
+            )}
+
+            {/* JSON OUTPUT */}
+            <div className="pc" style={{ marginTop: '0.55rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: showJSON ? '0.65rem' : 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <button className="btn-g" onClick={() => setShowJSON(v => !v)} style={{ fontSize: '0.84rem' }}>
+                    {showJSON ? '▲ Hide' : '▼ Show'} Structured JSON Output
+                  </button>
+                </div>
+                {showJSON && (
+                  <button className="btn-g" style={{ fontSize: '0.8rem', padding: '0.35rem 0.72rem' }}
+                    onClick={() => navigator.clipboard?.writeText(JSON.stringify(primers, null, 2))}>
+                    Copy JSON
+                  </button>
+                )}
+              </div>
+              <div className={`json-wrap ${showJSON ? 'open' : 'closed'}`}>
+                <div className="json-block">
+                  <PrimerJsonRenderer data={primers} />
+                </div>
+              </div>
+            </div>
+
+            {/* ALTERNATIVE CANDIDATES */}
+            {primers.all_candidates?.length > 0 && (
+              <div className="pc" style={{ marginTop: '0.55rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.48rem' }}>
+                  <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Alternative Candidates</span>
+                  <button className="btn-g" onClick={() => setShowCand(v => !v)}>{showCand ? 'Hide' : 'Show'} ({primers.all_candidates.length})</button>
+                </div>
+                {showCand && primers.all_candidates.map((c, i) => (
+                  <div key={i} className="cand-row">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                      <span style={{ fontSize: '0.92rem', color: '#00FFC6', fontWeight: 600 }}>{c.type}</span>
+                      <span style={{ fontSize: '0.88rem', color: QUAL_COL[c.quality_grade] }}>{c.quality_grade} · {c.quality_score}/100</span>
+                    </div>
+                    <div style={{ fontFamily: '"JetBrains Mono",monospace', fontSize: '0.88rem', color: '#c8cad4', marginBottom: '0.3rem' }}>{c.sequence}</div>
+                    <div style={{ fontSize: '0.84rem', color: '#6b7080' }}>Tm {c.tm} °C · GC {c.gc_content}% · {c.length} bp</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+          </div>
+        )}
+
+      </div>
     </div>
-    )}
-
-  </div>
-  </div>
   );
 }
 
 /* ─── JSON SYNTAX HIGHLIGHTER ──────────────────────────────────────────────── */
 function PrimerJsonRenderer({ data, indent = 0 }) {
-  const pad  = '  '.repeat(indent);
+  const pad = '  '.repeat(indent);
   const pad1 = '  '.repeat(indent + 1);
 
   if (Array.isArray(data)) {
-    if (!data.length) return <span style={{color:'#3d4155'}}>[]</span>;
+    if (!data.length) return <span style={{ color: '#3d4155' }}>[]</span>;
     return <>
-      <span style={{color:'#3d4155'}}>{'['}</span>{'\n'}
-      {data.map((v,i)=><span key={i}>{pad1}<PrimerJsonRenderer data={v} indent={indent+1}/>{i<data.length-1?',':''}{'\n'}</span>)}
-      {pad}<span style={{color:'#3d4155'}}>{']'}</span>
+      <span style={{ color: '#3d4155' }}>{'['}</span>{'\n'}
+      {data.map((v, i) => <span key={i}>{pad1}<PrimerJsonRenderer data={v} indent={indent + 1} />{i < data.length - 1 ? ',' : ''}{'\n'}</span>)}
+      {pad}<span style={{ color: '#3d4155' }}>{']'}</span>
     </>;
   }
   if (data !== null && typeof data === 'object') {
     const keys = Object.keys(data);
-    if (!keys.length) return <span style={{color:'#3d4155'}}>{'{}'}</span>;
+    if (!keys.length) return <span style={{ color: '#3d4155' }}>{'{}'}</span>;
     return <>
-      <span style={{color:'#3d4155'}}>{'{'}</span>{'\n'}
-      {keys.map((k,i)=><span key={k}>{pad1}<span className="json-key">"{k}"</span><span style={{color:'#3d4155'}}>: </span><PrimerJsonRenderer data={data[k]} indent={indent+1}/>{i<keys.length-1?',':''}{'\n'}</span>)}
-      {pad}<span style={{color:'#3d4155'}}>{'}'}</span>
+      <span style={{ color: '#3d4155' }}>{'{'}</span>{'\n'}
+      {keys.map((k, i) => <span key={k}>{pad1}<span className="json-key">"{k}"</span><span style={{ color: '#3d4155' }}>: </span><PrimerJsonRenderer data={data[k]} indent={indent + 1} />{i < keys.length - 1 ? ',' : ''}{'\n'}</span>)}
+      {pad}<span style={{ color: '#3d4155' }}>{'}'}</span>
     </>;
   }
-  if (typeof data === 'string')  return <span className="json-str">"{data}"</span>;
-  if (typeof data === 'number')  return <span className="json-num">{data}</span>;
-  if (typeof data === 'boolean') return <span style={{color:'#F87171'}}>{String(data)}</span>;
-  if (data === null)             return <span style={{color:'#F87171'}}>null</span>;
+  if (typeof data === 'string') return <span className="json-str">"{data}"</span>;
+  if (typeof data === 'number') return <span className="json-num">{data}</span>;
+  if (typeof data === 'boolean') return <span style={{ color: '#F87171' }}>{String(data)}</span>;
+  if (data === null) return <span style={{ color: '#F87171' }}>null</span>;
   return <span>{String(data)}</span>;
 }

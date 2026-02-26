@@ -698,7 +698,7 @@ const generatePDF = (analysisData, annotatedMutations, analysisParams, vcfMeta, 
       pdf += `Position:         AA ${am.positions.aaPosition} (nucleotide ${am.positions.nucleotidePosition})\n`;
       pdf += `Domain:           ${am.domainMapping.proteinDomain} (${am.domainMapping.functionalRegion})\n`;
       if (am.mutation.reference_amino_acid && am.mutation.alternate_amino_acid) {
-        pdf += `AA Substitution:  ${am.mutation.reference_amino_acid} (${AM_PROPERTIES?.[am.mutation.reference_amino_acid]?.name || am.mutation.reference_amino_acid}) → ${am.mutation.alternate_amino_acid} (${AA_PROPERTIES?.[am.mutation.alternate_amino_acid]?.name || am.mutation.alternate_amino_acid})\n`;
+        pdf += `AA Substitution:  ${am.mutation.reference_amino_acid} (${AA_PROPERTIES?.[am.mutation.reference_amino_acid]?.name || am.mutation.reference_amino_acid}) → ${am.mutation.alternate_amino_acid} (${AA_PROPERTIES?.[am.mutation.alternate_amino_acid]?.name || am.mutation.alternate_amino_acid})\n`;
         pdf += `Codons:           ${am.mutation.reference_codon} → ${am.mutation.alternate_codon}\n`;
       }
       pdf += '\nIN SILICO PREDICTIONS\n';
@@ -760,9 +760,9 @@ function MolecularDetailPanel({ domain, gene, color }) {
   const CPK = { C: '#22d3ee', N: '#3b82f6', O: '#ef4444', S: '#fbbf24', CA: '#06b6d4', H: '#e2e8f0' };
 
   // Show more residues for a denser, more realistic diagram
-  const domLen = Math.min(domain.end - domain.start + 1, 24);
-  const W = 620, H = 230;
-  const padX = 32, padY = 20;
+  const domLen = Math.min(domain.end - domain.start + 1, 32);
+  const W = 680, H = 280;
+  const padX = 32, padY = 24;
   const startX = padX, endX = W - padX;
   const baseY = H / 2 + 10;
   const step = (endX - startX) / Math.max(domLen - 1, 1);
@@ -841,7 +841,7 @@ function MolecularDetailPanel({ domain, gene, color }) {
   const gradCols = { 'CA': '#06b6d4', 'N': '#3b82f6', 'O': '#ef4444', 'C': '#22d3ee', 'S': '#fbbf24' };
 
   return (
-    <div style={{ background: '#050810', border: '1px solid #152540', borderRadius: 10, overflow: 'hidden', marginBottom: '1rem' }}>
+    <div style={{ background: 'linear-gradient(180deg, #040610 0%, #060a14 100%)', border: '1px solid #152540', borderRadius: 12, overflow: 'hidden', marginBottom: '1rem', boxShadow: '0 4px 24px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.02)' }}>
       <div style={{ padding: '.55rem .9rem', background: 'rgba(6,182,212,.07)', borderBottom: '1px solid #152540', display: 'flex', alignItems: 'center', gap: '.5rem', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '.8rem', fontWeight: 700, color: '#67e8f9', textTransform: 'uppercase', letterSpacing: '.07em' }}>
           CPK Ball-and-Stick · {domain.name}
@@ -1084,18 +1084,21 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
 
         /* ── Scene & Camera ── */
         const scene = new THREE.Scene();
-        scene.fog = new THREE.FogExp2(0x04060f, 0.006);
-        const camera = new THREE.PerspectiveCamera(isMobile ? 48 : 40, W / H, 0.1, 2000);
-        camera.position.set(0, isMobile ? 18 : 15, isMobile ? 170 : 155);
+        scene.fog = new THREE.FogExp2(0x04060f, 0.004);
+        const camera = new THREE.PerspectiveCamera(isMobile ? 48 : 38, W / H, 0.1, 2000);
+        camera.position.set(0, isMobile ? 18 : 12, isMobile ? 170 : 145);
         camera.lookAt(0, 0, 0);
 
-        /* ── Lights ── */
-        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const key = new THREE.DirectionalLight(0x67e8f9, 3.5); key.position.set(60, 90, 70); scene.add(key);
-        const fill = new THREE.DirectionalLight(0xa78bfa, 1.8); fill.position.set(-70, -40, -50); scene.add(fill);
-        const back = new THREE.DirectionalLight(0xfbbf24, 1.2); back.position.set(0, -70, -90); scene.add(back);
-        const rim = new THREE.DirectionalLight(0xffffff, 0.7); rim.position.set(0, 110, -110); scene.add(rim);
+        /* ── Lights — enhanced for deep molecular look ── */
+        scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+        const key = new THREE.DirectionalLight(0x67e8f9, 4.0); key.position.set(60, 90, 70); scene.add(key);
+        const fill = new THREE.DirectionalLight(0xa78bfa, 2.2); fill.position.set(-70, -40, -50); scene.add(fill);
+        const back = new THREE.DirectionalLight(0xfbbf24, 1.5); back.position.set(0, -70, -90); scene.add(back);
+        const rim = new THREE.DirectionalLight(0xffffff, 0.9); rim.position.set(0, 110, -110); scene.add(rim);
+        const topWash = new THREE.DirectionalLight(0x818cf8, 0.6); topWash.position.set(-30, 120, 40); scene.add(topWash);
         const selLight = new THREE.PointLight(0xffffff, 0, 60); scene.add(selLight);
+        /* Hemisphere light for ambient depth */
+        const hemiLight = new THREE.HemisphereLight(0x67e8f9, 0x1a1d2a, 0.3); scene.add(hemiLight);
 
         /* ── Build backbone ── */
         const { pts: allPts, defs: bbDefs } = buildBackbone(gene);
@@ -1117,9 +1120,9 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         const makeTube = (vpts, r, col, emiss = 0.18, opacity = 1, shine = 140) => {
           if (vpts.length < 2) return null;
           const curve = new THREE.CatmullRomCurve3(vpts, false, 'catmullrom', 0.5);
-          const segs = Math.max(vpts.length * (isMobile ? 2 : 4), isMobile ? 8 : 20);
-          const geo = new THREE.TubeGeometry(curve, segs, r, isMobile ? 6 : 10, false);
-          const mat = new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: emiss, shininess: shine, specular: 0x336688, transparent: opacity < 1, opacity });
+          const segs = Math.max(vpts.length * (isMobile ? 2 : 5), isMobile ? 8 : 24);
+          const geo = new THREE.TubeGeometry(curve, segs, r, isMobile ? 6 : 12, false);
+          const mat = new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: emiss, shininess: shine, specular: 0x4488aa, transparent: opacity < 1, opacity });
           return new THREE.Mesh(geo, mat);
         };
 
@@ -1149,8 +1152,8 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
               const vpts = slice.map(p => new THREE.Vector3(p.x, p.y, p.z));
 
               let r = 0.4, emiss = 0.0, op = 0.6, shine = 80;
-              if (ssType === 'helix') { r = isMobile ? 2.1 : 1.7; emiss = 0.22; op = 1.0; shine = 160; }
-              else if (ssType === 'sheet') { r = isMobile ? 1.8 : 1.4; emiss = 0.18; op = 1.0; shine = 145; }
+              if (ssType === 'helix') { r = isMobile ? 2.1 : 2.0; emiss = 0.28; op = 1.0; shine = 200; }
+              else if (ssType === 'sheet') { r = isMobile ? 1.8 : 1.6; emiss = 0.24; op = 1.0; shine = 180; }
 
               const tube = makeTube(vpts, isLnk ? Math.min(r, 0.42) : r, col, isLnk ? 0 : emiss, op, shine);
               if (tube) {
@@ -1182,9 +1185,9 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
            ───────────────────────────────────────────────────────────────── */
         const CPK = { CA: 0x22d3ee, C: 0x2dd4bf, N: 0x3b82f6, O: 0xef4444, S: 0xfbbf24, H: 0xe2e8f0 };
         const sCache = {};
-        const sphereGeo = r => { const k = r.toFixed(2); if (!sCache[k]) sCache[k] = new THREE.SphereGeometry(r, isMobile ? 6 : 10, isMobile ? 6 : 10); return sCache[k]; };
-        const atomMat = col => new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.38, shininess: 260, specular: 0xaaccee });
-        const bondMat = new THREE.MeshPhongMaterial({ color: 0x1a3a5a, emissive: 0x0a1a2a, emissiveIntensity: 0.15, shininess: 80 });
+        const sphereGeo = r => { const k = r.toFixed(2); if (!sCache[k]) sCache[k] = new THREE.SphereGeometry(r, isMobile ? 8 : 14, isMobile ? 8 : 14); return sCache[k]; };
+        const atomMat = col => new THREE.MeshPhongMaterial({ color: col, emissive: col, emissiveIntensity: 0.45, shininess: 300, specular: 0xbbddff });
+        const bondMat = new THREE.MeshPhongMaterial({ color: 0x1e4a6a, emissive: 0x0c2030, emissiveIntensity: 0.18, shininess: 100 });
 
         const addAtom = (x, y, z, elem, r = 0.55) => {
           const m = new THREE.Mesh(sphereGeo(r), atomMat(CPK[elem] || CPK.C));
@@ -1221,8 +1224,8 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         const SC2_ELEMS = ['O', 'N', 'C', 'S', 'C', 'O', 'N', 'C'];
 
         /* Sample every STEP backbone points for atoms */
-        const STEP = Math.max(2, Math.floor(pts.length / 100));
-        const STEP_MOB = Math.max(3, Math.floor(pts.length / 40)); // fewer atoms on mobile
+        const STEP = Math.max(2, Math.floor(pts.length / 140));
+        const STEP_MOB = Math.max(3, Math.floor(pts.length / 55)); // fewer atoms on mobile
 
         /* ── MOBILE: Cα-only trace with large visible spheres ── */
         if (isMobile) {
@@ -1246,7 +1249,7 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
             const pp = pts[Math.max(0, pi - STEP)], pn = pts[Math.min(pts.length - 1, pi + STEP)];
 
             /* Backbone atoms */
-            addAtom(x, y, z, 'CA', 0.54);  // Cα
+            addAtom(x, y, z, 'CA', 0.62);  // Cα — larger for visibility
 
             /* Amide N, between this Cα and previous */
             const nx = (x + pp.x) / 2, ny = (y + pp.y) / 2 + 0.6, nz = (z + pp.z) / 2;
@@ -1256,9 +1259,9 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
             const oy = cy - 0.9;
             const oz = cz + (rng2(pi * 7.9) - 0.5) * 1.0;
 
-            addAtom(nx, ny, nz, 'N', 0.40);
-            addAtom(cx, cy, cz, 'C', 0.35);
-            addAtom(ox, oy, oz, 'O', 0.42);
+            addAtom(nx, ny, nz, 'N', 0.46);
+            addAtom(cx, cy, cz, 'C', 0.40);
+            addAtom(ox, oy, oz, 'O', 0.48);
 
             /* Backbone bonds */
             addBond(nx, ny, nz, x, y, z, 0.14);          // N-Cα
@@ -1272,8 +1275,8 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
             const sc1y = y + (rng2(pi * 5.2) - 0.3) * scL + 1.5;
             const sc1z = z + Math.sin(ang) * scL * 0.7;
             const e1 = SC_ELEMS[pi % SC_ELEMS.length];
-            addAtom(sc1x, sc1y, sc1z, e1, 0.42);
-            addBond(x, y, z, sc1x, sc1y, sc1z, 0.12);
+            addAtom(sc1x, sc1y, sc1z, e1, 0.48);
+            addBond(x, y, z, sc1x, sc1y, sc1z, 0.14);
 
             /* Cγ for longer side chains */
             if (pi % 3 === 0) {
@@ -1282,8 +1285,18 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
               const sc2y = sc1y + (rng2(pi * 9.1) - 0.5) * 0.8;
               const sc2z = sc1z + Math.sin(ang2) * 1.2;
               const e2 = SC2_ELEMS[pi % SC2_ELEMS.length];
-              addAtom(sc2x, sc2y, sc2z, e2, 0.38);
-              addBond(sc1x, sc1y, sc1z, sc2x, sc2y, sc2z, 0.11);
+              addAtom(sc2x, sc2y, sc2z, e2, 0.44);
+              addBond(sc1x, sc1y, sc1z, sc2x, sc2y, sc2z, 0.13);
+              /* Cδ for aromatic/long-chain residues */
+              if (pi % 5 === 0) {
+                const ang3 = ang + 2.2;
+                const sc3x = sc2x + Math.cos(ang3) * 1.0;
+                const sc3y = sc2y + (rng2(pi * 11.3) - 0.5) * 0.6;
+                const sc3z = sc2z + Math.sin(ang3) * 1.0;
+                const e3 = ['C', 'N', 'O'][pi % 3];
+                addAtom(sc3x, sc3y, sc3z, e3, 0.36);
+                addBond(sc2x, sc2y, sc2z, sc3x, sc3y, sc3z, 0.10);
+              }
               /* H-bond donor/acceptor */
               if (['N', 'O', 'S'].includes(e2) && pi % 5 === 0) {
                 const hbIdx = Math.min(pts.length - 1, pi + STEP * 4);
@@ -1302,15 +1315,33 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
             }
           });
 
-          /* Solvation water molecules near domain surface */
-          for (let w = 0; w < 35; w++) {
+          /* Solvation water molecules near domain surface — denser shell */
+          for (let w = 0; w < 60; w++) {
             const idx = Math.floor(rng2(w * 11.7) * pts.length);
             const p = pts[idx]; if (!p || !p.domain) continue;
-            const wr = 2.5 + rng2(w * 7.7) * 2.5;
+            const wr = 2.2 + rng2(w * 7.7) * 3.0;
             const wa = rng2(w * 13.3) * Math.PI * 2;
-            const wh = (rng2(w * 5.1) - 0.5) * 3.5;
-            addAtom(p.x + Math.cos(wa) * wr, p.y + wh, p.z + Math.sin(wa) * wr, 'O', 0.28);
+            const wh = (rng2(w * 5.1) - 0.5) * 4.0;
+            addAtom(p.x + Math.cos(wa) * wr, p.y + wh, p.z + Math.sin(wa) * wr, 'O', 0.24);
+            /* Add H atoms near water O for realism */
+            if (w % 3 === 0) {
+              const hoff = 0.6;
+              addAtom(p.x + Math.cos(wa) * wr + hoff, p.y + wh + 0.3, p.z + Math.sin(wa) * wr, 'H', 0.16);
+              addAtom(p.x + Math.cos(wa) * wr - hoff, p.y + wh - 0.3, p.z + Math.sin(wa) * wr + hoff, 'H', 0.16);
+            }
           }
+
+          /* Counter-ions (Mg2+, Zn2+) near domain centers */
+          gene.domains.forEach((dom, di) => {
+            const midAA = (dom.start + dom.end) / 2;
+            const dp = pts.reduce((b, p) => Math.abs(p.aa - midAA) < Math.abs(b.aa - midAA) ? p : b, pts[0]);
+            if (dp && dom.functionalRegion === 'Critical') {
+              const ionSphere = new THREE.Mesh(sphereGeo(0.70), new THREE.MeshPhongMaterial({ color: 0x22d3ee, emissive: 0x22d3ee, emissiveIntensity: 0.8, shininess: 400, specular: 0xffffff, transparent: true, opacity: 0.85 }));
+              ionSphere.position.set(dp.x + (rng2(di * 31) - 0.5) * 3, dp.y + 2.5, dp.z + (rng2(di * 47) - 0.5) * 3);
+              ionSphere.userData = { isAtom: true };
+              atomGrp.add(ionSphere);
+            }
+          });
         }
 
         /* ── Mutation pins ── */
@@ -1331,8 +1362,15 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         }
 
         /* ── Grid floor ── */
-        const grid = new THREE.GridHelper(220, 44, 0x111928, 0x111928);
-        grid.position.y = -28; grid.material.opacity = 0.25; grid.material.transparent = true; scene.add(grid);
+        const grid = new THREE.GridHelper(240, 48, 0x0c1420, 0x0c1420);
+        grid.position.y = -32; grid.material.opacity = 0.18; grid.material.transparent = true; scene.add(grid);
+
+        /* Depth-atmosphere: gradient plane behind structure */
+        const bgGeo = new THREE.PlaneGeometry(300, 200);
+        const bgMat = new THREE.MeshBasicMaterial({ color: 0x06081a, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide });
+        const bgPlane = new THREE.Mesh(bgGeo, bgMat);
+        bgPlane.position.set(0, 0, -80);
+        scene.add(bgPlane);
 
         /* ── View mode switching ── */
         const applyViewMode = mode => {
@@ -1691,7 +1729,7 @@ Provide a rigorous structural explanation covering: secondary structure elements
 
           {/* Canvas */}
           <div style={{ position: 'relative' }}>
-            <div ref={containerRef} style={{ width: '100%', height: 'clamp(260px,42vw,460px)', background: '#04060f', position: 'relative' }} />
+            <div ref={containerRef} style={{ width: '100%', height: 'clamp(300px,44vw,500px)', background: 'radial-gradient(ellipse at center, #080c18 0%, #04060f 100%)', position: 'relative' }} />
             {tooltip && (
               <div style={{ position: 'absolute', left: tooltip.x, top: tooltip.y, background: 'rgba(4,6,15,.93)', border: '1px solid rgba(99,102,241,.55)', borderRadius: 7, padding: '.3rem .7rem', fontSize: '.78rem', color: '#c8cad4', fontWeight: 600, pointerEvents: 'none', whiteSpace: 'nowrap', boxShadow: '0 4px 14px rgba(0,0,0,.6)' }}>
                 {tooltip.text}
@@ -2293,16 +2331,23 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         @keyframes dropdownSlide { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:translateY(0); } }
         @keyframes domainPulse { 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
         @media(max-width:640px){
-          .pc{ padding:1rem; } .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; }
+          .pc{ padding:.85rem; } .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; }
           .summary-grid{ grid-template-columns:repeat(2,1fr); } .gene-grid{ grid-template-columns:repeat(2,1fr) !important; } .action-grid{ grid-template-columns:1fr !important; }
+          .mode-tab{ padding:.55rem .6rem !important; font-size:.82rem !important; flex-direction:column; text-align:center; min-width:0 !important; }
+          .mode-tab span{ font-size:.82rem !important; word-break:break-word; }
+          .btn-p, .btn-ai, .btn-pdf{ padding:.8rem .6rem !important; font-size:.92rem !important; }
+          .btn-sample{ font-size:.82rem !important; padding:.4rem .65rem !important; }
+          .sample-menu{ min-width:240px !important; max-width:calc(100vw - 2rem) !important; left:0 !important; right:0 !important; }
         }
         @media(max-width:768px){
           .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; }
           .summary-grid{ grid-template-columns:repeat(2,1fr); } .gene-grid{ grid-template-columns:repeat(2,1fr) !important; } .action-grid{ grid-template-columns:1fr !important; }
+          .mode-tab{ padding:.6rem .7rem !important; font-size:.88rem !important; }
+          .btn-p, .btn-ai, .btn-pdf{ font-size:.95rem !important; }
         }
       `}</style>
 
-      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '1.25rem 1.2rem 3rem' }}>
+      <div style={{ maxWidth: '860px', margin: '0 auto', padding: '1.25rem 1.2rem 3rem', overflowX: 'hidden' }}>
 
         {/* HEADER */}
         <div style={{ background: 'linear-gradient(180deg,#141820 0%,#0c0e14 100%)', borderBottom: '1px solid #1e2130', padding: '1.65rem 1.3rem 1.3rem', margin: '-1.25rem -1.2rem 0', marginBottom: '1.25rem' }}>
@@ -2320,14 +2365,14 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         </div>
 
         {/* TOP LEVEL MODE SWITCHER */}
-        <div style={{ display: 'flex', gap: '.8rem', marginBottom: '1.25rem' }}>
-          <button className={`mode-tab ${!isCancerMode ? 'active' : ''}`} onClick={() => switchMode('research')} style={{ padding: '1rem', border: !isCancerMode ? '2px solid rgba(6,182,212,.5)' : '1px solid #24272f', background: !isCancerMode ? 'rgba(6,182,212,.1)' : '#0f1117' }}>
-            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Research Mode</span>
-            <span style={{ fontSize: '.75rem', color: !isCancerMode ? '#a5f3fc' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Manual sequence input & analysis</span>
+        <div style={{ display: 'flex', gap: '.5rem', marginBottom: '1.25rem', width: '100%', overflow: 'hidden' }}>
+          <button className={`mode-tab ${!isCancerMode ? 'active' : ''}`} onClick={() => switchMode('research')} style={{ padding: '.85rem .6rem', border: !isCancerMode ? '2px solid rgba(6,182,212,.5)' : '1px solid #24272f', background: !isCancerMode ? 'rgba(6,182,212,.1)' : '#0f1117', minWidth: 0, overflow: 'hidden' }}>
+            <span style={{ fontSize: 'clamp(.82rem, 2.5vw, 1.05rem)', fontWeight: 700, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Research Mode</span>
+            <span style={{ fontSize: 'clamp(.62rem, 1.8vw, .75rem)', color: !isCancerMode ? '#a5f3fc' : '#6b7080', fontWeight: 400, marginTop: '.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Manual sequence input & analysis</span>
           </button>
-          <button className={`mode-tab ${isCancerMode ? 'active' : ''}`} onClick={() => switchMode('cancer')} style={{ padding: '1rem', border: isCancerMode ? '2px solid rgba(16,185,129,.5)' : '1px solid #24272f', background: isCancerMode ? 'rgba(16,185,129,.1)' : '#0f1117' }}>
-            <span style={{ fontSize: '1.05rem', fontWeight: 700, display: 'block' }}>Cancer Intelligence</span>
-            <span style={{ fontSize: '.75rem', color: isCancerMode ? '#a7f3d0' : '#6b7080', fontWeight: 400, marginTop: '.2rem' }}>Gene panel & clinical reports</span>
+          <button className={`mode-tab ${isCancerMode ? 'active' : ''}`} onClick={() => switchMode('cancer')} style={{ padding: '.85rem .6rem', border: isCancerMode ? '2px solid rgba(16,185,129,.5)' : '1px solid #24272f', background: isCancerMode ? 'rgba(16,185,129,.1)' : '#0f1117', minWidth: 0, overflow: 'hidden' }}>
+            <span style={{ fontSize: 'clamp(.82rem, 2.5vw, 1.05rem)', fontWeight: 700, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Cancer Intelligence</span>
+            <span style={{ fontSize: 'clamp(.62rem, 1.8vw, .75rem)', color: isCancerMode ? '#a7f3d0' : '#6b7080', fontWeight: 400, marginTop: '.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Gene panel & clinical reports</span>
           </button>
         </div>
 
@@ -2567,9 +2612,9 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         {mutations && (<>
           {mutations.warnings?.length > 0 && (<div className="warning"><strong>Validation Warnings:</strong><ul style={{ marginTop: '.5rem', paddingLeft: '1.5rem' }}>{mutations.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></div>)}
 
-          <div className="action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.8rem', marginBottom: '.8rem' }}>
-            <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>{loadingAI ? <><span className="spin"></span>Generating…</> : <>Get AI Explanation</>}</button>
-            <button className="btn-pdf" onClick={handleExportPDF}>Download Report</button>
+          <div className="action-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.6rem', marginBottom: '.8rem', maxWidth: '100%', overflow: 'hidden' }}>
+            <button className="btn-ai" onClick={handleAI} disabled={loadingAI} style={{ minWidth: 0, overflow: 'hidden' }}>{loadingAI ? <><span className="spin"></span><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Generating…</span></> : <><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Get AI Explanation</span></>}</button>
+            <button className="btn-pdf" onClick={handleExportPDF} style={{ minWidth: 0, overflow: 'hidden' }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Download Report</span></button>
           </div>
 
           {aiExplanation && (
