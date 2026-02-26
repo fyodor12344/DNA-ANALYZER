@@ -4,19 +4,24 @@ import { evaluatePrimerPair, calcSecondaryStructureScore } from '../utils/primer
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
 
-/* ─── SAMPLE SEQUENCE ────────────────────────────────────────────────────── */
-const SAMPLE_SEQUENCE = [
-  'ATGGAGGAGCCGCAGTCAGATCCTAGCGTGAGTTTGCCTGTCCTGGGAGAGACCGGCGC',
-  'ACAGAGGAAGAGAATCTCCGCAAGAAAGTGGGGTTTGTCTCCTTCCAGCCAAGGTCTGA',
-  'GCCTGCAGTTCAACTGACTGTTTCAAGTTATAGGGTGACAGGTTTCATCTGGCAAGCCA',
-  'GGCTTCGGGCTCAGTGGAACTCGGAGGAAAGTGAGGCTTTGCTCAGGAGAGGGGTTGCT',
-  'GATCTGCCCCCGGGCTCTCCCAGGACACCTATGGAAACTACTTCCTGAAACAACGTTCTG',
-  'TGTTTGTGTCCCCTTCGGTGGCCCCTGCACCAGAAGAAACCCCGCGGGAGCGCCCCTCCC',
-  'CCATCCCCCTCCCCCAAGAGATTCGTTGCCCTCCCAGGGTGGGCTGGCCCACTCGAACCC',
-  'CCATCCGGGTTCTTCACCTGTTTGGCTTCCTGGAAGGTGGAGACTCAGCCCAGCCCCCAA',
-  'GGTGAACTCAATCTCAAGGTCAATGGCAGGCCGTCCCCTTCCAGGTTCTTCGCCTGCAGC',
-  'CCCGGCACTGCCTCAGCCCTCAGCCCTAAGCCCAGTGCCAACTCAGCCCCCGGCCCCCAG'
-].join('');
+/* ─── SAMPLE SEQUENCES ───────────────────────────────────────────────────── */
+const SAMPLE_SEQUENCES = {
+  'Default (Unknown)': [
+    'ATGGAGGAGCCGCAGTCAGATCCTAGCGTGAGTTTGCCTGTCCTGGGAGAGACCGGCGC',
+    'ACAGAGGAAGAGAATCTCCGCAAGAAAGTGGGGTTTGTCTCCTTCCAGCCAAGGTCTGA',
+    'GCCTGCAGTTCAACTGACTGTTTCAAGTTATAGGGTGACAGGTTTCATCTGGCAAGCCA',
+    'GGCTTCGGGCTCAGTGGAACTCGGAGGAAAGTGAGGCTTTGCTCAGGAGAGGGGTTGCT',
+    'GATCTGCCCCCGGGCTCTCCCAGGACACCTATGGAAACTACTTCCTGAAACAACGTTCTG',
+    'TGTTTGTGTCCCCTTCGGTGGCCCCTGCACCAGAAGAAACCCCGCGGGAGCGCCCCTCCC',
+    'CCATCCCCCTCCCCCAAGAGATTCGTTGCCCTCCCAGGGTGGGCTGGCCCACTCGAACCC',
+    'CCATCCGGGTTCTTCACCTGTTTGGCTTCCTGGAAGGTGGAGACTCAGCCCAGCCCCCAA',
+    'GGTGAACTCAATCTCAAGGTCAATGGCAGGCCGTCCCCTTCCAGGTTCTTCGCCTGCAGC',
+    'CCCGGCACTGCCTCAGCCCTCAGCCCTAAGCCCAGTGCCAACTCAGCCCCCGGCCCCCAG'
+  ].join(''),
+  'BRCA1 (Breast Cancer 1)': 'GCTAACTCTTCTAGCCTTCAAACAACTAATGATGGTTAAAACAACCAGATAAATAAACAAGAACAGAATTTTAGGAAGCAAACTAGAACTATGTAAGAAACGATAATAATTAAAACAAAAAGAAT',
+  'EGFR (Epidermal Growth Factor)': 'TGCCTTCCAAGACTTCAGGTAACCACTCGCATCACTGTCCTCATCATCTTCATCATCTTCCTGCTCCTCATCGTCACCTACCTGCTGCTCATCCTCCTCCTC',
+  'GAPDH (Stable Reference)': 'ATGGGGAAGGTGAAGGTCGGAGTCAACGGATTTGGTCGTATTGGGCGCCTGGTCACCAGGGCTGCTTTTAACTCTGGTAAAGTGGATATTGTTGCCATCAATGACCCCTTCATTGACCTCAACTACATGGTTTACATGTTCCAATATGATTCCACCCATGGCAAATTCCATGGCACCGTCAAGGCTGAGAACGGGAAGCTTGTCATCAATGGAAATCCCATCACCATCTTCCAGGAGCGAGATCCCTCCAAAATCAAGTGGGGCGATGCTGGCGCTGAGTACGTCGTGGAGTCCACTGGCGTCTTCACCACCATGGAGAAGGC'
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THERMODYNAMIC ENGINE — SantaLucia 1998 Nearest-Neighbor
@@ -317,7 +322,7 @@ function pickBorderlinePairs(fwds, revs, ampMin, ampMax) {
    ─────────────────────────────────────────────────────────────────────────── */
 function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline) {
   const tmDiff = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
-  const annealT = parseFloat((Math.min(fwd.tm, rev.tm) - 5).toFixed(1));
+  const annealT = parseFloat(((fwd.tm + rev.tm) / 2 - 3).toFixed(1));
   const gcMax = Math.max(fwd.gc_content, rev.gc_content);
   // NaN guard: if quality_score is NaN/undefined, default to 0
   const fwdScore = isNaN(fwd.quality_score) || fwd.quality_score == null ? 0 : fwd.quality_score;
@@ -337,18 +342,26 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (fwdRep > 5) warnings.push({ urgency: 'medium', text: `Forward primer has ${fwdRep} repetitive 8-mer hits — specificity may be reduced` });
   if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
-  // ─── SAFETY GATE CHECK (must come BEFORE classification) ────────────────
+  // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
+  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic');
+  const ev = evalResult.error ? null : evalResult;
+
+  // ─── SAFETY GATE CHECK & THERMO ERRORS ────────────────────────────────────
   const safetyTriggers = [];
-  // NaN/null/0 thermodynamic value check
-  // Note: ΔG = 0 is scientifically valid (means no stable structure formed), NOT invalid
-  const thermoVals = [fwd.tm, rev.tm, fwd.hairpin_dg, rev.hairpin_dg, fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg];
-  const thermoNames = ['Forward Tm', 'Reverse Tm', 'Forward Hairpin ΔG', 'Reverse Hairpin ΔG', 'Forward Self-dimer ΔG', 'Reverse Self-dimer ΔG', 'Cross-dimer ΔG'];
-  thermoVals.forEach((v, i) => {
-    if (v === null || v === undefined || isNaN(v)) safetyTriggers.push(`${thermoNames[i]} = invalid (NaN/null)`);
-  });
-  // Tm = 0 IS invalid (no primer has Tm=0)
-  if (fwd.tm === 0) safetyTriggers.push('Forward Tm = 0°C (invalid)');
-  if (rev.tm === 0) safetyTriggers.push('Reverse Tm = 0°C (invalid)');
+  let hasThermoError = false;
+  const checkNull = (v, name) => { if (v === null || v === undefined || isNaN(v)) { safetyTriggers.push(`${name} = invalid (NaN/null)`); hasThermoError = true; } };
+  const checkThermo = (v, name) => {
+    checkNull(v, name);
+    if (v === 0) { safetyTriggers.push(`${name} = 0 (Thermodynamic Calculation Error)`); hasThermoError = true; }
+  };
+
+  checkNull(fwd.tm, 'Forward Tm'); checkNull(rev.tm, 'Reverse Tm');
+  if (fwd.tm === 0) { safetyTriggers.push('Forward Tm = 0°C (invalid)'); hasThermoError = true; }
+  if (rev.tm === 0) { safetyTriggers.push('Reverse Tm = 0°C (invalid)'); hasThermoError = true; }
+  checkThermo(fwd.hairpin_dg, 'Forward Hairpin ΔG'); checkThermo(rev.hairpin_dg, 'Reverse Hairpin ΔG');
+  checkThermo(fwd.self_dimer_dg, 'Forward Self-dimer ΔG'); checkThermo(rev.self_dimer_dg, 'Reverse Self-dimer ΔG');
+  checkThermo(cross_dimer_dg, 'Cross-dimer ΔG');
+
   if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff}°C exceeds 5°C limit`);
   if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT}°C below 50°C`);
   if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer ΔG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
@@ -359,26 +372,28 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
 
   const autoRejected = safetyTriggers.length > 0;
 
-  // Classification — safety gates override everything
+  // ─── CLASSIFICATION LOGIC ─────────────────────────────────────────────────
   let classification;
   if (autoRejected) {
     classification = 'Auto-Rejected';
-  } else if (overallScore >= 85) {
-    classification = 'Excellent';
-  } else if (overallScore >= 70) {
-    classification = 'Good';
-  } else if (overallScore >= 60) {
-    classification = 'Fair';
   } else {
-    classification = 'Poor';
-  }
-  // Downgrade for relaxation (only if not auto-rejected)
-  if (!autoRejected) {
+    const riskTier = ev ? ev.riskTier : 'Low';
+    const structScore = ev ? ev.structureScore : 0;
+    const prob = ev ? ev.successProbability : 100;
+
+    if (overallScore >= 90 && riskTier === 'Low') classification = 'Excellent';
+    else if (overallScore >= 80 && (riskTier === 'Low' || riskTier === 'Moderate')) classification = 'Very Good';
+    else if (overallScore >= 70) classification = 'Acceptable';
+    else if (overallScore >= 50) classification = 'Borderline';
+    else classification = 'Not Recommended';
+
+    if (structScore >= 8 && (classification === 'Excellent' || classification === 'Very Good')) classification = 'Very Good';
+    if (hasThermoError && (classification === 'Excellent' || classification === 'Very Good' || classification === 'Acceptable')) classification = 'Borderline';
+    if (prob < 80 && classification === 'Excellent') classification = 'Very Good';
+
     if (isBorderline) classification = 'Borderline';
-    else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Good';
-    else if (relaxLevel > 0 && classification === 'Good') classification = 'Fair';
-    else if (tmDiff > 3 && classification === 'Excellent') classification = 'Good';
-    else if (tmDiff > 3 && classification === 'Good') classification = 'Fair';
+    else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Very Good';
+    else if (relaxLevel > 0 && classification === 'Very Good') classification = 'Acceptable';
   }
 
   // Context-appropriate warnings (post-classification)
@@ -404,49 +419,29 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     issues: [], warnings: []
   });
 
-  // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
-  // Run the full 6-step evaluation pipeline on the designed primer pair
-  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic');
-  const evalData = evalResult.error ? null : evalResult;
+  // ─── AUTO-VALIDATOR (Rule 8) ──────────────────────────────────────────────
+  if (!autoRejected && ev) {
+    let adjust = false;
+    if (ev.structureScore >= 8 && (classification === 'Excellent' || classification === 'Very Good')) { adjust = true; classification = 'Very Good'; }
+    if (hasThermoError && classification !== 'Borderline' && classification !== 'Not Recommended') { adjust = true; classification = 'Borderline'; }
+    if (ev.successProbability < 80 && classification === 'Excellent') { adjust = true; classification = 'Very Good'; }
+    if (adjust) {
+      warnings.push({ urgency: 'low', text: "Internal consistency adjustment applied." });
+    }
+  }
 
-  // Bayesian Risk
-  const riskFactors = [];
-  if (tmDiff > 5) riskFactors.push(0.65);
-  else if (tmDiff > 3) riskFactors.push(0.30);
-  if (annealT < 50) riskFactors.push(0.55);
-  else if (annealT < 55) riskFactors.push(0.25);
-  const worstDimer = Math.min(fwd.self_dimer_dg, rev.self_dimer_dg, cross_dimer_dg);
-  if (worstDimer < -9) riskFactors.push(0.60);
-  else if (worstDimer < -5) riskFactors.push(0.30);
-  // worstHairpin already declared above in safety gate section
-  if (worstHairpin < -6) riskFactors.push(0.50);
-  else if (worstHairpin < -3) riskFactors.push(0.20);
-  const failProb = riskFactors.length > 0 ? 1 - riskFactors.reduce((p, r) => p * (1 - r), 1) : 0.05;
-  const successProb = Math.round((1 - failProb) * 100);
-  let riskTier = 'Low';
-  if (failProb > 0.70) riskTier = 'Critical';
-  else if (failProb > 0.40) riskTier = 'High';
-  else if (failProb > 0.20) riskTier = 'Moderate';
-
-  // Melting Curve Simulation
-  const fwdGC = fwd.gc_content, revGC = rev.gc_content;
-  const fwdSpread = fwdGC > 65 || fwdGC < 35 ? 4.5 : fwdGC > 55 || fwdGC < 40 ? 2.8 : 1.5;
-  const revSpread = revGC > 65 || revGC < 35 ? 4.5 : revGC > 55 || revGC < 40 ? 2.8 : 1.5;
-  const fwdMeltQ = fwdSpread > 3 ? 'Broad / Unstable' : fwdSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
-  const revMeltQ = revSpread > 3 ? 'Broad / Unstable' : revSpread > 2 ? 'Slightly Broad' : 'Sharp & Specific';
-  const asymMelt = tmDiff > 3;
-  let meltSummary = 'Sharp melting profile. Symmetric primer dissociation expected.';
-  if (fwdMeltQ !== 'Sharp & Specific' || revMeltQ !== 'Sharp & Specific') meltSummary = `Forward: ${fwdMeltQ}. Reverse: ${revMeltQ}.`;
-  if (asymMelt) meltSummary += ' Asymmetric melting behavior detected.';
-
-  // Secondary Structure
-  const fwdStruct = calcSecondaryStructureScore(fwd.sequence);
-  const revStruct = calcSecondaryStructureScore(rev.sequence);
-  const structScore = Math.min(10, Math.round((fwdStruct.score + revStruct.score) / 2));
-  let structInterp = 'Minimal secondary structure risk.';
-  if (structScore >= 6) structInterp = 'High interference risk from secondary structures.';
-  else if (structScore >= 3) structInterp = 'Moderate secondary structure presence.';
-  const threePrimeInterference = fwdStruct.threePrimeInvolved || revStruct.threePrimeInvolved;
+  // Optimize protocol if needed (Rule 6)
+  const isHighFi = mode.name === 'Diagnostic PCR' ? false : true; // Only diagnostic is standard taq
+  let optimizationNotes = [
+    mode.name === 'qPCR (Real-Time)'
+      ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
+      : 'Confirm product size by gel electrophoresis. Sequence before downstream use.',
+    `Denaturation: 98°C 30s | Annealing: ${annealT}°C 30s | Extension: 72°C ${Math.max(30, Math.ceil(amp / 1000) * 60)}s`,
+    ...(relaxLevel > 0 ? ['Relaxed constraints were used — validate these primers empirically before committing to synthesis.'] : [])
+  ];
+  if (isHighFi && annealT < 55) {
+    optimizationNotes.push('NOTE: High-fidelity polymerases (Q5/Phusion) typically require higher annealing temperatures. Consider a temperature gradient PCR (55–58°C).');
+  }
 
   return {
     forward_primer: mkPrimer(fwd, false),
@@ -465,16 +460,16 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
     // ─── EVALUATION ENGINE DATA ───
     evaluation: {
-      successProbability: successProb,
-      riskTier,
-      safetyTriggers,
+      successProbability: ev ? ev.successProbability : 50,
+      riskTier: ev ? ev.riskTier : 'High',
+      safetyTriggers: ev ? ev.triggers : safetyTriggers,
       safetyPassed: !autoRejected,
-      meltingCurve: { fwdMeltQ, revMeltQ, summary: meltSummary, asymmetric: asymMelt },
-      structureScore: structScore,
-      structureInterpretation: structInterp,
-      threePrimeInterference,
-      fwdStructure: fwdStruct,
-      revStructure: revStruct,
+      meltingCurve: ev ? { fwdMeltQ: ev.meltingCurve.fwdMeltQuality, revMeltQ: ev.meltingCurve.revMeltQuality, summary: ev.meltingCurve.overallMeltQuality, asymmetric: ev.meltingCurve.asymmetricMelting } : {},
+      structureScore: ev ? ev.structureScore : 10,
+      structureInterpretation: ev ? ev.structureInterpretation : 'Unknown risk',
+      threePrimeInterference: ev ? ev.threePrimeInterference : true,
+      fwdStructure: ev ? ev.fwdStructure : null,
+      revStructure: ev ? ev.revStructure : null,
     },
     pcr_protocol: {
       annealing_temp: annealT,
@@ -647,11 +642,11 @@ const APP_MODES = {
 };
 
 /* ─── COLOURS ────────────────────────────────────────────────────────────── */
-const QUAL_COL = { Excellent: '#00FFC6', Good: '#00c9a0', Fair: '#F59E0B', Poor: '#EF4444' };
+const QUAL_COL = { Excellent: '#00FFC6', 'Very Good': '#3b82f6', Acceptable: '#60A5FA', Borderline: '#F59E0B', 'Not Recommended': '#EF4444' };
 const RISK_COL = { low: '#00FFC6', medium: '#F59E0B', high: '#EF4444' };
 const URG_COL = { high: '#EF4444', medium: '#F59E0B', low: '#00FFC6' };
-const CLASS_COL = { Excellent: '#00FFC6', Good: '#60A5FA', Fair: '#F59E0B', Poor: '#EF4444', Borderline: '#F87171', 'Auto-Rejected': '#DC2626' };
-const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', Good: 'rgba(96,165,250,0.1)', Fair: 'rgba(245,158,11,0.1)', Poor: 'rgba(239,68,68,0.1)', Borderline: 'rgba(248,113,113,0.1)', 'Auto-Rejected': 'rgba(220,38,38,0.15)' };
+const CLASS_COL = { Excellent: '#00FFC6', 'Very Good': '#3b82f6', Acceptable: '#60A5FA', Borderline: '#F59E0B', 'Not Recommended': '#EF4444', 'Auto-Rejected': '#DC2626' };
+const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', 'Very Good': 'rgba(59,130,246,0.1)', Acceptable: 'rgba(96,165,250,0.1)', Borderline: 'rgba(245,158,11,0.1)', 'Not Recommended': 'rgba(239,68,68,0.1)', 'Auto-Rejected': 'rgba(220,38,38,0.15)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -668,11 +663,20 @@ export default function PrimerDesigner() {
   const [aiExplanation, setAiExplanation] = useState('');
   const [loadingAI, setLoadingAI] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [sampleIdx, setSampleIdx] = useState(0);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
 
-  const loadSample = () => { setSequence(SAMPLE_SEQUENCE); setError(''); setPrimers(null); setAiExplanation(''); };
+  const loadSample = () => {
+    const keys = Object.keys(SAMPLE_SEQUENCES);
+    const key = keys[sampleIdx % keys.length];
+    setSequence(SAMPLE_SEQUENCES[key]);
+    setError('');
+    setPrimers(null);
+    setAiExplanation('');
+    setSampleIdx(s => s + 1);
+  };
 
   useEffect(() => {
     const close = () => setShowExportMenu(false);
@@ -1250,7 +1254,7 @@ export default function PrimerDesigner() {
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <button className="btn-sample" onClick={loadSample}>Load Sample</button>
+              <button className="btn-sample" onClick={loadSample}>Next Sample Data</button>
             </div>
           </div>
           <textarea rows={5} value={sequence} onChange={e => setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
