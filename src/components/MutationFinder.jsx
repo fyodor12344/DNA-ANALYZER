@@ -1501,8 +1501,8 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
               else deselect();
             } catch (err) { deselect(); }
           };
-          if (isMobile && typeof requestIdleCallback === 'function') {
-            requestIdleCallback(doRaycast, { timeout: 100 });
+          if (isMobile) {
+            setTimeout(doRaycast, 10);
           } else {
             doRaycast();
           }
@@ -1510,6 +1510,7 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
 
         const el = renderer.domElement;
         el.style.cursor = isMobile ? 'default' : 'grab';
+        el.style.touchAction = 'none'; // CRITICAL: Stop mobile from freezing on drag
 
         if (isMobile) {
           // Touch events — more reliable than pointer on iOS/Android
