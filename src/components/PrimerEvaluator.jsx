@@ -12,6 +12,7 @@ const CLASS_COLORS = { Recommended: '#00FFC6', Acceptable: '#60A5FA', 'Not Recom
 export default function PrimerEvaluator({ result, setResult }) {
     const [fwdInput, setFwdInput] = useState('');
     const [revInput, setRevInput] = useState('');
+    const [templateInput, setTemplateInput] = useState('');
     const [mode, setMode] = useState('diagnostic');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -20,24 +21,24 @@ export default function PrimerEvaluator({ result, setResult }) {
         if (!fwdInput.trim() || !revInput.trim()) { setError('Enter both forward and reverse primer sequences.'); return; }
         setLoading(true); setError('');
         setTimeout(() => {
-            const evalResult = evaluatePrimerPair(fwdInput, revInput, mode);
+            const evalResult = evaluatePrimerPair(fwdInput, revInput, mode, templateInput);
             if (evalResult.error) { setError(evalResult.error); setLoading(false); return; }
             let alternatives = [];
-            if (evalResult.autoRejected || evalResult.classification === 'Not Recommended' || evalResult.weightedScore < 65) {
+            if (evalResult.classification === 'REJECTED' || evalResult.classification === 'CONDITIONALLY ACCEPTED' || evalResult.weightedScore < 65) {
                 alternatives = generateAlternatives(fwdInput, revInput);
             }
-            setResult({ ...evalResult, alternatives, fwdInput, revInput, mode });
+            setResult({ ...evalResult, alternatives, fwdInput, revInput, templateInput, mode });
             setLoading(false);
         }, 600);
     };
 
     const loadSample = (key) => {
         const s = SAMPLE_PRIMERS[key];
-        setFwdInput(s.forward); setRevInput(s.reverse);
+        setFwdInput(s.forward); setRevInput(s.reverse); setTemplateInput('');
         setError(''); setResult(null);
     };
 
-    const clearAll = () => { setFwdInput(''); setRevInput(''); setError(''); setResult(null); };
+    const clearAll = () => { setFwdInput(''); setRevInput(''); setTemplateInput(''); setError(''); setResult(null); };
 
     const exportPDF = () => {
         if (!result) return;
@@ -54,15 +55,22 @@ export default function PrimerEvaluator({ result, setResult }) {
     th{background:#00A389;color:white}.warn{color:#b45309;margin:4px 0}
     .footer{margin-top:30px;padding-top:12px;border-top:1px solid #e2e8f0;font-size:0.85em;color:#94a3b8}</style></head><body>
     <h1>PCR Primer Evaluation Report</h1>
-    <div class="card ${d.autoRejected ? 'rejected-card' : ''}">
-    <h2>Classification: ${d.classification} ${d.autoRejected ? '' : '(' + d.weightedScore + '/100)'}</h2>
+    <div class="card ${d.classification === 'REJECTED' ? 'rejected-card' : ''}">
+    <h2>Classification: ${d.classification} (${d.weightedScore}/100)</h2>
+    <div class="metric">Confidence Band: ${d.confidenceBand}</div>
     <div class="metric">PCR Success: ${d.successProbability}%</div>
     <div class="metric">Risk Tier: ${d.riskTier}</div>
+    <div class="metric">Specificity Score: ${d.specificityScore}/100</div>
     <div class="metric">Mode: ${d.mode === 'diagnostic' ? 'Diagnostic' : 'Research'}</div>
     </div>`;
-        if (d.autoRejected) {
+        if (d.classification === 'REJECTED' && d.triggers && d.triggers.length > 0) {
             h += `<h2>Safety Gate Triggers</h2><ul>`;
             d.triggers.forEach(t => { h += `<li class="warn">${t}</li>`; });
+            h += `</ul>`;
+        }
+        if (d.classification === 'CONDITIONALLY ACCEPTED' && d.optimizationSuggestions) {
+            h += `<h2>Suggested Optimizations</h2><ul>`;
+            d.optimizationSuggestions.forEach(s => { h += `<li>${s}</li>`; });
             h += `</ul>`;
         }
         h += `<h2>Primer Details</h2><table><tr><th>Parameter</th><th>Forward</th><th>Reverse</th></tr>
@@ -160,6 +168,17 @@ export default function PrimerEvaluator({ result, setResult }) {
                     {revInput && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{revInput.replace(/[^ATGC]/gi, '').length} bases</span>}
                 </div>
             </div>
+            <div style={{ ...S.inputGroup, marginBottom: '1rem' }}>
+                <label style={{ ...S.label, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Target Template Sequence (Optional)</span>
+                    <span style={{ color: '#64748b', fontSize: '0.75rem', fontWeight: 500 }}>For Specificity & 8-mer scoring</span>
+                </label>
+                <textarea style={{ ...S.input, minHeight: '80px', fontFamily: 'monospace' }} value={templateInput} onChange={e => setTemplateInput(e.target.value.toUpperCase().replace(/[^ATGC]/gi, ''))}
+                    placeholder="Paste full genomic target sequence here to calculate off-target risk..." spellCheck="false"
+                    onFocus={e => { e.target.style.borderColor = 'rgba(0,191,165,0.5)'; }}
+                    onBlur={e => { e.target.style.borderColor = 'rgba(255,255,255,0.1)'; }} />
+                {templateInput && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>{templateInput.length} bases</span>}
+            </div>
 
             {/* Sample Buttons */}
             <div style={S.sampleRow}>
@@ -195,35 +214,61 @@ export default function PrimerEvaluator({ result, setResult }) {
                 <div style={{ animation: 'fadeIn 0.5s ease-out' }}>
 
                     {/* Classification Banner */}
-                    <div style={{ ...S.card, borderLeft: `4px solid ${CLASS_COLORS[result.classification] || '#94a3b8'}`, background: result.autoRejected ? 'rgba(239,68,68,0.06)' : 'rgba(15,23,42,0.5)' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div style={{ ...S.card, borderLeft: `6px solid ${result.classColor}`, background: result.classification === 'REJECTED' ? 'rgba(239,68,68,0.06)' : result.classification === 'CONDITIONALLY ACCEPTED' ? 'rgba(245,158,11,0.06)' : 'rgba(0,255,198,0.06)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
                             <div>
-                                <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.25rem' }}>Primer Classification</div>
-                                <div style={{ fontSize: '1.6rem', fontWeight: 800, fontFamily: 'Montserrat, sans-serif', color: CLASS_COLORS[result.classification] || '#94a3b8' }}>
-                                    {result.autoRejected ? 'Auto-Rejected' : result.classification}
-                                    {!result.autoRejected && <span style={{ fontSize: '1rem', fontWeight: 600, marginLeft: '0.5rem', color: '#94a3b8' }}>({result.weightedScore}/100)</span>}
+                                <div style={{ fontSize: '0.75rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.35rem' }}>Primer Classification</div>
+                                <div style={{ fontSize: '1.8rem', fontWeight: 800, fontFamily: 'Montserrat, sans-serif', color: result.classColor }}>
+                                    {result.classification}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+                                    <span style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc' }}>{result.weightedScore} / 100</span>
+                                    <span style={{ fontSize: '0.85rem', color: '#94a3b8', background: 'rgba(255,255,255,0.1)', padding: '0.2rem 0.6rem', borderRadius: '12px' }}>{result.confidenceBand}</span>
                                 </div>
                             </div>
-                            <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center' }}>
+                                <div style={{ textAlign: 'center' }}>
+                                    <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Specificity</div>
+                                    <div style={{ fontSize: '1.2rem', fontWeight: 700, color: result.specificityScore >= 60 ? '#00FFC6' : '#F59E0B' }}>{result.specificityScore}/100</div>
+                                </div>
                                 <div style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>PCR Success</div>
-                                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: RISK_COLORS[result.riskTier] }}>{result.successProbability}%</div>
+                                    <div style={{ fontSize: '1.4rem', fontWeight: 800, color: result.successProbability >= 80 ? '#00FFC6' : result.successProbability >= 65 ? '#60A5FA' : result.successProbability >= 50 ? '#F59E0B' : '#EF4444' }}>{result.successProbability}%</div>
                                 </div>
                                 <div style={{ textAlign: 'center' }}>
                                     <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase' }}>Risk Tier</div>
-                                    <span style={S.badge(RISK_COLORS[result.riskTier], RISK_BG[result.riskTier])}>{result.riskTier}</span>
+                                    <span style={S.badge(
+                                        result.riskTier === 'Low Risk' ? '#00FFC6' : result.riskTier === 'Moderate Risk' ? '#60A5FA' : result.riskTier === 'Elevated Risk' ? '#F59E0B' : '#EF4444',
+                                        result.riskTier === 'Low Risk' ? 'rgba(0,255,198,0.1)' : result.riskTier === 'Moderate Risk' ? 'rgba(96,165,250,0.1)' : result.riskTier === 'Elevated Risk' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)'
+                                    )}>{result.riskTier}</span>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    {/* Rejection Triggers */}
-                    {result.autoRejected && (
+                    {/* Rejection Triggers OR Optimizations */}
+                    {(result.classification === 'REJECTED' && result.triggers?.length > 0) && (
                         <div style={{ ...S.card, borderLeft: '4px solid #EF4444' }}>
                             <div style={{ ...S.cardTitle, color: '#EF4444' }}>Safety Gate Triggers</div>
                             {result.triggers.map((t, i) => (
-                                <div key={i} style={{ padding: '0.5rem 0.75rem', margin: '0.4rem 0', background: 'rgba(239,68,68,0.08)', borderRadius: '6px', color: '#FCA5A5', fontSize: '0.9rem', borderLeft: '3px solid #EF4444' }}>
+                                <div key={i} style={{ padding: '0.6rem 0.8rem', margin: '0.5rem 0', background: 'rgba(239,68,68,0.08)', borderRadius: '6px', color: '#FCA5A5', fontSize: '0.9rem', borderLeft: '3px solid #EF4444' }}>
                                     {t}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+
+                    {result.classification === 'CONDITIONALLY ACCEPTED' && result.optimizationSuggestions && result.optimizationSuggestions.length > 0 && (
+                        <div style={{ ...S.card, borderLeft: '4px solid #F59E0B' }}>
+                            <div style={{ ...S.cardTitle, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></svg>
+                                Suggested Optimizations
+                            </div>
+                            <div style={{ color: '#cbd5e1', fontSize: '0.9rem', marginBottom: '1rem' }}>This primer pair has moderate issues but might be usable if optimized. Consider the following adjustments:</div>
+                            {result.optimizationSuggestions.map((s, i) => (
+                                <div key={i} style={{ padding: '0.6rem 0.8rem', margin: '0.5rem 0', background: 'rgba(245,158,11,0.08)', borderRadius: '6px', color: '#FDE68A', fontSize: '0.9rem', borderLeft: '3px solid #F59E0B', display: 'flex', gap: '0.5rem' }}>
+                                    <span style={{ color: '#F59E0B', fontWeight: 'bold' }}>•</span>
+                                    <span>{s}</span>
                                 </div>
                             ))}
                         </div>
@@ -329,9 +374,14 @@ export default function PrimerEvaluator({ result, setResult }) {
                                             <tr key={i}>
                                                 <td style={S.td}>{i + 1}</td>
                                                 <td style={S.td}>{a.label}</td>
-                                                <td style={S.td}><span style={{ fontWeight: 700, color: a.score >= 65 ? '#00FFC6' : '#F59E0B' }}>{a.score}/100</span></td>
-                                                <td style={S.td}><span style={S.badge(RISK_COLORS[a.riskTier], RISK_BG[a.riskTier])}>{a.riskTier}</span></td>
-                                                <td style={{ ...S.td, color: CLASS_COLORS[a.classification] || '#94a3b8' }}>{a.classification}</td>
+                                                <td style={S.td}><span style={{ fontWeight: 700, color: a.score >= 85 ? '#00FFC6' : a.score >= 65 ? '#60A5FA' : '#F59E0B' }}>{a.score}/100</span></td>
+                                                <td style={S.td}>
+                                                    <span style={S.badge(
+                                                        a.riskTier === 'Low Risk' ? '#00FFC6' : a.riskTier === 'Moderate Risk' ? '#60A5FA' : a.riskTier === 'Elevated Risk' ? '#F59E0B' : '#EF4444',
+                                                        a.riskTier === 'Low Risk' ? 'rgba(0,255,198,0.1)' : a.riskTier === 'Moderate Risk' ? 'rgba(96,165,250,0.1)' : a.riskTier === 'Elevated Risk' ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)'
+                                                    )}>{a.riskTier}</span>
+                                                </td>
+                                                <td style={{ ...S.td, color: a.classification === 'ACCEPTED' ? '#00FFC6' : a.classification === 'CONDITIONALLY ACCEPTED' ? '#F59E0B' : '#EF4444', fontWeight: 600 }}>{a.classification}</td>
                                                 <td style={S.td}>{a.successProb}%</td>
                                             </tr>
                                         ))}

@@ -388,7 +388,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
   // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
-  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic');
+  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic', seq);
   const ev = evalResult.error ? null : evalResult;
 
   // ─── SAFETY GATE CHECK & THERMO ERRORS ────────────────────────────────────
@@ -420,30 +420,24 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   // ─── CLASSIFICATION LOGIC ─────────────────────────────────────────────────
   let classification;
   if (autoRejected) {
-    classification = 'Auto-Rejected';
+    classification = 'REJECTED';
+  } else if (ev) {
+    classification = ev.classification;
+    // engine already computes 'ACCEPTED', 'CONDITIONALLY ACCEPTED', 'REJECTED' intelligently.
   } else {
-    const riskTier = ev ? ev.riskTier : 'Low';
-    const structScore = ev ? ev.structureScore : 0;
-    const prob = ev ? ev.successProbability : 100;
-
-    if (overallScore >= 90 && riskTier === 'Low') classification = 'Excellent';
-    else if (overallScore >= 80 && (riskTier === 'Low' || riskTier === 'Moderate')) classification = 'Very Good';
-    else if (overallScore >= 70) classification = 'Acceptable';
-    else if (overallScore >= 50) classification = 'Borderline';
-    else classification = 'Not Recommended';
-
-    if (structScore >= 8 && (classification === 'Excellent' || classification === 'Very Good')) classification = 'Very Good';
-    if (hasThermoError && (classification === 'Excellent' || classification === 'Very Good' || classification === 'Acceptable')) classification = 'Borderline';
-    if (prob < 80 && classification === 'Excellent') classification = 'Very Good';
-
-    if (isBorderline) classification = 'Borderline';
-    else if (relaxLevel > 0 && classification === 'Excellent') classification = 'Very Good';
-    else if (relaxLevel > 0 && classification === 'Very Good') classification = 'Acceptable';
+    // Fallback if engine fails
+    if (overallScore >= 80) classification = 'ACCEPTED';
+    else if (overallScore >= 50) classification = 'CONDITIONALLY ACCEPTED';
+    else classification = 'REJECTED';
   }
+
+  // Adjust for Designer context
+  if (isBorderline && classification === 'ACCEPTED') classification = 'CONDITIONALLY ACCEPTED';
+  if (relaxLevel > 0 && classification === 'ACCEPTED') classification = 'CONDITIONALLY ACCEPTED';
 
   // Context-appropriate warnings (post-classification)
   if (autoRejected) {
-    warnings.unshift({ urgency: 'high', text: `AUTO-REJECTED: ${safetyTriggers.length} safety gate${safetyTriggers.length > 1 ? 's' : ''} triggered. This primer pair should NOT be used.` });
+    warnings.unshift({ urgency: 'high', text: `REJECTED: ${safetyTriggers.length} safety gate${safetyTriggers.length > 1 ? 's' : ''} triggered. This primer pair should NOT be used.` });
   } else {
     if (isBorderline) warnings.unshift({ urgency: 'high', text: 'Borderline pair — experimental validation strongly recommended before use' });
     if (relaxLevel >= 1) warnings.push({ urgency: 'medium', text: `Constraints relaxed (pass ${relaxLevel}) — strict search found no matching pair` });
@@ -467,9 +461,9 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   // ─── AUTO-VALIDATOR (Rule 8) ──────────────────────────────────────────────
   if (!autoRejected && ev) {
     let adjust = false;
-    if (ev.structureScore >= 8 && (classification === 'Excellent' || classification === 'Very Good')) { adjust = true; classification = 'Very Good'; }
-    if (hasThermoError && classification !== 'Borderline' && classification !== 'Not Recommended') { adjust = true; classification = 'Borderline'; }
-    if (ev.successProbability < 80 && classification === 'Excellent') { adjust = true; classification = 'Very Good'; }
+    if (ev.structureScore >= 8 && classification === 'ACCEPTED') { adjust = true; classification = 'CONDITIONALLY ACCEPTED'; }
+    if (hasThermoError && classification !== 'REJECTED') { adjust = true; classification = 'CONDITIONALLY ACCEPTED'; }
+    if (ev.successProbability < 80 && classification === 'ACCEPTED') { adjust = true; classification = 'CONDITIONALLY ACCEPTED'; }
     if (adjust) {
       warnings.push({ urgency: 'low', text: "Internal consistency adjustment applied." });
     }
@@ -516,6 +510,8 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
       threePrimeInterference: ev ? ev.threePrimeInterference : true,
       fwdStructure: ev ? ev.fwdStructure : null,
       revStructure: ev ? ev.revStructure : null,
+      confidenceBand: ev ? ev.confidenceBand : 'High Risk (<50%)',
+      optimizationSuggestions: ev ? ev.optimizationSuggestions : [],
     },
     pcr_protocol: {
       annealing_temp: annealT,
@@ -688,11 +684,11 @@ const APP_MODES = {
 };
 
 /* ─── COLOURS ────────────────────────────────────────────────────────────── */
-const QUAL_COL = { Excellent: '#00FFC6', 'Very Good': '#3b82f6', Acceptable: '#60A5FA', Borderline: '#F59E0B', 'Not Recommended': '#EF4444' };
+const QUAL_COL = { ACCEPTED: '#00FFC6', 'CONDITIONALLY ACCEPTED': '#F59E0B', REJECTED: '#EF4444' };
 const RISK_COL = { low: '#00FFC6', medium: '#F59E0B', high: '#EF4444' };
 const URG_COL = { high: '#EF4444', medium: '#F59E0B', low: '#00FFC6' };
-const CLASS_COL = { Excellent: '#00FFC6', 'Very Good': '#3b82f6', Acceptable: '#60A5FA', Borderline: '#F59E0B', 'Not Recommended': '#EF4444', 'Auto-Rejected': '#DC2626' };
-const CLASS_BG = { Excellent: 'rgba(0,255,198,0.1)', 'Very Good': 'rgba(59,130,246,0.1)', Acceptable: 'rgba(96,165,250,0.1)', Borderline: 'rgba(245,158,11,0.1)', 'Not Recommended': 'rgba(239,68,68,0.1)', 'Auto-Rejected': 'rgba(220,38,38,0.15)' };
+const CLASS_COL = { ACCEPTED: '#00FFC6', 'CONDITIONALLY ACCEPTED': '#F59E0B', REJECTED: '#EF4444' };
+const CLASS_BG = { ACCEPTED: 'rgba(0,255,198,0.1)', 'CONDITIONALLY ACCEPTED': 'rgba(245,158,11,0.1)', REJECTED: 'rgba(239,68,68,0.15)' };
 
 /* ════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
@@ -760,6 +756,7 @@ export default function PrimerDesigner() {
     let c = `PCR Primer Designer Results\n${'='.repeat(50)}\n\n`;
     c += `Application Mode: ${mode.name}\n`;
     c += `Classification: ${primers.classification}\n`;
+    if (primers.evaluation?.confidenceBand) c += `Confidence Band: ${primers.evaluation.confidenceBand}\n`;
     if (!primers.autoRejected) c += `Overall Score: ${primers.overall_score}/100\n`;
     c += `Product Size: ${primers.expected_product_size} bp\n`;
     c += `Tm Difference: ${primers.tm_difference} \u00b0C\n`;
@@ -775,6 +772,11 @@ export default function PrimerDesigner() {
       if (primers.evaluation.safetyTriggers.length > 0) {
         c += `SAFETY GATE TRIGGERS\n`;
         primers.evaluation.safetyTriggers.forEach(t => { c += `  - ${t}\n`; });
+        c += '\n';
+      }
+      if (primers.evaluation.optimizationSuggestions?.length > 0) {
+        c += `SUGGESTED OPTIMIZATIONS\n`;
+        primers.evaluation.optimizationSuggestions.forEach(s => { c += `  - ${s}\n`; });
         c += '\n';
       }
       c += `MELTING CURVE: ${primers.evaluation.meltingCurve.summary}\n`;

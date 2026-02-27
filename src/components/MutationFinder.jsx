@@ -2457,51 +2457,65 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
               <>
                 <h4 style={{ color: '#6EE7B7', marginBottom: '.6rem', fontSize: '1.1rem' }}>Cancer Intelligence Mode</h4>
                 <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
-                  This mode is tailored for translational oncology research. You select a known cancer driver gene (like TP53 or KRAS) and enter a mutation either by clinical HGVS notation (e.g. <code>R175H</code>) or by pasting the full mutated DNA sequence.
+                  This mode is engineered for translational oncology and clinical variant interpretation. It allows researchers to evaluate specific mutations in known cancer drivers (e.g., TP53, KRAS, BRCA1, EGFR) by computing their structural, biochemical, and clinical consequences in real-time.
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', marginBottom: '1.5rem' }}>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Clinical Databases</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Cross-references variants against live ClinVar and COSMIC databases to instantly recognize known pathogenic hotspots.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Instant Clinical Context</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Replaces manual literature review by instantly cross-referencing variants against COSMIC (somatic) and ClinVar (germline) databases for live pathogenicity thresholds.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>3D Structural Mapping</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Renders actual PDB structures (like 2OCJ for TP53) and maps the domain geometry in an interactive 3D ribbon viewer.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Structural Topology Mapping</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Renders true PDB coordinates in 3D, allowing visual confirmation of whether a mutation destabilizes a core hydrophobic pocket or breaks a critical DNA-binding zinc finger.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>AI Explanations</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Uses Large Language Models to write comprehensive clinical diagnostic insight reports detailing geometric structural consequences.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>ACMG-Aligned Scoring</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Calculates a weighted Pathogenicity Score using BLOSUM62 matrices, empirical frequencies, and structural disruption heuristics to predict severity.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Pathogenicity Scoring</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Scores severity using BLOSUM62 matrices, empirical empirical frequencies, and structural disruption heuristics.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Automated Clinical Reports</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Generates formalized, exportable reports detailing geometric structural consequences, evolutionary conservation, and biochemical polarity shifts.</p>
                   </div>
                 </div>
+                <h5 style={{ color: '#c8cad4', marginBottom: '.6rem', fontSize: '1rem', borderBottom: '1px solid #334155', paddingBottom: '.4rem' }}>How to Use It</h5>
+                <ol style={{ fontSize: '.95rem', color: '#8a8f9e', lineHeight: 1.6, paddingLeft: '1.2rem', margin: 0 }}>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Select a Target Gene:</strong> Choose an oncogene or tumor suppressor from the curated dropdown (e.g., TP53).</li>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Input the Variant:</strong> Enter a clinically standard HGVS notation (like <code>R175H</code>), or paste raw sequence data.</li>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Analyze & Interpret:</strong> Click 'Analyze Mutation'. The engine will translate the sequence, align the reading frame, and score the biochemical disruption.</li>
+                  <li><strong style={{ color: '#e2e8f0' }}>Export Findings:</strong> Use the interactive viewer to rotate the affected domain, then export the comprehensive text report for external review.</li>
+                </ol>
               </>
             ) : (
               <>
                 <h4 style={{ color: '#67E8F9', marginBottom: '.6rem', fontSize: '1.1rem' }}>Research Mode</h4>
                 <p style={{ fontSize: '1.05rem', color: '#8a8f9e', lineHeight: 1.75, marginBottom: '1.3rem' }}>
-                  This general-purpose mode allows you to align any novel, proprietary, or uncharacterized DNA reference sequence against an alternate (mutated) sequence, functioning as a secure bioinformatics alignment proxy.
+                  A general-purpose sandboxed environment designed for aligning and interrogating novel, proprietary, or undiscovered DNA sequences without clinical bias.
                 </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.2rem', marginBottom: '1.5rem' }}>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Variant Detection</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Computes reading frame offsets to dynamically trace amino acid changes, revealing insertions, missense, nonsense, and frameshift artifacts.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Unbiased Variant Detection</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Computes reading frame offsets dynamically to trace raw amino acid changes, revealing complex insertions, missense, nonsense, and frameshifts.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Privacy Integrity</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Entirely unlinks your analysis from cloud-hosted cancer databases to provide guaranteed separation for proprietary molecular investigations.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Total Privacy Integrity</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Entirely unlinks your analysis from remote cloud-hosted cancer databases; sensitive proprietary IP never leaves your local browser memory.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>2D Length Simulation</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Predicts basic N/C-terminal boundaries by translating arbitrary gene lengths to show a dynamic two-dimensional model of the structural framework.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Mathematical Transparency</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Translates base pairs strictly logically, bypassing pre-configured clinical heuristics to evaluate synthetic biology circuits and unknown frames.</p>
                   </div>
                   <div>
-                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>VCF Format Utility</h5>
-                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Natively parses VCF text blocks straight from raw automated Next-Generation Sequencing (NGS) outputs or variant callers.</p>
+                    <h5 style={{ color: '#c8cad4', marginBottom: '.4rem', fontSize: '.95rem' }}>Dynamic 2D Modelling</h5>
+                    <p style={{ fontSize: '.9rem', color: '#8a8f9e', lineHeight: 1.6 }}>Simulates basic N/C-terminal boundaries by mapping arbitrary gene lengths into a two-dimensional framework, highlighting structural collapses.</p>
                   </div>
                 </div>
+                <h5 style={{ color: '#c8cad4', marginBottom: '.6rem', fontSize: '1rem', borderBottom: '1px solid #334155', paddingBottom: '.4rem' }}>How to Use It</h5>
+                <ol style={{ fontSize: '.95rem', color: '#8a8f9e', lineHeight: 1.6, paddingLeft: '1.2rem', margin: 0 }}>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Provide Baseline:</strong> Paste the known reference sequence (or expected synthetic sequence).</li>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Provide Experimental Read:</strong> Paste your alternate sequence (from sequencing data or a mutant strain).</li>
+                  <li style={{ marginBottom: '.4rem' }}><strong style={{ color: '#e2e8f0' }}>Set Parameters:</strong> Adjust the reading frame (1, 2, or 3) and strand direction (forward/reverse).</li>
+                  <li><strong style={{ color: '#e2e8f0' }}>Investigate the Alignment:</strong> Click 'Analyze Mutation' to dynamically map where substitutions emerged and where frameshifts destroyed the topology.</li>
+                </ol>
               </>
             )}
           </div>

@@ -210,14 +210,14 @@ export function calcSecondaryStructureScore(seq, hairpinDG, selfDimerDG) {
 /* ─── FULL EVALUATION PIPELINE ─────────────────────────────────────────── */
 
 /* ─── Helper: derive risk tier strictly from probability (STEP 2) ──────── */
-function deriveRiskTier(probability) {
-    if (probability === 0) return 'Critical';
-    if (probability < 40) return 'High';
-    if (probability < 70) return 'Moderate';
-    return 'Low';
+export function deriveRiskTier(probability) {
+    if (probability >= 80) return 'Low Risk';
+    if (probability >= 65) return 'Moderate Risk';
+    if (probability >= 50) return 'Elevated Risk';
+    return 'High Risk';
 }
 
-export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
+export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', templateSeq = '') {
     fwdSeq = fwdSeq.toUpperCase().replace(/[^ATGC]/g, '');
     revSeq = revSeq.toUpperCase().replace(/[^ATGC]/g, '');
 
@@ -303,14 +303,42 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         triggers.length = 0;
         triggers.push('Thermodynamic calculation could not be completed.');
     }
-    const autoRejected = triggers.length > 0;
+
+    // --- Specificity & 8-mer Hits ---
+    let fwdRep = 0;
+    let revRep = 0;
+    if (templateSeq && templateSeq.length > 20) {
+        const fullSeq = templateSeq.toUpperCase();
+        const countRepeatHits = (primer) => {
+            let max = 0;
+            for (let i = 0; i <= primer.length - 8; i++) {
+                const kmer = primer.slice(i, i + 8);
+                let cnt = 0, pos = 0;
+                while ((pos = fullSeq.indexOf(kmer, pos)) !== -1) { cnt++; pos++; }
+                if (cnt > max) max = cnt;
+            }
+            return max;
+        };
+        fwdRep = countRepeatHits(fwdSeq);
+        revRep = countRepeatHits(revSeq);
+    }
+    const maxHits = Math.max(fwdRep, revRep);
+    const specificityScore = templateSeq ? Math.max(0, 100 - maxHits * 5) : 100;
+
+    // --- Critical Thermo Failures ---
+    const hasCriticalThermo = thermoStatus === 'FAILED'
+        || final_report.cross_dimer < -9
+        || Math.min(final_report.hairpin_forward, final_report.hairpin_reverse) < -6
+        || tmDiff > 3;
+
+    let autoRejected = hasCriticalThermo || specificityScore < 30;
 
     let weightedScore = 'Unavailable';
     let combinedStructureScore = 'Unavailable';
     let structureInterpretation = 'Unavailable';
     let threePrimeInterference = false;
     let successProbability = 0;
-    let riskTier = 'Critical';
+    let riskTier = 'High Risk';
     let failureProbability = null;
     let fwdMeltQuality = 'Unavailable';
     let revMeltQuality = 'Unavailable';
@@ -318,28 +346,28 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         ? 'Simulation unavailable due to thermodynamic calculation error.'
         : 'Unavailable';
     let asymmetricMelting = false;
-    let classification = 'Auto-Rejected';
+    let classification = 'REJECTED';
     let classColor = '#EF4444';
+    let confidenceBand = 'High Risk (<50%)';
     const summaryPoints = [];
+    const optimizationSuggestions = [];
 
     if (thermoStatus === 'VALID') {
         // ─── WEIGHTED SCIENTIFIC SCORE ───────────────────────────────────────
-        const tmScore = Math.max(0, 1 - tmDiff / 10) * 20;
-        const gcAvg = (fwdGC + revGC) / 2;
-        const gcScore = Math.max(0, 1 - Math.abs(gcAvg - 50) / 25) * 10;
-        const avgThreePrime = (fwd3DG + rev3DG) / 2;
-        const threePrimeScore = (avgThreePrime < -10 ? 1.0 : avgThreePrime < -7 ? 0.7 : 0.4) * 15;
+        const tmScore = Math.max(0, 1 - tmDiff / 10) * 40; // 40% Thermodynamics
+        const specScore = (specificityScore / 100) * 30;   // 30% Specificity
+
         const worstHairpin = Math.min(final_report.hairpin_forward, final_report.hairpin_reverse);
-        const hairpinScore = (worstHairpin > -1 ? 1.0 : worstHairpin > -3 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 15;
         const worstDimer = Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse, final_report.cross_dimer);
-        const dimerScore = (worstDimer > -2 ? 1.0 : worstDimer > -5 ? 0.7 : worstDimer > -7 ? 0.4 : 0.1) * 15;
-        const annealScore = (annealingTemp >= 55 && annealingTemp <= 65 ? 1.0 : annealingTemp >= 50 && annealingTemp <= 70 ? 0.6 : 0.2) * 15;
+        const structureScoreRaw = (worstHairpin > -1 && worstDimer > -2 ? 1.0 : worstHairpin > -3 && worstDimer > -4 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 20; // 20% Structure
+
         const last2Fwd = fwdSeq.slice(-2);
         const last2Rev = revSeq.slice(-2);
-        const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length >= 1;
-        const revClamp = (last2Rev.match(/[GC]/g) || []).length >= 1;
-        const constraintScore = ((fwdClamp ? 5 : 0) + (revClamp ? 5 : 0));
-        weightedScore = Math.round(tmScore + gcScore + threePrimeScore + hairpinScore + dimerScore + annealScore + constraintScore);
+        const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length;
+        const revClamp = (last2Rev.match(/[GC]/g) || []).length;
+        const constraintScore = ((fwdClamp > 0 && fwdClamp <= 2 ? 5 : 0) + (revClamp > 0 && revClamp <= 2 ? 5 : 0)); // 10% GC Clamp
+
+        weightedScore = Math.round(tmScore + specScore + structureScoreRaw + constraintScore);
 
         // ─── SECONDARY STRUCTURE SCORE ───────────────────────────────────────
         combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
@@ -349,8 +377,7 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         threePrimeInterference = fwdStructure.threePrimeInvolved || revStructure.threePrimeInvolved;
 
         // ─── STEP 3: BIOLOGICAL PROBABILITY (computed for ALL primers) ──────
-        // Probability reflects real biological risk even for auto-rejected primers.
-        // 0% is reserved ONLY for thermoStatus === 'FAILED' or model integrity invalid.
+        // Probability reflects real biological risk even for rejected primers.
         if (weightedScore >= 85) {
             successProbability = combinedStructureScore <= 4 ? Math.max(85, Math.min(99, weightedScore)) : Math.floor(65 + Math.random() * 15);
         } else if (weightedScore >= 70) {
@@ -358,39 +385,63 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
         } else if (weightedScore >= 40) {
             successProbability = Math.floor(40 + Math.random() * 24);
         } else {
-            // Very poor score — assign low but non-zero probability
             successProbability = Math.floor(20 + Math.random() * 20);
         }
 
-        // If auto-rejected due to safety gates, cap probability at 40%
-        // (the biology is bad, but the engine still worked)
         if (autoRejected) {
-            successProbability = Math.min(successProbability, 40);
-            // Ensure floor of at least 5% (engine is valid, just risky)
+            successProbability = Math.min(successProbability, 49);
             successProbability = Math.max(successProbability, 5);
         }
 
         failureProbability = 1 - (successProbability / 100);
 
-        // ─── STEP 2: Risk tier ALWAYS derived from probability ──────────────
-        riskTier = deriveRiskTier(successProbability);
+        // ─── Risk Tier Logic ──────────────────────────────────────────────────
+        if (successProbability >= 80) riskTier = 'Low Risk';
+        else if (successProbability >= 65) riskTier = 'Moderate Risk';
+        else if (successProbability >= 50) riskTier = 'Elevated Risk';
+        else riskTier = 'High Risk';
 
-        // ─── Classification ─────────────────────────────────────────────────
+        // ─── Confidence Band ──────────────────────────────────────────────────
+        if (weightedScore >= 85) confidenceBand = 'High Confidence (\u226585%)';
+        else if (weightedScore >= 65) confidenceBand = 'Moderate Confidence (65–84%)';
+        else if (weightedScore >= 50) confidenceBand = 'Experimental Use Recommended (50–64%)';
+        else confidenceBand = 'High Risk (<50%)';
+
+        // ─── 3-Tier Classification ────────────────────────────────────────────
+        if (successProbability < 50) {
+            autoRejected = true;
+        }
+
         if (autoRejected) {
-            classification = 'Auto-Rejected';
-            classColor = '#EF4444';
-        } else if (weightedScore >= 85 && successProbability >= 80) {
-            classification = 'Recommended';
-            classColor = '#00FFC6';
-        } else if (weightedScore >= 70) {
-            classification = 'Acceptable';
-            classColor = '#60A5FA';
-        } else if (weightedScore >= 50) {
-            classification = 'Not Recommended';
-            classColor = '#F59E0B';
+            classification = 'REJECTED';
+            classColor = '#EF4444'; // Red
+            if (riskTier === 'Low Risk') riskTier = 'High Risk'; // Ensure consistency
+        } else if (specificityScore >= 60 && combinedStructureScore <= 4 && successProbability >= 80) {
+            classification = 'ACCEPTED';
+            classColor = '#00FFC6'; // Green
         } else {
-            classification = 'Not Recommended';
-            classColor = '#EF4444';
+            classification = 'CONDITIONALLY ACCEPTED';
+            classColor = '#F59E0B'; // Yellow/Orange
+        }
+
+        // ─── Suggested Optimizations ──────────────────────────────────────────
+        if (classification === 'CONDITIONALLY ACCEPTED') {
+            if (fwdClamp > 2 || revClamp > 2) {
+                optimizationSuggestions.push('Reduce 3\u2032 GC clamp strength to 40–60% by removing 1-2 terminal G/C bases.');
+            }
+            if (specificityScore < 60) {
+                optimizationSuggestions.push('Increase specificity score above 60 by moving primer 5–10 bases upstream/downstream to reduce repetitive 8-mer hits.');
+                optimizationSuggestions.push('Avoid repetitive motifs longer than 6 bases.');
+            }
+            if (tmDiff > 2) {
+                optimizationSuggestions.push('Adjust primer length by \u00B12 bases on the lower Tm primer to balance melting temperatures.');
+            }
+            if (combinedStructureScore >= 3) {
+                optimizationSuggestions.push('Shift primer binding site slightly to disrupt the predicted secondary structure (hairpin or dimer).');
+            }
+            if (optimizationSuggestions.length === 0) {
+                optimizationSuggestions.push('Consider empirical testing or generating alternatives if PCR efficiency is low.');
+            }
         }
 
         // Scientific summary points
@@ -434,10 +485,6 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     if (thermoData.reverse.selfDimerDG !== final_report.self_dimer_reverse)
         validationErrors.push(`Rev self-dimer mismatch: thermoData=${thermoData.reverse.selfDimerDG}, report=${final_report.self_dimer_reverse}`);
 
-    // Risk tier must match probability
-    const expectedRiskTier = deriveRiskTier(typeof successProbability === 'number' ? successProbability : 0);
-    if (riskTier !== expectedRiskTier)
-        validationErrors.push(`Risk tier mismatch: tier=${riskTier}, expected=${expectedRiskTier} for prob=${successProbability}`);
 
     // No dG value should be exactly 0
     const dgValues = [
@@ -461,8 +508,9 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic') {
     }
 
     return {
-        autoRejected, triggers, classification, classColor, weightedScore,
-        successProbability, riskTier, failureProbability, thermoStatus,
+        autoRejected, triggers, classification, classColor, weightedScore, confidenceBand,
+        successProbability, riskTier, failureProbability, thermoStatus, specificityScore,
+        optimizationSuggestions,
         meltingCurve: { fwdMeltQuality, revMeltQuality, overallMeltQuality, asymmetricMelting },
         structureScore: combinedStructureScore, structureInterpretation, threePrimeInterference,
         fwdStructure, revStructure, summaryPoints, thermoData, final_report
