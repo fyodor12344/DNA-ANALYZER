@@ -2380,8 +2380,9 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         @media(max-width:640px){
           .pc{ padding:.85rem; } .seq-input-grid{ grid-template-columns:1fr; } .config-grid{ grid-template-columns:1fr; }
           .summary-grid{ grid-template-columns:repeat(2,1fr); } .gene-grid{ grid-template-columns:repeat(2,1fr) !important; } .action-grid{ grid-template-columns:1fr !important; }
+          .mode-switcher{ flex-direction:column; }
           .mode-tab{ padding:.55rem .6rem !important; font-size:.82rem !important; flex-direction:column; text-align:center; min-width:0 !important; }
-          .mode-tab span{ font-size:.82rem !important; word-break:break-word; }
+          .mode-tab span{ font-size:.82rem !important; word-break:break-word; white-space:normal !important; }
           .btn-p, .btn-ai, .btn-pdf{ padding:.8rem .6rem !important; font-size:.92rem !important; }
           .btn-sample{ font-size:.82rem !important; padding:.4rem .65rem !important; }
           .sample-menu{ min-width:240px !important; max-width:calc(100vw - 2rem) !important; left:0 !important; right:0 !important; }
@@ -2412,7 +2413,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
         </div>
 
         {/* TOP LEVEL MODE SWITCHER */}
-        <div style={{ display: 'flex', gap: '.5rem', marginBottom: '1.25rem', width: '100%', overflow: 'hidden' }}>
+        <div className="mode-switcher" style={{ display: 'flex', gap: '.6rem', marginBottom: '1.25rem', width: '100%' }}>
           <button className={`mode-tab ${!isCancerMode ? 'active' : ''}`} onClick={() => switchMode('research')} style={{ padding: '.85rem .6rem', border: !isCancerMode ? '2px solid rgba(6,182,212,.5)' : '1px solid #24272f', background: !isCancerMode ? 'rgba(6,182,212,.1)' : '#0f1117', minWidth: 0, overflow: 'hidden' }}>
             <span style={{ fontSize: 'clamp(.82rem, 2.5vw, 1.05rem)', fontWeight: 700, display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Research Mode</span>
             <span style={{ fontSize: 'clamp(.62rem, 1.8vw, .75rem)', color: !isCancerMode ? '#a5f3fc' : '#6b7080', fontWeight: 400, marginTop: '.2rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Manual sequence input & analysis</span>
