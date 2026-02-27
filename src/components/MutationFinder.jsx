@@ -1433,9 +1433,7 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
         /* Camera animation to zoom into selected domain region */
         let camTarget = null;
         const zoomToWorld = (wx, wy) => {
-          // wx,wy are in root-group local space; we want camera to look there
-          // and come closer. We only animate camera.position.z and camera.lookAt y
-          camTarget = { ty: wy * 0.12, tz: 55 };
+          camTarget = { localPt: new THREE.Vector3(wx, wy, 0), tz: isMobile ? 85 : 55 };
         };
         sceneRef.current.zoomTo = zoomToWorld;
         sceneRef.current.autoSpin = autoSpin;
@@ -1456,7 +1454,7 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
           setClickedDomain(null);
           autoSpin.v = true; setIsSpinning(true);
           // Animate camera back to default view
-          camTarget = { ty: 0, tz: isMobile ? 170 : 155 };
+          camTarget = { tx: 0, ty: 0, tz: isMobile ? 180 : 155 };
         };
 
         const select = (mesh, hitPt) => {
@@ -1476,10 +1474,9 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
           const full = domain ? gene.domains.find(d => d.name === domain.name) : null;
           setClickedDomain({ domain: full || domain, midAA: Math.round(mesh.userData.midAA || 0), ssType: mesh.userData.ssType, isLinker: mesh.userData.isLinker, color: (colOf(mesh.userData.midAA || 0)).toString(16).padStart(6, '0') });
 
-          /* Zoom camera toward hit — use hitPt in ROOT local space */
-          // hitPt is in world space; convert to root-local to get Y for camera aim
+          /* Zoom camera toward hit — perfectly centered tracking */
           const localPt = root.worldToLocal(hitPt.clone());
-          camTarget = { ty: localPt.y * 0.08, tz: isMobile ? 75 : 55 };
+          camTarget = { localPt, tz: isMobile ? 85 : 55 };
         };
 
         const handleClick = e => {
@@ -1581,10 +1578,21 @@ function StructureViewer({ gene, showRCSB, setShowRCSB, mutPins }) {
 
           /* Camera zoom animation toward selected domain */
           if (camTarget) {
-            const { ty = 0, tz = 60 } = camTarget;
-            camera.position.z += (tz - camera.position.z) * 0.05;
-            camera.position.y += (ty - camera.position.y) * 0.04;
-            if (Math.abs(camera.position.z - tz) < 0.4 && Math.abs(camera.position.y - ty) < 0.4) camTarget = null;
+            let tx = 0, ty = 0, tz = isMobile ? 180 : 155;
+            if (camTarget.localPt) {
+              const wpt = root.localToWorld(camTarget.localPt.clone());
+              tx = wpt.x * 0.85; // Pan camera 85% towards target to keep slight context
+              ty = wpt.y * 0.85;
+              tz = camTarget.tz;
+            } else {
+              tx = camTarget.tx || 0;
+              ty = camTarget.ty || 0;
+              tz = camTarget.tz;
+            }
+            camera.position.x += (tx - camera.position.x) * 0.06;
+            camera.position.y += (ty - camera.position.y) * 0.06;
+            camera.position.z += (tz - camera.position.z) * 0.06;
+            if (!camTarget.localPt && Math.abs(camera.position.z - tz) < 0.5 && Math.abs(camera.position.y - ty) < 0.5 && Math.abs(camera.position.x - tx) < 0.5) camTarget = null;
           }
 
           /* Pulse selected */
