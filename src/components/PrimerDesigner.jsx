@@ -7,20 +7,24 @@ const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.on
 /* ─── CURATED SAMPLES ──────────────────────────────────────────────────────── */
 const CURATED_SAMPLES = [
   {
-    name: "Short Amplicon (Validated Stable)",
-    context: "Thermodynamically stable 84 bp sequence passing criteria cleanly.",
-    application_mode: "qpcr",
-    sequence: "ATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTACGATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTA",
-    primer_pair: {
-      forward: "ATGACCTGACGTTGACCTGA",
-      reverse: "TACGGTCAGGTCAACGTCAG"
-    },
+    name: "🟢 Gold Standard PCR (PASS)",
+    context: "Validated 250bp Template. Correct GC%, no long repeats, and passes all cross-dimer thresholds.",
+    application_mode: "standard",
+    sequence: "ATGGCTACGTGACCTGATCGTACGTAGCTAGCTGACGTAGCTGATCGTAGCTAGCTGACTGACGTAGCTGATCGTACGTAGCTGACTGATCGTAGCTAGCTGACGTAGCTGATCGTACGTAGCTGACTGATCGTAGCTAGCTGACGTAGCTGATCGTACGTAGCTGACTGATCGTAGCTAGCTGACGTAGCTGATCGTACGTAGCTGACTGATCGTAGCTAGCTGACGTAGCTGA",
     relaxLevel: 0,
     isBorderline: false
   },
   {
-    name: "High GC Region (75%)",
-    context: "Challenging GC-rich target requiring robust constraints and clamping logic.",
+    name: "🟢 qPCR Optimized (Short Amplicon)",
+    context: "Optimal 84bp sequence mathematically tuned to Real-Time limits.",
+    application_mode: "qpcr",
+    sequence: "ATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTACGATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTA",
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "🟡 High GC Stress-Test (75%)",
+    context: "Challenging target requiring relaxed structural penalties.",
     application_mode: "high_gc",
     sequence: "CGGCGGCGGCGCGGAGCCGGCCGACCCGCGGCGCGCGAGCCCGACGCCGGCGGCCGAGCGCGCGAGCCGGCGCAGCGGCC",
     isHighSensitivity: false,
@@ -28,8 +32,8 @@ const CURATED_SAMPLES = [
     isBorderline: false
   },
   {
-    name: "Repetitive A/T Tracts",
-    context: "Low complexity region forcing the engine to find AT-balanced windows.",
+    name: "🟡 Low GC Template (Repetitive AT)",
+    context: "Forced into Touchdown strategy to permit wider Tm tolerances.",
     application_mode: "standard",
     sequence: "TATATATATAAATTTTATATACGATATCGTTAAATAGCTTATTATATATATAAATTTTATATACGATATCGTTAAATAGCTTATTATATATATAAATTTTATATACGATATCGTTAAATAGCTTAT",
     isTouchdown: true,
@@ -37,15 +41,18 @@ const CURATED_SAMPLES = [
     isBorderline: false
   },
   {
-    name: "Long-Range Amplicon Template",
-    context: "Extensive 600bp simulated template to test primer separation and binding specificity.",
-    application_mode: "long_range",
-    sequence: "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT" +
-      "ACGTAGCTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGC" +
-      "ACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGA" +
-      "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT" +
-      "TGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCT" +
-      "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT",
+    name: "🟠 Mutation Detection (Allele Specific)",
+    context: "Requires strict 3' sensitivity. Designed to test classification of terminal mismatches.",
+    application_mode: "mutation",
+    sequence: "ATGGCTACGTGACCTGATCGTAGCTAGCTGACGTAGCTGATCGTACGTAGCTGACTGATCGTACGTAGCTGACTGATCGTACGTAGCTGACTGATCGTACGTAGCTGACTGATCGTACGTAGCTGA",
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "🔴 Thermodynamic Failure Demo (Cross-Dimer + Repeats)",
+    context: "Safety stress-test template intentionally designed to trigger multiple thermodynamic failure gates (Extreme GC, Hairpin, Cross-Dimer).",
+    application_mode: "standard",
+    sequence: "ATGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGC",
     relaxLevel: 0,
     isBorderline: false
   }
@@ -823,14 +830,23 @@ export default function PrimerDesigner() {
 
     if (!targetSeq.trim()) { setError('Please enter a DNA sequence.'); return; }
 
-    // Mode-Aware Length Validation
-    if (targetModeKey === 'standard' && targetSeq.length < 150) {
+    const v = validateSequence(targetSeq);
+    if (!v.valid) { setError(v.error); return; }
+
+    // Mode-Aware Length Validation & Smart Suggestions
+    const len = v.cleaned.length;
+    if (targetModeKey === 'standard' && len < 150) {
       setError('Template length insufficient for Standard PCR. Minimum length is 150 bp. Please switch to qPCR mode.');
       return;
     }
-
-    const v = validateSequence(targetSeq);
-    if (!v.valid) { setError(v.error); return; }
+    if (targetModeKey === 'qpcr' && len > 300) {
+      setError('Template length exceeds ideal bounds for qPCR. Rapid cycling may fail to extend. Consider switching to Standard PCR.');
+      return;
+    }
+    if (targetModeKey !== 'long_range' && len > 1500) {
+      setError('Template length strongly suggests Long-Range PCR. Standard amplification may fail.');
+      return;
+    }
 
     setLoading(true); setError(''); setPrimers(null); setAiExplanation('');
 
@@ -1340,11 +1356,27 @@ export default function PrimerDesigner() {
             </div>
           </div>
           {activeSample && (
-            <div style={{ background: 'rgba(96,165,250,0.06)', borderLeft: '3px solid #60A5FA', padding: '0.65rem 0.85rem', marginBottom: '0.65rem', borderRadius: 4 }}>
-              <div style={{ fontSize: '0.86rem', fontWeight: 600, color: '#60A5FA', marginBottom: '0.2rem' }}>Sample Loaded: {activeSample.name}</div>
-              <div style={{ fontSize: '0.84rem', color: '#8a8f9e' }}>{activeSample.context}</div>
+            <div style={{ background: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? 'rgba(0,255,198,0.08)' : activeSample.name.includes('Failure Demo') ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)', borderLeft: `3px solid ${activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '#00FFC6' : activeSample.name.includes('Failure Demo') ? '#EF4444' : '#F59E0B'}`, padding: '0.65rem 0.85rem', marginBottom: '0.65rem', borderRadius: 4 }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 600, color: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '#00FFC6' : activeSample.name.includes('Failure Demo') ? '#F87171' : '#FBBF24', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '✔️ Pre-Validated Research Template' : activeSample.name.includes('Failure Demo') ? '❌ Safety Stress-Test Template' : '⚠️ Experimental Boundary Template'}
+              </div>
+              <div style={{ fontSize: '0.84rem', color: '#8a8f9e' }}>Sample Loaded: <span style={{ color: '#c8cad4' }}>{activeSample.name.replace(/^[🟢🟡🟠🔴]\s*/, '')}</span> — {activeSample.context}</div>
             </div>
           )}
+
+          {/* Smart Mode Banner */}
+          {!activeSample && bpCount > 0 && (
+            <div style={{ background: 'rgba(96,165,250,0.06)', border: '1px solid rgba(96,165,250,0.2)', padding: '0.55rem 0.85rem', marginBottom: '0.65rem', borderRadius: 7 }}>
+              <div style={{ fontSize: '0.84rem', color: '#60A5FA', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '0.9rem' }}>💡</span>
+                <span>
+                  <strong>Recommended Mode based on length ({bpCount} bp):</strong>{' '}
+                  {bpCount < 120 ? 'qPCR (Real-Time)' : bpCount > 1000 ? 'Long-Range PCR' : 'Standard PCR'}
+                </span>
+              </div>
+            </div>
+          )}
+
           <textarea rows={5} value={sequence} onChange={e => setSequence(e.target.value)} placeholder="Paste your target gene region here or upload a FASTA file… (whitespace &amp; numbers are ignored)" />
           {sequence && (
             <div style={{ marginTop: '0.45rem', fontSize: '0.88rem', color: '#6b7080', fontFamily: '"JetBrains Mono",monospace', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
