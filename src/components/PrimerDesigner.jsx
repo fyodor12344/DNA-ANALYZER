@@ -1310,26 +1310,46 @@ export default function PrimerDesigner() {
         <div className="pc" id="sequence-input-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.65rem' }}>
             <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Target DNA Sequence</div>
-            <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
               <label className="btn-sample" style={{ cursor: 'pointer', margin: 0, padding: '0.4rem 0.85rem' }}>
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <button
-                onClick={handleLoadSampleBtn}
-                style={{
-                  cursor: 'pointer', margin: 0, padding: '0.45rem 1.15rem',
-                  background: 'rgba(0,191,165,0.15)', color: '#00FFC6',
-                  border: '1px solid #00BFA5', borderRadius: '11px',
-                  fontSize: '0.86rem', fontWeight: 600, transition: 'all 0.2s',
-                  fontFamily: '"Sora", sans-serif',
-                  boxShadow: '0 0 8px rgba(0,191,165,0.05)'
-                }}
-                onMouseEnter={e => { e.target.style.background = 'rgba(0,191,165,0.25)'; e.target.style.boxShadow = '0 0 12px rgba(0,191,165,0.25)'; }}
-                onMouseLeave={e => { e.target.style.background = 'rgba(0,191,165,0.15)'; e.target.style.boxShadow = '0 0 8px rgba(0,191,165,0.05)'; }}
-              >
-                Load Sample
-              </button>
+              <div style={{ position: 'relative' }}>
+                <button
+                  onClick={handleLoadSampleBtn}
+                  className="btn-sample"
+                  style={{
+                    cursor: 'pointer', margin: 0, padding: '0.4rem 0.85rem'
+                  }}
+                >
+                  Load Sample
+                </button>
+                {showLoadSample && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: '0.45rem', background: '#141720', border: '1px solid #24272f', borderRadius: 10, padding: '0.55rem', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: 50, width: 'max-content', maxWidth: '350px' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.45rem', padding: '0 0.5rem' }}>Curated Scenarios</div>
+                    {CURATED_SAMPLES.map((s, i) => (
+                      <div key={i} onClick={() => {
+                        setActiveSample(s);
+                        setSequence(s.sequence);
+                        // Mode-Aware setting change
+                        if (s.application_mode) setAppMode(s.application_mode);
+                        if (s.isHighSensitivity !== undefined) setIsHighSensitivity(s.isHighSensitivity);
+                        if (s.isTouchdown !== undefined) setIsTouchdown(s.isTouchdown);
+                        setShowLoadSample(false);
+                        if (s.primer_pair) { handleDesignFn(s); } else { setPrimers(null); setError(''); }
+                      }}
+                        style={{ padding: '0.65rem 0.75rem', borderRadius: 8, cursor: 'pointer', marginBottom: '0.28rem', border: '1px solid transparent', transition: 'all 0.2s', background: activeSample === s ? 'rgba(0,255,198,0.06)' : 'transparent', borderColor: activeSample === s ? 'rgba(0,255,198,0.3)' : 'transparent' }}
+                        onMouseEnter={e => { if (activeSample !== s) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = '#1e2130'; } }}
+                        onMouseLeave={e => { if (activeSample !== s) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                      >
+                        <div style={{ fontSize: '0.9rem', color: activeSample === s ? '#00FFC6' : '#e2e4e9', fontWeight: 600, marginBottom: '0.15rem' }}>{s.name}</div>
+                        <div style={{ fontSize: '0.8rem', color: '#8a8f9e', lineHeight: 1.4 }}>{s.context}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderLeft: '1px solid #24272f', paddingLeft: '0.65rem' }}>
                 <span style={{ fontSize: '0.82rem', fontWeight: 600, color: isDemoMode ? '#818CF8' : '#6b7080' }}>Demo Mode</span>
@@ -1338,30 +1358,6 @@ export default function PrimerDesigner() {
                   <span className="slider round"></span>
                 </label>
               </div>
-              {showLoadSample && (
-                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '0.45rem', background: '#141720', border: '1px solid #24272f', borderRadius: 10, padding: '0.55rem', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: 50, minWidth: 280 }}>
-                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.45rem', padding: '0 0.5rem' }}>Curated Scenarios</div>
-                  {CURATED_SAMPLES.map((s, i) => (
-                    <div key={i} onClick={() => {
-                      setActiveSample(s);
-                      setSequence(s.sequence);
-                      // Mode-Aware setting change
-                      if (s.application_mode) setAppMode(s.application_mode);
-                      if (s.isHighSensitivity !== undefined) setIsHighSensitivity(s.isHighSensitivity);
-                      if (s.isTouchdown !== undefined) setIsTouchdown(s.isTouchdown);
-                      setShowLoadSample(false);
-                      if (s.primer_pair) { handleDesignFn(s); } else { setPrimers(null); setError(''); }
-                    }}
-                      style={{ padding: '0.65rem 0.75rem', borderRadius: 8, cursor: 'pointer', marginBottom: '0.28rem', border: '1px solid transparent', transition: 'all 0.2s', background: activeSample === s ? 'rgba(0,255,198,0.06)' : 'transparent', borderColor: activeSample === s ? 'rgba(0,255,198,0.3)' : 'transparent' }}
-                      onMouseEnter={e => { if (activeSample !== s) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = '#1e2130'; } }}
-                      onMouseLeave={e => { if (activeSample !== s) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
-                    >
-                      <div style={{ fontSize: '0.9rem', color: activeSample === s ? '#00FFC6' : '#e2e4e9', fontWeight: 600, marginBottom: '0.15rem' }}>{s.name}</div>
-                      <div style={{ fontSize: '0.8rem', color: '#8a8f9e', lineHeight: 1.4 }}>{s.context}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
           {activeSample && (
@@ -1924,7 +1920,6 @@ export default function PrimerDesigner() {
 
           </div>
         )}
-
       </div>
     </div>
   );
