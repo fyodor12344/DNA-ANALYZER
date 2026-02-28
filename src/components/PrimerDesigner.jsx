@@ -154,19 +154,28 @@ function scanCandidates(seq, mode, ampMin, ampMax, th, conditions) {
 }
 
 /* ─── PAIR PICKER ────────────────────────────────────────────────────────────
-   Given scored fwd+rev lists, find best pair within amplicon/Tm/dimer limits.
+   Given scored fwd+rev lists, find best pair using true weightedScore from engine.
    ─────────────────────────────────────────────────────────────────────────── */
-function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin, conditions) {
+function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin, conditions, seq, appModeKey, isHighSensitivity, isTouchdown) {
   let best = null, bestScore = -Infinity;
-  for (const fwd of fwds.slice(0, 80)) {
-    for (const rev of revs.slice(0, 80)) {
+  const fList = fwds.slice(0, 50);
+  const rList = revs.slice(0, 50);
+  for (const fwd of fList) {
+    for (const rev of rList) {
       const amp = rev.end - fwd.start;
       if (amp < ampMin || amp > ampMax) continue;
       if (Math.abs(fwd.tm - rev.tm) > tmDiffMax) continue;
       const cd = calcCrossDimerDG(fwd.sequence, rev.sequence, conditions);
       if (cd < crossDimerMin) continue;
-      const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
-      if (pairScore > bestScore) { bestScore = pairScore; best = { fwd, rev, amp, cross_dimer_dg: cd }; }
+
+      const ev = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'standard', seq, conditions, isHighSensitivity, isTouchdown);
+      if (ev && !ev.error) {
+        const effectiveScore = ev.autoRejected ? (ev.weightedScore - 200) : ev.weightedScore;
+        if (effectiveScore > bestScore) {
+          bestScore = effectiveScore;
+          best = { fwd, rev, amp, cross_dimer_dg: cd };
+        }
+      }
     }
   }
   return best;
@@ -175,14 +184,17 @@ function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin, cond
 /* ─── PICK TOP 3 BORDERLINE PAIRS ────────────────────────────────────────────
    Last resort: return top 3 scored pairs regardless of Tm/dimer strictness.
    ─────────────────────────────────────────────────────────────────────────── */
-function pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions) {
+function pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions, seq, appModeKey, isHighSensitivity, isTouchdown) {
   const pairs = [];
-  for (const fwd of fwds.slice(0, 40)) {
-    for (const rev of revs.slice(0, 40)) {
+  const fList = fwds.slice(0, 40);
+  const rList = revs.slice(0, 40);
+  for (const fwd of fList) {
+    for (const rev of rList) {
       const amp = rev.end - fwd.start;
       if (amp < ampMin || amp > ampMax) continue;
       const cd = calcCrossDimerDG(fwd.sequence, rev.sequence, conditions);
-      const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
+      const ev = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'standard', seq, conditions, isHighSensitivity, isTouchdown);
+      const pairScore = ev && !ev.error ? ev.weightedScore : -100;
       pairs.push({ fwd, rev, amp, cross_dimer_dg: cd, pairScore });
     }
   }
@@ -407,7 +419,7 @@ async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivit
     };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, tmDiffStrict, crossStrict, conditions);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, tmDiffStrict, crossStrict, conditions, seq, appModeKey, isHighSensitivity, isTouchdown);
     if (best) {
       const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
@@ -420,7 +432,7 @@ async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivit
     const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions, seq, appModeKey, isHighSensitivity, isTouchdown);
     if (best) {
       const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
@@ -433,7 +445,7 @@ async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivit
     const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions, seq, appModeKey, isHighSensitivity, isTouchdown);
     if (best) {
       const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
@@ -448,7 +460,7 @@ async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivit
     const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
     const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6, conditions);
+    const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6, conditions, seq, appModeKey, isHighSensitivity, isTouchdown);
     if (best) {
       const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
@@ -468,7 +480,7 @@ async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivit
       return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
     }
 
-    const borderlinePairs = pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions);
+    const borderlinePairs = pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions, seq, appModeKey, isHighSensitivity, isTouchdown);
     if (!borderlinePairs.length) {
       return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
     }
@@ -789,12 +801,20 @@ export default function PrimerDesigner() {
   /* ── submit ── */
   const handleDesignFn = async (overrideSample = null) => {
     const targetSeq = overrideSample ? overrideSample.sequence : sequence;
-    const targetMode = overrideSample ? APP_MODES[overrideSample.application_mode] : mode;
+    const targetModeKey = overrideSample ? overrideSample.application_mode : appMode;
+    const targetMode = APP_MODES[targetModeKey];
     const targetHS = overrideSample ? (overrideSample.isHighSensitivity || false) : isHighSensitivity;
     const targetTD = overrideSample ? (overrideSample.isTouchdown || false) : isTouchdown;
     const conditions = { na: parseFloat(naConc) || 50, mg: parseFloat(mgConc) || 1.5, primerConc: parseFloat(primerConc) || 250, dntp: parseFloat(dntpConc) || 0.2 };
 
     if (!targetSeq.trim()) { setError('Please enter a DNA sequence.'); return; }
+
+    // Mode-Aware Length Validation
+    if (targetModeKey === 'standard' && targetSeq.length < 150) {
+      setError('Template length insufficient for Standard PCR. Minimum length is 150 bp. Please switch to qPCR mode.');
+      return;
+    }
+
     const v = validateSequence(targetSeq);
     if (!v.valid) { setError(v.error); return; }
 
