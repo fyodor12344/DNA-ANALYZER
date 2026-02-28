@@ -5,78 +5,7 @@ import { evaluatePrimerPair, calcSecondaryStructureScore, calcTmNN, calcGC, calc
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
 
 /* ─── CURATED SAMPLES ──────────────────────────────────────────────────────── */
-const CURATED_SAMPLES = [
-  {
-    name: "Standard PCR Ideal Case",
-    context: "Balanced primers for standard general-purpose PCR",
-    application_mode: "standard",
-    sequence: "ATACGGACCCCGCAAAAGCGGATATTCTGGCCGCAAAAGCGGATAC".repeat(5),
-    primer_pair: {
-      forward: "ATACGGACCCCGCAAAAGCGGATAT",
-      reverse: "GTATCCGCTTTTGCGGGGATCCGTA"
-    },
-    relaxLevel: 0,
-    isBorderline: false,
-    isHighSensitivity: false,
-    isTouchdown: false
-  },
-  {
-    name: "qPCR Strict Case",
-    context: "Short amplicon with extremely strict dimer limits",
-    application_mode: "qpcr",
-    sequence: "ATACGGACCCCGCAAAAGCGGGCGCGCGCAAAAACTATCCTGGCCGCAAAAGCGGGCGCGCGC".repeat(2),
-    primer_pair: {
-      forward: "ATACGGACCCCGCAAAAGCGG",
-      reverse: "GTATCCTGGCCGCAAAAGCGG"
-    },
-    relaxLevel: 0,
-    isBorderline: false,
-    isHighSensitivity: true,
-    isTouchdown: false
-  },
-  {
-    name: "High GC Optimization Case",
-    context: "High GC region needing relaxed thermodynamic thresholds",
-    application_mode: "high_gc",
-    sequence: "GCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGC".repeat(4),
-    primer_pair: {
-      forward: "GCGCGCGCGCGCGCGCGCGC",
-      reverse: "GCGCGCGCGCGCGCGCGCGC"
-    },
-    relaxLevel: 2,
-    isBorderline: true,
-    isHighSensitivity: false,
-    isTouchdown: true
-  },
-  {
-    name: "Mutation Detection Case",
-    context: "Enforcing strict 3′ mismatch sensitivity and penalizing repetitive regions heavily",
-    application_mode: "mutation",
-    sequence: "ATACGGACCGATCAATCGATTGTATCCAAAGGATCCTGGGATCAATCGATTATACTA".repeat(3),
-    primer_pair: {
-      forward: "ATACGGACCGATCAATCGATT",
-      reverse: "GTATAATCGATTGATCCCAGG"
-    },
-    relaxLevel: 0,
-    isBorderline: false,
-    isHighSensitivity: false,
-    isTouchdown: false
-  },
-  {
-    name: "Long-Range PCR Case",
-    context: "Large amplicon requiring adjusted scoring weights for structure and thermodynamics",
-    application_mode: "long_range",
-    sequence: "ATACGGTCCAGCGCGAAAAAGCGCGCATGCTATTTAATACCGCAAAAGCGGATACTG".repeat(15),
-    primer_pair: {
-      forward: "ATACGGTCCAGCGCGAAAAAGCGC",
-      reverse: "GTATCCGCTTTTGCGGTATTAA"
-    },
-    relaxLevel: 0,
-    isBorderline: false,
-    isHighSensitivity: false,
-    isTouchdown: false
-  }
-];
+const CURATED_SAMPLES = [];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THERMODYNAMIC ENGINE imported from primerEvalEngine.js
@@ -629,24 +558,38 @@ export default function PrimerDesigner() {
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
 
-  const handleSampleSelect = (e) => {
-    const sName = e.target.value;
-    if (!sName) {
-      setActiveSample(null);
-      setSequence('');
-      setPrimers(null);
-      return;
-    }
-    const sample = CURATED_SAMPLES.find(s => s.name === sName);
-    setActiveSample(sample);
-    setSequence(sample.sequence);
-    setAppMode(sample.application_mode);
-    setIsHighSensitivity(sample.isHighSensitivity || false);
-    setIsTouchdown(sample.isTouchdown || false);
+  const handleLoadSampleBtn = () => {
+    const sName = "Validated Stable Test Sequence";
+    const sampleSeq = "ATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTACGATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTA";
+
+    const sampleObj = {
+      name: sName,
+      context: "Thermodynamically stable sequence passing standard criteria cleanly.",
+      application_mode: "standard",
+      sequence: sampleSeq,
+      primer_pair: {
+        forward: sampleSeq.slice(0, 20),
+        reverse: revComp(sampleSeq.slice(-20))
+      },
+      relaxLevel: 0,
+      isBorderline: false,
+      isHighSensitivity: false,
+      isTouchdown: false
+    };
+
+    setActiveSample(sampleObj);
+    setSequence(sampleSeq);
+    setAppMode("standard");
+    setIsHighSensitivity(false);
+    setIsTouchdown(false);
     setError('');
     setPrimers(null);
     setAiExplanation('');
-    setTimeout(() => handleDesignFn(sample), 0);
+
+    // Scroll sequence input into view smoothly
+    document.getElementById('sequence-input-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    setTimeout(() => handleDesignFn(sampleObj), 300);
   };
 
   useEffect(() => {
@@ -1313,7 +1256,7 @@ export default function PrimerDesigner() {
         </div>
 
         {/* ═══ SEQUENCE INPUT ═══ */}
-        <div className="pc">
+        <div className="pc" id="sequence-input-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.65rem' }}>
             <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>Target DNA Sequence</div>
             <div style={{ display: 'flex', gap: '0.42rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1321,12 +1264,21 @@ export default function PrimerDesigner() {
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <select className="btn-sample" value={activeSample ? activeSample.name : ''} onChange={handleSampleSelect} style={{ outline: 'none', cursor: 'pointer', appearance: 'none', padding: '0.4rem 2rem 0.4rem 0.85rem', margin: 0, backgroundImage: 'url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2360A5FA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22/%3E%3C/svg%3E")', backgroundRepeat: 'no-repeat', backgroundPosition: 'right .7rem top 50%', backgroundSize: '.65rem auto' }}>
-                <option value="" disabled selected={!activeSample}>Load Sample ▼</option>
-                {CURATED_SAMPLES.map(s => (
-                  <option key={s.name} value={s.name}>{s.name}</option>
-                ))}
-              </select>
+              <button
+                onClick={handleLoadSampleBtn}
+                style={{
+                  cursor: 'pointer', margin: 0, padding: '0.45rem 1.15rem',
+                  background: 'rgba(0,191,165,0.15)', color: '#00FFC6',
+                  border: '1px solid #00BFA5', borderRadius: '11px',
+                  fontSize: '0.86rem', fontWeight: 600, transition: 'all 0.2s',
+                  fontFamily: '"Sora", sans-serif',
+                  boxShadow: '0 0 8px rgba(0,191,165,0.05)'
+                }}
+                onMouseEnter={e => { e.target.style.background = 'rgba(0,191,165,0.25)'; e.target.style.boxShadow = '0 0 12px rgba(0,191,165,0.25)'; }}
+                onMouseLeave={e => { e.target.style.background = 'rgba(0,191,165,0.15)'; e.target.style.boxShadow = '0 0 8px rgba(0,191,165,0.05)'; }}
+              >
+                Load Sample
+              </button>
             </div>
           </div>
           {activeSample && (

@@ -34,8 +34,13 @@ export default function PrimerEvaluator({ result, setResult }) {
 
     const loadSample = (key) => {
         const s = SAMPLE_PRIMERS[key];
-        setFwdInput(s.forward); setRevInput(s.reverse); setTemplateInput('');
-        setError(''); setResult(null);
+        if (s) {
+            setFwdInput(s.forward);
+            setRevInput(s.reverse);
+            setTemplateInput(s.template || '');
+            setError('');
+            setResult(null);
+        }
     };
 
     const clearAll = () => { setFwdInput(''); setRevInput(''); setTemplateInput(''); setError(''); setResult(null); };
