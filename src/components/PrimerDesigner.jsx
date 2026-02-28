@@ -7,64 +7,74 @@ const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.on
 /* ─── CURATED SAMPLES ──────────────────────────────────────────────────────── */
 const CURATED_SAMPLES = [
   {
-    name: "Ideal Diagnostic Case",
-    context: "Balanced primers for high-specificity diagnostic PCR",
-    application_mode: "diagnostic",
+    name: "Standard PCR Ideal Case",
+    context: "Balanced primers for standard general-purpose PCR",
+    application_mode: "standard",
     sequence: "ATACGGACCCCGCAAAAGCGGATATTCTGGCCGCAAAAGCGGATAC".repeat(5),
     primer_pair: {
       forward: "ATACGGACCCCGCAAAAGCGGATAT",
-      reverse: "GTATCCGCTTTTGCGGGGATCCGTA" // perfectly matching, balanced
+      reverse: "GTATCCGCTTTTGCGGGGATCCGTA"
     },
     relaxLevel: 0,
-    isBorderline: false
+    isBorderline: false,
+    isHighSensitivity: false,
+    isTouchdown: false
   },
   {
-    name: "Borderline Optimization Case",
-    context: "Tm difference 3-4°C, slight GC imbalance, mild hairpin formation",
-    application_mode: "cloning",
-    sequence: "ATACGGTCCAGCGCGAAAAAGCGCGCATGCTATTTAATACCGCAAAAGCGGATACTG".repeat(4),
-    primer_pair: {
-      forward: "ATACGGTCCAGCGCGAAAAAGCGC",
-      reverse: "GTATCCGCTTTTGCGGTATTAAATA" // Lower Tm, asymmetric
-    },
-    relaxLevel: 0,
-    isBorderline: true
-  },
-  {
-    name: "High Dimer Risk Case",
-    context: "Cross-dimer ΔG < -9 kcal/mol, 3′ complementarity",
-    application_mode: "diagnostic",
-    sequence: "ATACGGACCCCGCAAAAGCGGGCGCGCGCAAAAACTATCCTGGCCGCAAAAGCGGGCGCGCGC".repeat(3),
-    primer_pair: {
-      forward: "ATACGGACCCCGCAAAAGCGGGCGCGCGC",
-      reverse: "GTATCCTGGCCGCAAAAGCGGGCGCGCGC" // Severe 3' dimer
-    },
-    relaxLevel: 0,
-    isBorderline: false
-  },
-  {
-    name: "Thermodynamic Failure Case",
-    context: "ΔG returns 0 (Model integrity failure)",
-    application_mode: "mutation",
-    sequence: "ATACGGACCGATCAATCGATTGTATCCAAAGGATCCTGGGATCAATCGATTATACTA".repeat(4),
-    primer_pair: {
-      forward: "ATACGGACCGATCAATCGATTGTAT", // No hairpin = 0
-      reverse: "GTATAATCGATTGATCCCAGGATCA" // No hairpin = 0
-    },
-    relaxLevel: 0,
-    isBorderline: false
-  },
-  {
-    name: "Research-Only Relaxed Case",
-    context: "Relaxation pass = 2, Tm diff > 4°C, structure moderate",
+    name: "qPCR Strict Case",
+    context: "Short amplicon with extremely strict dimer limits",
     application_mode: "qpcr",
-    sequence: "ATACGGACCCCGCAAAAGCGGATATGGACTCTGGCCGCAAAAGCGGATACGGA".repeat(6),
+    sequence: "ATACGGACCCCGCAAAAGCGGGCGCGCGCAAAAACTATCCTGGCCGCAAAAGCGGGCGCGCGC".repeat(2),
     primer_pair: {
-      forward: "ATACGGACCCCGCAAAAGCGGATAT",
-      reverse: "GTATCCGCTTTTGCGGTATTAAATA"
+      forward: "ATACGGACCCCGCAAAAGCGG",
+      reverse: "GTATCCTGGCCGCAAAAGCGG"
+    },
+    relaxLevel: 0,
+    isBorderline: false,
+    isHighSensitivity: true,
+    isTouchdown: false
+  },
+  {
+    name: "High GC Optimization Case",
+    context: "High GC region needing relaxed thermodynamic thresholds",
+    application_mode: "high_gc",
+    sequence: "GCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGCGC".repeat(4),
+    primer_pair: {
+      forward: "GCGCGCGCGCGCGCGCGCGC",
+      reverse: "GCGCGCGCGCGCGCGCGCGC"
     },
     relaxLevel: 2,
-    isBorderline: true
+    isBorderline: true,
+    isHighSensitivity: false,
+    isTouchdown: true
+  },
+  {
+    name: "Mutation Detection Case",
+    context: "Enforcing strict 3′ mismatch sensitivity and penalizing repetitive regions heavily",
+    application_mode: "mutation",
+    sequence: "ATACGGACCGATCAATCGATTGTATCCAAAGGATCCTGGGATCAATCGATTATACTA".repeat(3),
+    primer_pair: {
+      forward: "ATACGGACCGATCAATCGATT",
+      reverse: "GTATAATCGATTGATCCCAGG"
+    },
+    relaxLevel: 0,
+    isBorderline: false,
+    isHighSensitivity: false,
+    isTouchdown: false
+  },
+  {
+    name: "Long-Range PCR Case",
+    context: "Large amplicon requiring adjusted scoring weights for structure and thermodynamics",
+    application_mode: "long_range",
+    sequence: "ATACGGTCCAGCGCGAAAAAGCGCGCATGCTATTTAATACCGCAAAAGCGGATACTG".repeat(15),
+    primer_pair: {
+      forward: "ATACGGTCCAGCGCGAAAAAGCGC",
+      reverse: "GTATCCGCTTTTGCGGTATTAA"
+    },
+    relaxLevel: 0,
+    isBorderline: false,
+    isHighSensitivity: false,
+    isTouchdown: false
   }
 ];
 
@@ -120,14 +130,19 @@ function countRepeatHits(primer, fullSeq) {
 }
 
 /* ─── SCORING (weighted) ─────────────────────────────────────────────────── */
-function scorePrimerFull(p, fullSeq, mode) {
+function scorePrimerFull(p, fullSeq, mode, isHighSensitivity, isTouchdown) {
   const tmTarget = (mode.tmMin + mode.tmMax) / 2;
 
   let wTm = 40, wSpec = 30, wStruct = 20, wClamp = 10;
-  if (mode.name === 'qPCR (Real-Time)') { wTm = 35; wSpec = 35; wStruct = 20; wClamp = 10; }
-  else if (mode.name === 'Long-Range PCR') { wTm = 45; wSpec = 25; wStruct = 15; wClamp = 15; }
-  else if (mode.name === 'High GC PCR') { wTm = 40; wSpec = 30; wStruct = 15; wClamp = 15; }
-  else if (mode.name === 'Low Template PCR' || mode.name === 'Touchdown PCR') { wTm = 35; wSpec = 35; wStruct = 15; wClamp = 15; }
+  if (mode.name === 'qPCR (Real-Time)') { wTm = 40; wSpec = 35; wStruct = 15; wClamp = 10; }
+  else if (mode.name === 'Long-Range PCR') { wTm = 45; wSpec = 25; wStruct = 20; wClamp = 10; }
+  else if (mode.name === 'High GC PCR') { wTm = 45; wSpec = 30; wStruct = 15; wClamp = 10; }
+  else if (mode.name === 'Mutation Detection') { wTm = 40; wSpec = 40; wStruct = 10; wClamp = 10; }
+
+  if (isHighSensitivity) {
+    wSpec += 5;
+    wStruct -= 5;
+  }
 
   const tmScoreRaw = Math.max(0, 1 - Math.abs(p.tm - tmTarget) / 5);
   const gcScoreRaw = Math.max(0, 1 - Math.abs(p.gc_content - 50) / 15);
@@ -139,10 +154,14 @@ function scorePrimerFull(p, fullSeq, mode) {
 
   const clampScoreRaw = hasGCClamp(p.sequence) ? 1.0 : 0.0;
 
-  const rep = countRepeatHits(p.sequence, fullSeq);
+  let rep = countRepeatHits(p.sequence, fullSeq);
   const specScoreRaw = rep <= 2 ? 1.0 : rep <= 5 ? 0.7 : rep <= 10 ? 0.35 : 0.1;
 
-  const total = combinedThermo * (wTm / 100) + specScoreRaw * (wSpec / 100) + combinedStruct * (wStruct / 100) + clampScoreRaw * (wClamp / 100);
+  let total = combinedThermo * (wTm / 100) + specScoreRaw * (wSpec / 100) + combinedStruct * (wStruct / 100) + clampScoreRaw * (wClamp / 100);
+
+  // Specificity penalty in High Sensitivity mode
+  if (isHighSensitivity && rep > 5) total -= 0.15;
+
   return Math.round(total * 100);
 }
 
@@ -245,7 +264,7 @@ function pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions) {
 /* ─── BUILD RESULT OBJECT ────────────────────────────────────────────────────
    Shared result builder for both strict and borderline paths.
    ─────────────────────────────────────────────────────────────────────────── */
-function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline, conditions, appModeKey) {
+function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline, conditions, appModeKey, isHighSensitivity, isTouchdown) {
   const tmDiff = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
   const annealT = parseFloat(((fwd.tm + rev.tm) / 2 - 3).toFixed(1));
   const gcMax = Math.max(fwd.gc_content, rev.gc_content);
@@ -268,7 +287,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
   // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
-  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'diagnostic', seq, conditions);
+  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'standard', seq, conditions, isHighSensitivity, isTouchdown);
   const ev = evalResult.error ? null : evalResult;
 
   // ─── SAFETY GATE CHECK & THERMO ERRORS ────────────────────────────────────
@@ -350,7 +369,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   }
 
   // Optimize protocol if needed (Rule 6)
-  const isHighFi = mode.name === 'Diagnostic PCR' ? false : true; // Only diagnostic is standard taq
+  const isHighFi = mode.name === 'Standard PCR' ? false : true; // Only standard is standard taq
   let optimizationNotes = [
     mode.name === 'qPCR (Real-Time)'
       ? 'Keep amplicon 70–150 bp. Verify efficiency 90–110%. Use ROX reference dye.'
@@ -428,7 +447,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
      Pass 3 — expand amplicon ±50 bp
      Pass 4 — full borderline: relax all, return top 3 pairs
    ─────────────────────────────────────────────────────────────────────────── */
-async function designPrimers(seq, mode, conditions, appModeKey) {
+async function designPrimers(seq, mode, conditions, appModeKey, isHighSensitivity, isTouchdown) {
   await new Promise(r => setTimeout(r, 900));
   seq = seq.toUpperCase();
   const n = seq.length;
@@ -437,7 +456,7 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
 
   const scoreAll = (candidates, fullSeq) => {
     candidates.forEach(p => {
-      p.quality_score = scorePrimerFull(p, fullSeq, mode);
+      p.quality_score = scorePrimerFull(p, fullSeq, mode, isHighSensitivity, isTouchdown);
       p.quality_grade = classifyScore(p.quality_score);
     });
     candidates.sort((a, b) => b.quality_score - a.quality_score);
@@ -445,12 +464,23 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
 
   // ── PASS 0: Strict ────────────────────────────────────────────────────────
   {
-    const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
+    let tmDiffStrict = 3, crossStrict = -9;
+    if (appModeKey === 'qpcr') { tmDiffStrict = 1.5; crossStrict = -7; }
+    if (isHighSensitivity) { crossStrict += 2; }
+    if (isTouchdown) { tmDiffStrict += 0.5; }
+
+    const th = {
+      gcMax: appModeKey === 'high_gc' ? 70 : 60,
+      tmMin: mode.tmMin,
+      tmMax: mode.tmMax,
+      hpMin: appModeKey === 'high_gc' ? -4 : -3,
+      sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false
+    };
     const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 3, -6, conditions);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, tmDiffStrict, crossStrict, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false, conditions, appModeKey);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -463,7 +493,7 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false, conditions, appModeKey);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -476,7 +506,7 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false, conditions, appModeKey);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -491,7 +521,7 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
     scoreAll(fwds, seq); scoreAll(revs, seq);
     const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false, conditions, appModeKey);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false, conditions, appModeKey, isHighSensitivity, isTouchdown);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -516,7 +546,7 @@ async function designPrimers(seq, mode, conditions, appModeKey) {
 
     // Use best borderline as primary result, expose all 3
     const primary = borderlinePairs[0];
-    const data = buildResult(primary.fwd, primary.rev, primary.amp, primary.cross_dimer_dg, seq, mode, 4, true, conditions, appModeKey);
+    const data = buildResult(primary.fwd, primary.rev, primary.amp, primary.cross_dimer_dg, seq, mode, 4, true, conditions, appModeKey, isHighSensitivity, isTouchdown);
     data.borderline_pairs = borderlinePairs.map((bp, i) => ({
       rank: i + 1,
       label: `Borderline Pair ${i + 1} — Experimental Validation Recommended`,
@@ -557,15 +587,11 @@ function validateSequence(seq) {
 
 /* ─── APP MODES ──────────────────────────────────────────────────────────── */
 const APP_MODES = {
-  standard: { name: 'Standard PCR', desc: 'Routine general-purpose PCR', prodMin: 200, prodMax: 1000, tmMin: 55, tmMax: 65 },
-  diagnostic: { name: 'Diagnostic PCR', desc: 'Standard detection & identification', prodMin: 200, prodMax: 800, tmMin: 55, tmMax: 65 },
-  cloning: { name: 'Cloning', desc: 'Gene cloning & subcloning', prodMin: 100, prodMax: 3000, tmMin: 58, tmMax: 68 },
+  standard: { name: 'Standard PCR', desc: 'Routine general-purpose PCR', prodMin: 150, prodMax: 800, tmMin: 55, tmMax: 65 },
   qpcr: { name: 'qPCR (Real-Time)', desc: 'Short amplicons (70-150bp), strict dimers', prodMin: 70, prodMax: 150, tmMin: 58, tmMax: 62 },
-  high_gc: { name: 'High GC PCR', desc: 'GC tolerance up to 70%', prodMin: 150, prodMax: 800, tmMin: 60, tmMax: 70 },
-  long_range: { name: 'Long-Range PCR', desc: 'Large amplicons (>3kb)', prodMin: 3000, prodMax: 10000, tmMin: 58, tmMax: 68 },
-  touchdown: { name: 'Touchdown PCR', desc: 'Gradually lowering annealing temps', prodMin: 200, prodMax: 1000, tmMin: 60, tmMax: 70 },
-  low_template: { name: 'Low Template PCR', desc: 'High sensitivity required', prodMin: 100, prodMax: 500, tmMin: 55, tmMax: 65 },
-  mutation: { name: 'Mutation Detection', desc: 'SNP detection & mutagenesis', prodMin: 150, prodMax: 500, tmMin: 60, tmMax: 68 }
+  high_gc: { name: 'High GC PCR', desc: 'GC tolerance up to 70%', prodMin: 150, prodMax: 800, tmMin: 60, tmMax: 68 },
+  long_range: { name: 'Long-Range PCR', desc: 'Large amplicons (≤5kb)', prodMin: 2000, prodMax: 5000, tmMin: 58, tmMax: 68 },
+  mutation: { name: 'Mutation Detection', desc: 'SNP detection & mutagenesis', prodMin: 100, prodMax: 400, tmMin: 60, tmMax: 68 }
 };
 
 /* ─── COLOURS ────────────────────────────────────────────────────────────── */
@@ -580,7 +606,7 @@ const CLASS_BG = { ACCEPTED: 'rgba(0,255,198,0.1)', 'CONDITIONALLY ACCEPTED': 'r
    ════════════════════════════════════════════════════════════════════════════ */
 export default function PrimerDesigner() {
   const [sequence, setSequence] = useState('');
-  const [appMode, setAppMode] = useState('diagnostic');
+  const [appMode, setAppMode] = useState('standard');
   const [primers, setPrimers] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -597,6 +623,8 @@ export default function PrimerDesigner() {
   const [primerConc, setPrimerConc] = useState(250);
   const [dntpConc, setDntpConc] = useState(0.2);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [isHighSensitivity, setIsHighSensitivity] = useState(false);
+  const [isTouchdown, setIsTouchdown] = useState(false);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
@@ -613,6 +641,8 @@ export default function PrimerDesigner() {
     setActiveSample(sample);
     setSequence(sample.sequence);
     setAppMode(sample.application_mode);
+    setIsHighSensitivity(sample.isHighSensitivity || false);
+    setIsTouchdown(sample.isTouchdown || false);
     setError('');
     setPrimers(null);
     setAiExplanation('');
@@ -817,6 +847,8 @@ export default function PrimerDesigner() {
   const handleDesignFn = async (overrideSample = null) => {
     const targetSeq = overrideSample ? overrideSample.sequence : sequence;
     const targetMode = overrideSample ? APP_MODES[overrideSample.application_mode] : mode;
+    const targetHS = overrideSample ? (overrideSample.isHighSensitivity || false) : isHighSensitivity;
+    const targetTD = overrideSample ? (overrideSample.isTouchdown || false) : isTouchdown;
     const conditions = { na: parseFloat(naConc) || 50, mg: parseFloat(mgConc) || 1.5, primerConc: parseFloat(primerConc) || 250, dntp: parseFloat(dntpConc) || 0.2 };
 
     if (!targetSeq.trim()) { setError('Please enter a DNA sequence.'); return; }
@@ -835,10 +867,10 @@ export default function PrimerDesigner() {
         const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr, conditions), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin: { delta_g: fHpDg, risk_level: fHpDg > -3 ? 'low' : fHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(fStr, conditions), three_prime_stability_dg: calc3PrimeDG(fStr, conditions), last_5bp_gc_percent: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
         const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr, conditions), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin: { delta_g: rHpDg, risk_level: rHpDg > -3 ? 'low' : rHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(rStr, conditions), three_prime_stability_dg: calc3PrimeDG(rStr, conditions), last_5bp_gc_percent: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
         const cd = calcCrossDimerDG(fStr, rStr, conditions);
-        let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline, conditions, overrideSample.application_mode);
-        f.quality_score = scorePrimerFull(f, v.cleaned, targetMode);
+        let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline, conditions, overrideSample.application_mode, targetHS, targetTD);
+        f.quality_score = scorePrimerFull(f, v.cleaned, targetMode, targetHS, targetTD);
         f.quality_grade = classifyScore(f.quality_score);
-        r.quality_score = scorePrimerFull(r, v.cleaned, targetMode);
+        r.quality_score = scorePrimerFull(r, v.cleaned, targetMode, targetHS, targetTD);
         r.quality_grade = classifyScore(r.quality_score);
         resData.forward_primer = f;
         resData.reverse_primer = r;
@@ -850,7 +882,7 @@ export default function PrimerDesigner() {
         await new Promise(res => setTimeout(res, 800));
         setPrimers(resData);
       } else {
-        const res = await designPrimers(v.cleaned, targetMode, conditions, appMode);
+        const res = await designPrimers(v.cleaned, targetMode, conditions, appMode, targetHS, targetTD);
         if (res.success) {
           res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
           res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
@@ -1267,6 +1299,16 @@ export default function PrimerDesigner() {
               <label className="lbl">dNTP (mM)</label>
               <input type="number" step="0.1" value={dntpConc} onChange={e => setDntpConc(e.target.value)} style={{ width: '100%', background: '#0f1117', border: '1px solid #24272f', borderRadius: '8px', color: '#e2e4e9', padding: '0.6rem 0.8rem', outline: 'none' }} />
             </div>
+          </div>
+          <div style={{ padding: '0 1rem 1rem', display: 'flex', gap: '1.5rem', flexWrap: 'wrap', background: '#080a10', border: '1px solid #161923', borderTop: 'none', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px', marginTop: '-1.15rem', marginBottom: '1.15rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: isHighSensitivity ? '#00FFC6' : '#e2e4e9' }}>
+              <input type="checkbox" checked={isHighSensitivity} onChange={e => setIsHighSensitivity(e.target.checked)} style={{ accentColor: '#00FFC6', width: '16px', height: '16px' }} />
+              High Sensitivity Mode
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem', color: isTouchdown ? '#00FFC6' : '#e2e4e9' }}>
+              <input type="checkbox" checked={isTouchdown} onChange={e => setIsTouchdown(e.target.checked)} style={{ accentColor: '#00FFC6', width: '16px', height: '16px' }} />
+              Touchdown Strategy
+            </label>
           </div>
         </div>
 

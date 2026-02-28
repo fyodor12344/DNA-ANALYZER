@@ -13,7 +13,7 @@ export default function PrimerEvaluator({ result, setResult }) {
     const [fwdInput, setFwdInput] = useState('');
     const [revInput, setRevInput] = useState('');
     const [templateInput, setTemplateInput] = useState('');
-    const [mode, setMode] = useState('diagnostic');
+    const [mode, setMode] = useState('standard');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -61,7 +61,7 @@ export default function PrimerEvaluator({ result, setResult }) {
     <div class="metric">PCR Success: ${d.successProbability}%</div>
     <div class="metric">Risk Tier: ${d.riskTier}</div>
     <div class="metric">Specificity Score: ${d.specificityScore}/100</div>
-    <div class="metric">Mode: ${d.mode === 'diagnostic' ? 'Diagnostic' : 'Research'}</div>
+    <div class="metric">Mode: ${d.mode === 'standard' ? 'Standard PCR' : 'Research'}</div>
     </div>`;
         if (d.classification === 'REJECTED' && d.triggers && d.triggers.length > 0) {
             h += `<h2>Safety Gate Triggers</h2><ul>`;
@@ -145,7 +145,7 @@ export default function PrimerEvaluator({ result, setResult }) {
 
             {/* Mode Selection */}
             <div style={S.modeRow}>
-                <button style={S.modeBtn(mode === 'diagnostic')} onClick={() => setMode('diagnostic')}>Diagnostic Mode</button>
+                <button style={S.modeBtn(mode === 'standard')} onClick={() => setMode('standard')}>Standard Mode</button>
                 <button style={S.modeBtn(mode === 'research')} onClick={() => setMode('research')}>Research Mode</button>
             </div>
 

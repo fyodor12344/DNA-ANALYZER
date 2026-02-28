@@ -230,14 +230,12 @@ export function deriveRiskTier(probability) {
     return 'High Risk';
 }
 
-export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', templateSeq = '', conditions = { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 }) {
+export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'standard', templateSeq = '', conditions = { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 }, isHighSensitivity = false, isTouchdown = false) {
     fwdSeq = fwdSeq.toUpperCase().replace(/[^ATGC]/g, '');
     revSeq = revSeq.toUpperCase().replace(/[^ATGC]/g, '');
 
     if (fwdSeq.length < 15 || fwdSeq.length > 35) return { error: 'Forward primer must be 15-35 bases.' };
     if (revSeq.length < 15 || revSeq.length > 35) return { error: 'Reverse primer must be 15-35 bases.' };
-
-    const isDiagnostic = mode === 'diagnostic';
 
     // ─── Calculate thermodynamic properties ──────────────────────────────
     const fwdTm = calcTmNN(fwdSeq, conditions);
@@ -300,16 +298,37 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
     checkThermo(final_report.self_dimer_reverse, 'Reverse Self-dimer dG');
     checkThermo(final_report.cross_dimer, 'Cross-dimer dG');
 
-    if (isDiagnostic) {
-        if (tmDiff > 5) triggers.push(`Tm mismatch ${tmDiff} C exceeds 5 C limit`);
-        if (annealingTemp < 50) triggers.push(`Annealing temperature ${annealingTemp} C below 50 C`);
-        if (final_report.self_dimer_forward < -9 || final_report.self_dimer_reverse < -9)
-            triggers.push(`Self-dimer dG ${Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse)} kcal/mol below -9 kcal/mol`);
-        if (final_report.cross_dimer < -9)
-            triggers.push(`Cross-dimer dG ${final_report.cross_dimer} kcal/mol below -9 kcal/mol`);
-        if (final_report.hairpin_forward < -6 || final_report.hairpin_reverse < -6)
-            triggers.push(`Hairpin dG ${Math.min(final_report.hairpin_forward, final_report.hairpin_reverse)} kcal/mol below -6 kcal/mol`);
+    let maxTmDiff = 3;
+    let crossLimit = -9;
+    let hpLimit = -6;
+    let minSpec = 30;
+
+    if (mode === 'qpcr') {
+        maxTmDiff = 1.5;
+        crossLimit = -7;
+    } else if (mode === 'long_range') {
+        hpLimit = -5;
+    } else if (mode === 'high_gc') {
+        hpLimit = -5;
+    } else if (mode === 'mutation') {
+        minSpec = 40;
     }
+
+    if (isHighSensitivity) {
+        crossLimit += 2;
+    }
+    if (isTouchdown) {
+        maxTmDiff += 0.5;
+    }
+
+    if (tmDiff > maxTmDiff) triggers.push(`Tm mismatch ${tmDiff} C exceeds ${maxTmDiff} C limit`);
+    if (annealingTemp < 50) triggers.push(`Annealing temperature ${annealingTemp} C below 50 C`);
+    if (final_report.self_dimer_forward < crossLimit || final_report.self_dimer_reverse < crossLimit)
+        triggers.push(`Self-dimer dG ${Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse)} kcal/mol below ${crossLimit} kcal/mol`);
+    if (final_report.cross_dimer < crossLimit)
+        triggers.push(`Cross-dimer dG ${final_report.cross_dimer} kcal/mol below ${crossLimit} kcal/mol`);
+    if (final_report.hairpin_forward < hpLimit || final_report.hairpin_reverse < hpLimit)
+        triggers.push(`Hairpin dG ${Math.min(final_report.hairpin_forward, final_report.hairpin_reverse)} kcal/mol below ${hpLimit} kcal/mol`);
 
     const thermoStatus = hasThermoError ? 'FAILED' : 'VALID';
     if (thermoStatus === 'FAILED') {
@@ -336,15 +355,16 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
         revRep = countRepeatHits(revSeq);
     }
     const maxHits = Math.max(fwdRep, revRep);
-    const specificityScore = templateSeq ? Math.max(0, 100 - maxHits * 5) : 100;
+    let specificityScore = templateSeq ? Math.max(0, 100 - maxHits * 5) : 100;
 
     // --- Critical Thermo Failures ---
     const hasCriticalThermo = thermoStatus === 'FAILED'
-        || final_report.cross_dimer < -9
-        || Math.min(final_report.hairpin_forward, final_report.hairpin_reverse) < -6
-        || tmDiff > 3;
+        || final_report.cross_dimer < crossLimit
+        || Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse) < crossLimit
+        || Math.min(final_report.hairpin_forward, final_report.hairpin_reverse) < hpLimit
+        || tmDiff > maxTmDiff;
 
-    let autoRejected = hasCriticalThermo || specificityScore < 30;
+    let autoRejected = hasCriticalThermo || specificityScore < minSpec;
 
     let weightedScore = 'Unavailable';
     let combinedStructureScore = 'Unavailable';
@@ -368,17 +388,32 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
     if (thermoStatus === 'VALID') {
         // ─── MODE-SPECIFIC WEIGHTS ──────────────────────────────────────────
         let wTm = 40, wSpec = 30, wStruct = 20, wClamp = 10;
-        if (mode === 'qpcr') { wTm = 35; wSpec = 35; wStruct = 20; wClamp = 10; }
-        else if (mode === 'long_range') { wTm = 45; wSpec = 25; wStruct = 15; wClamp = 15; }
-        else if (mode === 'high_gc') { wTm = 40; wSpec = 30; wStruct = 15; wClamp = 15; }
-        else if (mode === 'low_template' || mode === 'touchdown') { wTm = 35; wSpec = 35; wStruct = 15; wClamp = 15; }
+        if (mode === 'qpcr') { wTm = 40; wSpec = 35; wStruct = 15; wClamp = 10; }
+        else if (mode === 'long_range') { wTm = 45; wSpec = 25; wStruct = 20; wClamp = 10; }
+        else if (mode === 'high_gc') { wTm = 45; wSpec = 30; wStruct = 15; wClamp = 10; }
+        else if (mode === 'mutation') { wTm = 40; wSpec = 40; wStruct = 10; wClamp = 10; }
 
-        const tmScoreRaw = Math.max(0, 1 - tmDiff / 10);
-        const specScoreRaw = (specificityScore / 100);
+        if (isHighSensitivity) {
+            wSpec += 5;
+            wStruct -= 5;
+        }
+
+        const tmScoreRaw = Math.max(0, 1 - Math.abs(tmDiff) / 10);
+        let specScoreRaw = (specificityScore / 100);
+
+        if (isHighSensitivity && maxHits > 5) {
+            specScoreRaw = Math.max(0, specScoreRaw - 0.2);
+        }
+
+        let dimerMultiplier = isTouchdown ? 0.8 : 1.0;
 
         const worstHairpin = Math.min(final_report.hairpin_forward, final_report.hairpin_reverse);
         const worstDimer = Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse, final_report.cross_dimer);
-        const structureScoreRawRaw = worstHairpin > -1 && worstDimer > -2 ? 1.0 : worstHairpin > -3 && worstDimer > -4 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1;
+
+        let structureScoreRawRaw = 0.1;
+        if (worstHairpin > -1 && worstDimer > -2) structureScoreRawRaw = 1.0;
+        else if (worstHairpin > -3 && worstDimer > -4) structureScoreRawRaw = 1.0 - (0.3 * dimerMultiplier);
+        else if (worstHairpin > -5 && worstDimer > -6) structureScoreRawRaw = 1.0 - (0.6 * dimerMultiplier);
 
         const last2Fwd = fwdSeq.slice(-2);
         const last2Rev = revSeq.slice(-2);
@@ -386,7 +421,14 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
         const revClamp = (last2Rev.match(/[GC]/g) || []).length;
         const constraintScoreRaw = ((fwdClamp > 0 && fwdClamp <= 2 ? 0.5 : 0) + (revClamp > 0 && revClamp <= 2 ? 0.5 : 0));
 
+        let modePenalty = 0;
+        if (mode === 'mutation') {
+            if (fwd3DG < -6) modePenalty += 5;
+            if (rev3DG < -6) modePenalty += 5;
+        }
+
         weightedScore = Math.round(tmScoreRaw * wTm + specScoreRaw * wSpec + structureScoreRawRaw * wStruct + constraintScoreRaw * wClamp);
+        weightedScore = Math.max(0, weightedScore - modePenalty);
 
         // ─── SECONDARY STRUCTURE SCORE ───────────────────────────────────────
         combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
@@ -426,7 +468,9 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
         else if (weightedScore >= 50) confidenceBand = 'Experimental Use Recommended (50–64%)';
         else confidenceBand = 'High Risk (<50%)';
 
-        // ─── 3-Tier Classification ────────────────────────────────────────────
+        // ─── 3-Tier Classification & Consistency Enforcement ──────────────────
+        let acceptedProbMin = isHighSensitivity ? 85 : 80;
+
         if (successProbability < 50) {
             autoRejected = true;
         }
@@ -434,8 +478,12 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
         if (autoRejected) {
             classification = 'REJECTED';
             classColor = '#EF4444'; // Red
-            if (riskTier === 'Low Risk') riskTier = 'High Risk'; // Ensure consistency
-        } else if (specificityScore >= 60 && combinedStructureScore <= 4 && successProbability >= 80) {
+            if (riskTier === 'Low Risk' || riskTier === 'Moderate Risk' || riskTier === 'Elevated Risk') {
+                riskTier = 'High Risk'; // Ensure consistency
+            }
+            // Math consistency check - if it's high risk but prob somehow sneaked up due to base algo
+            successProbability = Math.min(successProbability, Math.max(5, 49 - Math.floor(weightedScore / 10)));
+        } else if (specificityScore >= 60 && combinedStructureScore <= 4 && successProbability >= acceptedProbMin) {
             classification = 'ACCEPTED';
             classColor = '#00FFC6'; // Green
         } else {
@@ -556,7 +604,7 @@ export function generateAlternatives(fwdSeq, revSeq) {
         const newFwd = shiftPrimer(fwdSeq, s.fOff);
         const newRev = shiftPrimer(revSeq, s.rOff);
         if (newFwd.length < 15 || newRev.length < 15) continue;
-        const result = evaluatePrimerPair(newFwd, newRev, 'diagnostic', '', { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 });
+        const result = evaluatePrimerPair(newFwd, newRev, 'standard', '', { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 });
         if (result.error) continue;
         alternatives.push({
             label: s.label,
