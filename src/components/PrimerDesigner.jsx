@@ -5,7 +5,51 @@ import { evaluatePrimerPair, calcSecondaryStructureScore, calcTmNN, calcGC, calc
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
 
 /* ─── CURATED SAMPLES ──────────────────────────────────────────────────────── */
-const CURATED_SAMPLES = [];
+const CURATED_SAMPLES = [
+  {
+    name: "Short Amplicon (Validated Stable)",
+    context: "Thermodynamically stable 84 bp sequence passing criteria cleanly.",
+    application_mode: "qpcr",
+    sequence: "ATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTACGATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTA",
+    primer_pair: {
+      forward: "ATGACCTGACGTTGACCTGA",
+      reverse: "TACGGTCAGGTCAACGTCAG"
+    },
+    relaxLevel: 0,
+    isBorderline: false
+  },
+  {
+    name: "High GC Region (75%)",
+    context: "Challenging GC-rich target requiring robust constraints and clamping logic.",
+    application_mode: "high_gc",
+    sequence: "CGGCGGCGGCGCGGAGCCGGCCGACCCGCGGCGCGCGAGCCCGACGCCGGCGGCCGAGCGCGCGAGCCGGCGCAGCGGCC",
+    isHighSensitivity: false,
+    relaxLevel: 2,
+    isBorderline: false
+  },
+  {
+    name: "Repetitive A/T Tracts",
+    context: "Low complexity region forcing the engine to find AT-balanced windows.",
+    application_mode: "standard",
+    sequence: "TATATATATAAATTTTATATACGATATCGTTAAATAGCTTATTATATATATAAATTTTATATACGATATCGTTAAATAGCTTATTATATATATAAATTTTATATACGATATCGTTAAATAGCTTAT",
+    isTouchdown: true,
+    relaxLevel: 1,
+    isBorderline: false
+  },
+  {
+    name: "Long-Range Amplicon Template",
+    context: "Extensive 600bp simulated template to test primer separation and binding specificity.",
+    application_mode: "long_range",
+    sequence: "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT" +
+      "ACGTAGCTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGC" +
+      "ACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGACTGA" +
+      "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT" +
+      "TGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCT" +
+      "AGCTCGATCGTACGATCGTAGCTAGCTAGCTGATCGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGTAGCTGATCGT",
+    relaxLevel: 0,
+    isBorderline: false
+  }
+];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THERMODYNAMIC ENGINE imported from primerEvalEngine.js
@@ -1299,6 +1343,30 @@ export default function PrimerDesigner() {
               >
                 Load Sample
               </button>
+              {showLoadSample && (
+                <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '0.45rem', background: '#141720', border: '1px solid #24272f', borderRadius: 10, padding: '0.55rem', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: 50, minWidth: 280 }}>
+                  <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.45rem', padding: '0 0.5rem' }}>Curated Scenarios</div>
+                  {CURATED_SAMPLES.map((s, i) => (
+                    <div key={i} onClick={() => {
+                      setActiveSample(s);
+                      setSequence(s.sequence);
+                      // Mode-Aware setting change
+                      if (s.application_mode) setAppMode(s.application_mode);
+                      if (s.isHighSensitivity !== undefined) setIsHighSensitivity(s.isHighSensitivity);
+                      if (s.isTouchdown !== undefined) setIsTouchdown(s.isTouchdown);
+                      setShowLoadSample(false);
+                      if (s.primer_pair) { handleDesignFn(s); } else { setPrimers(null); setError(''); }
+                    }}
+                      style={{ padding: '0.65rem 0.75rem', borderRadius: 8, cursor: 'pointer', marginBottom: '0.28rem', border: '1px solid transparent', transition: 'all 0.2s', background: activeSample === s ? 'rgba(0,255,198,0.06)' : 'transparent', borderColor: activeSample === s ? 'rgba(0,255,198,0.3)' : 'transparent' }}
+                      onMouseEnter={e => { if (activeSample !== s) { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.borderColor = '#1e2130'; } }}
+                      onMouseLeave={e => { if (activeSample !== s) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.borderColor = 'transparent'; } }}
+                    >
+                      <div style={{ fontSize: '0.9rem', color: activeSample === s ? '#00FFC6' : '#e2e4e9', fontWeight: 600, marginBottom: '0.15rem' }}>{s.name}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#8a8f9e', lineHeight: 1.4 }}>{s.context}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
           {activeSample && (
