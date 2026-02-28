@@ -617,6 +617,7 @@ export default function PrimerDesigner() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [isHighSensitivity, setIsHighSensitivity] = useState(false);
   const [isTouchdown, setIsTouchdown] = useState(false);
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
@@ -1329,6 +1330,14 @@ export default function PrimerDesigner() {
               >
                 Load Sample
               </button>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderLeft: '1px solid #24272f', paddingLeft: '0.65rem' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: isDemoMode ? '#818CF8' : '#6b7080' }}>Demo Mode</span>
+                <label className="switch" style={{ margin: 0 }}>
+                  <input type="checkbox" checked={isDemoMode} onChange={e => setIsDemoMode(e.target.checked)} />
+                  <span className="slider round"></span>
+                </label>
+              </div>
               {showLoadSample && (
                 <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: '0.45rem', background: '#141720', border: '1px solid #24272f', borderRadius: 10, padding: '0.55rem', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', zIndex: 50, minWidth: 280 }}>
                   <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.45rem', padding: '0 0.5rem' }}>Curated Scenarios</div>
@@ -1356,9 +1365,9 @@ export default function PrimerDesigner() {
             </div>
           </div>
           {activeSample && (
-            <div style={{ background: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? 'rgba(0,255,198,0.08)' : activeSample.name.includes('Failure Demo') ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)', borderLeft: `3px solid ${activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '#00FFC6' : activeSample.name.includes('Failure Demo') ? '#EF4444' : '#F59E0B'}`, padding: '0.65rem 0.85rem', marginBottom: '0.65rem', borderRadius: 4 }}>
-              <div style={{ fontSize: '0.86rem', fontWeight: 600, color: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '#00FFC6' : activeSample.name.includes('Failure Demo') ? '#F87171' : '#FBBF24', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') ? '✔️ Pre-Validated Research Template' : activeSample.name.includes('Failure Demo') ? '❌ Safety Stress-Test Template' : '⚠️ Experimental Boundary Template'}
+            <div style={{ background: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') || activeSample.name.includes('Gold Standard') ? 'rgba(0,255,198,0.08)' : activeSample.name.includes('FAIL') || activeSample.name.includes('Failure') ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)', borderLeft: `3px solid ${activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') || activeSample.name.includes('Gold Standard') ? '#00FFC6' : activeSample.name.includes('FAIL') || activeSample.name.includes('Failure') ? '#EF4444' : '#F59E0B'}`, padding: '0.65rem 0.85rem', marginBottom: '0.65rem', borderRadius: 4 }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 600, color: activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') || activeSample.name.includes('Gold Standard') ? '#00FFC6' : activeSample.name.includes('FAIL') || activeSample.name.includes('Failure') ? '#F87171' : '#FBBF24', marginBottom: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                {activeSample.name.includes('PASS') || activeSample.name.includes('Optimized') || activeSample.name.includes('Gold Standard') ? '✔️ Pre-Validated Research Template' : activeSample.name.includes('FAIL') || activeSample.name.includes('Failure') ? '❌ Safety Stress-Test Template' : '⚠️ Experimental Boundary Template'}
               </div>
               <div style={{ fontSize: '0.84rem', color: '#8a8f9e' }}>Sample Loaded: <span style={{ color: '#c8cad4' }}>{activeSample.name.replace(/^[🟢🟡🟠🔴]\s*/, '')}</span> — {activeSample.context}</div>
             </div>
@@ -1548,17 +1557,70 @@ export default function PrimerDesigner() {
                       <div className="stat-v" style={{ fontSize: '1.1rem', color: primers.evaluation.riskTier === 'Low' ? '#00FFC6' : primers.evaluation.riskTier === 'Moderate' ? '#F59E0B' : '#EF4444' }}>{primers.evaluation.riskTier}</div>
                       <div className="stat-l">Risk Tier</div>
                     </div>
-                    <div className="stat-b">
-                      <div className="stat-v" style={{ fontSize: '1.1rem', color: primers.evaluation.safetyPassed ? '#00FFC6' : '#EF4444' }}>{primers.evaluation.safetyPassed ? 'All Passed' : 'Failed'}</div>
-                      <div className="stat-l">Safety Gates</div>
+                  </div>
+                </div>
+
+                {/* VISUAL SAFETY DASHBOARD */}
+                <div className="pc" style={{ background: '#0a0c10', borderColor: '#1a1d26', marginBottom: '1.1rem' }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#e2e4e9', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span>📊</span> Visual Safety Dashboard
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                    {/* Thermodynamic Health */}
+                    <div style={{ background: '#141720', padding: '0.85rem', borderRadius: 8, border: '1px solid #24272f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#8a8f9e', fontWeight: 600 }}>Thermodynamic Health</span>
+                        <span style={{ fontSize: '0.8rem', color: primers.evaluation.safetyPassed ? '#00FFC6' : '#EF4444', fontWeight: 700 }}>{primers.evaluation.safetyPassed ? 'PASS' : 'FAIL'}</span>
+                      </div>
+                      <div style={{ height: 6, background: '#1e2130', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: primers.evaluation.safetyPassed ? '100%' : '35%', background: primers.evaluation.safetyPassed ? '#00FFC6' : '#EF4444', transition: 'width 1s ease' }}></div>
+                      </div>
                     </div>
+
+                    {/* Dimer Strength Gauge */}
+                    <div style={{ background: '#141720', padding: '0.85rem', borderRadius: 8, border: '1px solid #24272f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#8a8f9e', fontWeight: 600 }}>Cross-Dimer Risk</span>
+                        <span style={{ fontSize: '0.8rem', color: primers.cross_dimer_dg > -5 ? '#00FFC6' : primers.cross_dimer_dg > -7 ? '#F59E0B' : '#EF4444', fontWeight: 700 }}>{primers.cross_dimer_dg} kcal</span>
+                      </div>
+                      <div style={{ height: 6, background: '#1e2130', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.max(5, 100 - (Math.abs(primers.cross_dimer_dg) * 10))}%`, background: primers.cross_dimer_dg > -5 ? '#00FFC6' : primers.cross_dimer_dg > -7 ? '#F59E0B' : '#EF4444', transition: 'width 1s ease' }}></div>
+                      </div>
+                    </div>
+
+                    {/* Tm Match Indicator */}
+                    <div style={{ background: '#141720', padding: '0.85rem', borderRadius: 8, border: '1px solid #24272f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#8a8f9e', fontWeight: 600 }}>Tm Match (ΔTm)</span>
+                        <span style={{ fontSize: '0.8rem', color: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444', fontWeight: 700 }}>{primers.tm_difference}°C</span>
+                      </div>
+                      <div style={{ height: 6, background: '#1e2130', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${Math.max(5, 100 - (primers.tm_difference * 20))}%`, background: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444', transition: 'width 1s ease' }}></div>
+                      </div>
+                    </div>
+
+                    {/* Specificity Score */}
+                    <div style={{ background: '#141720', padding: '0.85rem', borderRadius: 8, border: '1px solid #24272f' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#8a8f9e', fontWeight: 600 }}>Specificity</span>
+                        <span style={{ fontSize: '0.8rem', color: primers.specificity_score >= 80 ? '#818CF8' : primers.specificity_score >= 60 ? '#F59E0B' : '#EF4444', fontWeight: 700 }}>{primers.specificity_score}/100</span>
+                      </div>
+                      <div style={{ height: 6, background: '#1e2130', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: `${primers.specificity_score}%`, background: primers.specificity_score >= 80 ? '#818CF8' : primers.specificity_score >= 60 ? '#F59E0B' : '#EF4444', transition: 'width 1s ease' }}></div>
+                      </div>
+                    </div>
+
                   </div>
                 </div>
 
                 {/* Safety Gate Triggers */}
                 {primers.evaluation.safetyTriggers.length > 0 && (
                   <div className="pc" style={{ borderColor: 'rgba(239,68,68,0.35)', background: 'rgba(239,68,68,0.04)' }}>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Safety Gate Triggers</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Safety Gate Triggers</span>
+                      {isDemoMode && <span style={{ fontSize: '0.75rem', color: '#818CF8', padding: '0.2rem 0.5rem', background: 'rgba(129,140,248,0.1)', borderRadius: 4 }}>DEMO LOGIC: Fails structural filter</span>}
+                    </div>
                     {primers.evaluation.safetyTriggers.map((t, i) => (
                       <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', background: 'rgba(239,68,68,0.08)', borderRadius: 7, padding: '0.5rem 0.75rem', marginBottom: '0.35rem', fontSize: '0.86rem', color: '#FCA5A5', borderLeft: '3px solid #EF4444' }}>
                         <span>{t}</span>
@@ -1710,7 +1772,10 @@ export default function PrimerDesigner() {
                 <div key={i} className="pc" style={{ padding: '1.2rem' }}>
                   {/* header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.38rem' }}>
-                    <span style={{ fontSize: '0.98rem', fontWeight: 600, color: '#00FFC6' }}>{p.label} Primer</span>
+                    <span style={{ fontSize: '0.98rem', fontWeight: 600, color: '#00FFC6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      {p.label} Primer
+                      {isDemoMode && <span style={{ fontSize: '0.7rem', color: '#818CF8', background: 'rgba(129,140,248,0.15)', padding: '0.15rem 0.4rem', borderRadius: 4, fontWeight: 700, letterSpacing: '0.05em' }}>SELECTED PAIR</span>}
+                    </span>
                     <span style={{ background: `${QUAL_COL[p.quality_grade]}18`, color: QUAL_COL[p.quality_grade], border: `1px solid ${QUAL_COL[p.quality_grade]}40`, fontSize: '0.76rem', fontWeight: 600, padding: '0.22rem 0.58rem', borderRadius: 12 }}>
                       {p.quality_grade} · {p.quality_score}/100
                     </span>
@@ -1764,7 +1829,11 @@ export default function PrimerDesigner() {
                   {/* quality flags */}
                   {p.detailed_analysis?.length > 0 && (
                     <div style={{ marginTop: '0.75rem' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Quality Flags</span>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.2rem' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Quality Flags</span>
+                        {isDemoMode && <span style={{ fontSize: '0.7rem', color: '#818CF8' }}>DEMO: Showing logic triggers</span>}
+                      </div>
+
                       {p.detailed_analysis.map((a, j) => {
                         const col = { error: '#EF4444', warning: '#F59E0B', info: '#60A5FA' }[a.type] || '#6b7080';
                         return (
