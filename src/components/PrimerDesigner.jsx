@@ -602,7 +602,7 @@ export default function PrimerDesigner() {
   const [loadingAI, setLoadingAI] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [activeSample, setActiveSample] = useState(null);
-
+  const [showLoadSample, setShowLoadSample] = useState(false);
   const [naConc, setNaConc] = useState(50);
   const [mgConc, setMgConc] = useState(1.5);
   const [primerConc, setPrimerConc] = useState(250);
@@ -615,37 +615,7 @@ export default function PrimerDesigner() {
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
 
   const handleLoadSampleBtn = () => {
-    const sName = "Validated Stable Test Sequence";
-    const sampleSeq = "ATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTACGATGACCTGACGTTGACCTGACCGTACGTTGACCTGACCGTA";
-
-    const sampleObj = {
-      name: sName,
-      context: "Thermodynamically stable sequence passing standard criteria cleanly.",
-      application_mode: "standard",
-      sequence: sampleSeq,
-      primer_pair: {
-        forward: sampleSeq.slice(0, 20),
-        reverse: revComp(sampleSeq.slice(-20))
-      },
-      relaxLevel: 0,
-      isBorderline: false,
-      isHighSensitivity: false,
-      isTouchdown: false
-    };
-
-    setActiveSample(sampleObj);
-    setSequence(sampleSeq);
-    setAppMode("standard");
-    setIsHighSensitivity(false);
-    setIsTouchdown(false);
-    setError('');
-    setPrimers(null);
-    setAiExplanation('');
-
-    // Scroll sequence input into view smoothly
-    document.getElementById('sequence-input-section')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    setTimeout(() => handleDesignFn(sampleObj), 300);
+    setShowLoadSample(prev => !prev);
   };
 
   useEffect(() => {
