@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { evaluatePrimerPair, calcSecondaryStructureScore } from '../utils/primerEvalEngine';
+import { evaluatePrimerPair, calcSecondaryStructureScore, calcTmNN, calcGC, calc3PrimeDG, calcHairpinDG, calcSelfDimerDG, calcCrossDimerDG, revComp } from '../utils/primerEvalEngine';
 
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
@@ -69,132 +69,12 @@ const CURATED_SAMPLES = [
 ];
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   THERMODYNAMIC ENGINE — SantaLucia 1998 Nearest-Neighbor
+   THERMODYNAMIC ENGINE imported from primerEvalEngine.js
    ═══════════════════════════════════════════════════════════════════════════ */
-
-// ΔH (kcal/mol), ΔS (cal/mol·K)
-const NN = {
-  AA: [-7.9, -22.2], AT: [-7.2, -20.4], TA: [-7.2, -21.3], CA: [-8.5, -22.7],
-  GT: [-8.4, -22.4], CT: [-7.8, -21.0], GA: [-8.2, -22.2], CG: [-10.6, -27.2],
-  GC: [-9.8, -24.4], GG: [-8.0, -19.9], AC: [-7.8, -21.0], TC: [-8.2, -22.2],
-  TG: [-8.5, -22.7], AG: [-7.8, -21.0], TT: [-7.9, -22.2], CC: [-8.0, -19.9]
-};
-const INIT_AT = [2.3, 4.1];
-const INIT_GC = [0.1, -2.8];
-const R_GAS = 1.987; // cal/mol·K
-
-const revComp = seq => {
-  const m = { A: 'T', T: 'A', G: 'C', C: 'G' };
-  return seq.split('').reverse().map(b => m[b] || b).join('');
-};
-
-// Nearest-neighbor Tm (SantaLucia 1998), [oligo]=250nM, [Na+]=50mM
-function calcTmNN(seq) {
-  seq = seq.toUpperCase();
-  let dH = 0, dS = 0;
-  for (let i = 0; i < seq.length - 1; i++) {
-    const p = seq[i] + seq[i + 1];
-    if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-  }
-  // Initiation penalties
-  [seq[0], seq[seq.length - 1]].forEach(b => {
-    if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
-    else { dH += INIT_GC[0]; dS += INIT_GC[1]; }
-  });
-  // Salt correction for 50 mM NaCl
-  dS += 0.368 * (seq.length - 1) * Math.log(0.05);
-  const CT = 250e-9; // 250 nM
-  const TmK = (dH * 1000) / (dS + R_GAS * Math.log(CT / 4));
-  return parseFloat((TmK - 273.15).toFixed(1));
-}
-
-function calcGC(seq) {
-  seq = seq.toUpperCase();
-  return parseFloat(((seq.split('').filter(b => 'GC'.includes(b)).length / seq.length) * 100).toFixed(1));
-}
-
-// 3′-end stability: ΔG of last 5 bp duplex at 37 °C
-function calc3PrimeDG(seq) {
-  const end = seq.slice(-5).toUpperCase();
-  let dH = 0, dS = 0;
-  for (let i = 0; i < end.length - 1; i++) {
-    const p = end[i] + end[i + 1];
-    if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-  }
-  return parseFloat((dH - 310.15 * (dS / 1000)).toFixed(2));
-}
 
 function calcLast5GC(seq) {
   const end = seq.slice(-5).toUpperCase();
   return parseFloat(((end.split('').filter(b => 'GC'.includes(b)).length / 5) * 100).toFixed(1));
-}
-
-// Hairpin ΔG via stem-loop search (full complementarity required)
-function calcHairpinDG(seq) {
-  seq = seq.toUpperCase();
-  const n = seq.length;
-  let best = 0;
-  for (let stemLen = 3; stemLen <= 7; stemLen++) {
-    for (let loopLen = 3; loopLen <= 6; loopLen++) {
-      for (let i = 0; i <= n - 2 * stemLen - loopLen; i++) {
-        const stem1 = seq.slice(i, i + stemLen);
-        const j = i + stemLen + loopLen;
-        if (j + stemLen > n) continue;
-        const stem2rc = revComp(seq.slice(j, j + stemLen));
-        if (stem1 !== stem2rc) continue;
-        let dH = 0, dS = 0;
-        for (let k = 0; k < stemLen - 1; k++) {
-          const p = stem1[k] + stem1[k + 1];
-          if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-        }
-        const loopPen = loopLen === 3 ? 5.4 : loopLen === 4 ? 4.5 : 4.0;
-        const dG = dH - 310.15 * (dS / 1000) + loopPen;
-        if (dG < best) best = dG;
-      }
-    }
-  }
-  return parseFloat(best.toFixed(2));
-}
-
-// Self-dimer ΔG (3′ end vs rest of same primer)
-function calcSelfDimerDG(seq) {
-  seq = seq.toUpperCase();
-  let best = 0;
-  for (let endLen = 4; endLen <= 10; endLen++) {
-    if (endLen > seq.length) continue;
-    const end = seq.slice(-endLen);
-    for (let i = 0; i <= seq.length - endLen; i++) {
-      if (i === seq.length - endLen) continue;
-      if (end !== revComp(seq.slice(i, i + endLen))) continue;
-      let dH = 0, dS = 0;
-      for (let k = 0; k < endLen - 1; k++) {
-        const p = end[k] + end[k + 1];
-        if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-      }
-      const dG = dH - 310.15 * (dS / 1000);
-      if (dG < best) best = dG;
-    }
-  }
-  return parseFloat(best.toFixed(2));
-}
-
-// Cross-dimer ΔG between forward 3′ and reverse 3′
-function calcCrossDimerDG(fwd, rev) {
-  fwd = fwd.toUpperCase(); rev = rev.toUpperCase();
-  let best = 0;
-  for (let endLen = 4; endLen <= 10; endLen++) {
-    if (endLen > fwd.length || endLen > rev.length) continue;
-    const fEnd = fwd.slice(-endLen);
-    if (fEnd !== revComp(rev.slice(-endLen))) continue;
-    let dH = 0, dS = 0;
-    for (let k = 0; k < endLen - 1; k++) {
-      const p = fEnd[k] + fEnd[k + 1];
-      if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
-    }
-    const dG = dH - 310.15 * (dS / 1000);
-    if (dG < best) best = dG;
-  }
-  return parseFloat(best.toFixed(2));
 }
 
 function hasRuns(seq, n = 4) {
@@ -243,26 +123,26 @@ function countRepeatHits(primer, fullSeq) {
 function scorePrimerFull(p, fullSeq, mode) {
   const tmTarget = (mode.tmMin + mode.tmMax) / 2;
 
-  // 25% Tm stability
-  const tmScore = Math.max(0, 1 - Math.abs(p.tm - tmTarget) / 5);
+  let wTm = 40, wSpec = 30, wStruct = 20, wClamp = 10;
+  if (mode.name === 'qPCR (Real-Time)') { wTm = 35; wSpec = 35; wStruct = 20; wClamp = 10; }
+  else if (mode.name === 'Long-Range PCR') { wTm = 45; wSpec = 25; wStruct = 15; wClamp = 15; }
+  else if (mode.name === 'High GC PCR') { wTm = 40; wSpec = 30; wStruct = 15; wClamp = 15; }
+  else if (mode.name === 'Low Template PCR' || mode.name === 'Touchdown PCR') { wTm = 35; wSpec = 35; wStruct = 15; wClamp = 15; }
 
-  // 20% GC balance
-  const gcScore = Math.max(0, 1 - Math.abs(p.gc_content - 50) / 15);
+  const tmScoreRaw = Math.max(0, 1 - Math.abs(p.tm - tmTarget) / 5);
+  const gcScoreRaw = Math.max(0, 1 - Math.abs(p.gc_content - 50) / 15);
+  const combinedThermo = (tmScoreRaw + gcScoreRaw) / 2;
 
-  // 20% secondary structure (hairpin)
-  const hpScore = p.hairpin_dg > -1 ? 1.0 : p.hairpin_dg > -2 ? 0.8 : p.hairpin_dg > -3 ? 0.55 : 0.0;
+  const hpScoreRaw = p.hairpin_dg > -1 ? 1.0 : p.hairpin_dg > -2 ? 0.8 : p.hairpin_dg > -3 ? 0.55 : 0.0;
+  const sdScoreRaw = p.self_dimer_dg > -2 ? 1.0 : p.self_dimer_dg > -3.5 ? 0.75 : p.self_dimer_dg > -5 ? 0.45 : 0.0;
+  const combinedStruct = (hpScoreRaw + sdScoreRaw) / 2;
 
-  // 15% self-dimer
-  const sdScore = p.self_dimer_dg > -2 ? 1.0 : p.self_dimer_dg > -3.5 ? 0.75 : p.self_dimer_dg > -5 ? 0.45 : 0.0;
+  const clampScoreRaw = hasGCClamp(p.sequence) ? 1.0 : 0.0;
 
-  // 10% GC clamp
-  const clampScore = hasGCClamp(p.sequence) ? 1.0 : 0.0;
-
-  // 10% specificity
   const rep = countRepeatHits(p.sequence, fullSeq);
-  const specScore = rep <= 2 ? 1.0 : rep <= 5 ? 0.7 : rep <= 10 ? 0.35 : 0.1;
+  const specScoreRaw = rep <= 2 ? 1.0 : rep <= 5 ? 0.7 : rep <= 10 ? 0.35 : 0.1;
 
-  const total = 0.25 * tmScore + 0.20 * gcScore + 0.20 * hpScore + 0.15 * sdScore + 0.10 * clampScore + 0.10 * specScore;
+  const total = combinedThermo * (wTm / 100) + specScoreRaw * (wSpec / 100) + combinedStruct * (wStruct / 100) + clampScoreRaw * (wClamp / 100);
   return Math.round(total * 100);
 }
 
@@ -278,7 +158,7 @@ function classifyScore(score) {
    Scans the sequence with given thresholds and returns raw candidate lists.
    thresholds: { gcMax, tmMin, tmMax, hpMin, sdMin, allowNoClamp, allowRuns3 }
    ─────────────────────────────────────────────────────────────────────────── */
-function scanCandidates(seq, mode, ampMin, ampMax, th) {
+function scanCandidates(seq, mode, ampMin, ampMax, th, conditions) {
   const n = seq.length;
   const fwds = [], revs = [];
 
@@ -290,17 +170,17 @@ function scanCandidates(seq, mode, ampMin, ampMax, th) {
     if (!noTerminalGGGCCC(p)) return null;
     // Skip expensive internal complementarity check in relaxed passes
     if (!th.relaxed && hasInternalComplementarity(p)) return null;
-    const tm = calcTmNN(p);
+    const tm = calcTmNN(p, conditions);
     if (tm < th.tmMin || tm > th.tmMax) return null;
-    const hp = calcHairpinDG(p);
-    const sd = calcSelfDimerDG(p);
+    const hp = calcHairpinDG(p, conditions);
+    const sd = calcSelfDimerDG(p, conditions);
     if (hp < th.hpMin) return null;
     if (sd < th.sdMin) return null;
     return {
       sequence: p, length: p.length, start, end,
       tm, gc_content: gc,
       hairpin_dg: hp, self_dimer_dg: sd,
-      three_prime_dg: calc3PrimeDG(p),
+      three_prime_dg: calc3PrimeDG(p, conditions),
       last_5bp_gc: calcLast5GC(p),
       gc_clamp: { has_clamp: hasGCClamp(p), clamp_strength: (p.slice(-2).match(/[GC]/g) || []).length }
     };
@@ -328,14 +208,14 @@ function scanCandidates(seq, mode, ampMin, ampMax, th) {
 /* ─── PAIR PICKER ────────────────────────────────────────────────────────────
    Given scored fwd+rev lists, find best pair within amplicon/Tm/dimer limits.
    ─────────────────────────────────────────────────────────────────────────── */
-function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin) {
+function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin, conditions) {
   let best = null, bestScore = -Infinity;
   for (const fwd of fwds.slice(0, 80)) {
     for (const rev of revs.slice(0, 80)) {
       const amp = rev.end - fwd.start;
       if (amp < ampMin || amp > ampMax) continue;
       if (Math.abs(fwd.tm - rev.tm) > tmDiffMax) continue;
-      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence);
+      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence, conditions);
       if (cd < crossDimerMin) continue;
       const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
       if (pairScore > bestScore) { bestScore = pairScore; best = { fwd, rev, amp, cross_dimer_dg: cd }; }
@@ -347,13 +227,13 @@ function pickBestPair(fwds, revs, ampMin, ampMax, tmDiffMax, crossDimerMin) {
 /* ─── PICK TOP 3 BORDERLINE PAIRS ────────────────────────────────────────────
    Last resort: return top 3 scored pairs regardless of Tm/dimer strictness.
    ─────────────────────────────────────────────────────────────────────────── */
-function pickBorderlinePairs(fwds, revs, ampMin, ampMax) {
+function pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions) {
   const pairs = [];
   for (const fwd of fwds.slice(0, 40)) {
     for (const rev of revs.slice(0, 40)) {
       const amp = rev.end - fwd.start;
       if (amp < ampMin || amp > ampMax) continue;
-      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence);
+      const cd = calcCrossDimerDG(fwd.sequence, rev.sequence, conditions);
       const pairScore = (fwd.quality_score + rev.quality_score) / 2 - Math.abs(fwd.tm - rev.tm) * 2;
       pairs.push({ fwd, rev, amp, cross_dimer_dg: cd, pairScore });
     }
@@ -365,7 +245,7 @@ function pickBorderlinePairs(fwds, revs, ampMin, ampMax) {
 /* ─── BUILD RESULT OBJECT ────────────────────────────────────────────────────
    Shared result builder for both strict and borderline paths.
    ─────────────────────────────────────────────────────────────────────────── */
-function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline) {
+function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBorderline, conditions, appModeKey) {
   const tmDiff = parseFloat(Math.abs(fwd.tm - rev.tm).toFixed(1));
   const annealT = parseFloat(((fwd.tm + rev.tm) / 2 - 3).toFixed(1));
   const gcMax = Math.max(fwd.gc_content, rev.gc_content);
@@ -388,7 +268,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (revRep > 5) warnings.push({ urgency: 'medium', text: `Reverse primer has ${revRep} repetitive 8-mer hits — specificity may be reduced` });
 
   // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
-  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, 'diagnostic', seq);
+  const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'diagnostic', seq, conditions);
   const ev = evalResult.error ? null : evalResult;
 
   // ─── SAFETY GATE CHECK & THERMO ERRORS ────────────────────────────────────
@@ -530,7 +410,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
     },
     _meta: {
       model: 'SantaLucia 1998 Nearest-Neighbor',
-      conditions: '[oligo]=250nM, [Na+]=50mM, T=37°C',
+      conditions_used: conditions,
       scoring: '25% Tm · 20% GC · 20% structure · 15% dimer · 10% clamp · 10% specificity',
       application_mode: mode.name,
       relax_level: relaxLevel,
@@ -548,7 +428,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
      Pass 3 — expand amplicon ±50 bp
      Pass 4 — full borderline: relax all, return top 3 pairs
    ─────────────────────────────────────────────────────────────────────────── */
-async function designPrimers(seq, mode) {
+async function designPrimers(seq, mode, conditions, appModeKey) {
   await new Promise(r => setTimeout(r, 900));
   seq = seq.toUpperCase();
   const n = seq.length;
@@ -566,11 +446,11 @@ async function designPrimers(seq, mode) {
   // ── PASS 0: Strict ────────────────────────────────────────────────────────
   {
     const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
-    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 3, -6);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 3, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 0, false, conditions, appModeKey);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -579,11 +459,11 @@ async function designPrimers(seq, mode) {
   // ── PASS 1: Relax Tm difference to 5°C ───────────────────────────────────
   {
     const th = { gcMax: 65, tmMin: 58, tmMax: 65, hpMin: -3, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: false };
-    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 1, false, conditions, appModeKey);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -592,11 +472,11 @@ async function designPrimers(seq, mode) {
   // ── PASS 2: Relax GC to 70% and hairpin to -4 kcal/mol ───────────────────
   {
     const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
-    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th);
+    const { fwds, revs } = scanCandidates(seq, mode, mode.prodMin, mode.prodMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6);
+    const best = pickBestPair(fwds, revs, mode.prodMin, mode.prodMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 2, false, conditions, appModeKey);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -607,11 +487,11 @@ async function designPrimers(seq, mode) {
     const ampMin = Math.max(40, mode.prodMin - 50);
     const ampMax = mode.prodMax + 50;
     const th = { gcMax: 70, tmMin: 56, tmMax: 67, hpMin: -4, sdMin: -5, allowNoClamp: false, allowRuns3: false, relaxed: true };
-    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
+    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
-    const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6);
+    const best = pickBestPair(fwds, revs, ampMin, ampMax, 5, -6, conditions);
     if (best) {
-      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false);
+      const data = buildResult(best.fwd, best.rev, best.amp, best.cross_dimer_dg, seq, mode, 3, false, conditions, appModeKey);
       data.all_candidates = buildAltCandidates(fwds, revs, best);
       return { success: true, data };
     }
@@ -622,21 +502,21 @@ async function designPrimers(seq, mode) {
     const ampMin = Math.max(40, mode.prodMin - 100);
     const ampMax = mode.prodMax + 100;
     const th = { gcMax: 75, tmMin: 50, tmMax: 70, hpMin: -5, sdMin: -6, allowNoClamp: true, allowRuns3: true, relaxed: true };
-    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th);
+    const { fwds, revs } = scanCandidates(seq, mode, ampMin, ampMax, th, conditions);
     scoreAll(fwds, seq); scoreAll(revs, seq);
 
     if (!fwds.length || !revs.length) {
       return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
     }
 
-    const borderlinePairs = pickBorderlinePairs(fwds, revs, ampMin, ampMax);
+    const borderlinePairs = pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions);
     if (!borderlinePairs.length) {
       return { success: false, error: `Sequence is too short (${n} bp) or lacks sufficient compositional diversity to design primers for ${mode.name} mode. Try a longer sequence or switch to a different application mode.` };
     }
 
     // Use best borderline as primary result, expose all 3
     const primary = borderlinePairs[0];
-    const data = buildResult(primary.fwd, primary.rev, primary.amp, primary.cross_dimer_dg, seq, mode, 4, true);
+    const data = buildResult(primary.fwd, primary.rev, primary.amp, primary.cross_dimer_dg, seq, mode, 4, true, conditions, appModeKey);
     data.borderline_pairs = borderlinePairs.map((bp, i) => ({
       rank: i + 1,
       label: `Borderline Pair ${i + 1} — Experimental Validation Recommended`,
@@ -677,9 +557,14 @@ function validateSequence(seq) {
 
 /* ─── APP MODES ──────────────────────────────────────────────────────────── */
 const APP_MODES = {
+  standard: { name: 'Standard PCR', desc: 'Routine general-purpose PCR', prodMin: 200, prodMax: 1000, tmMin: 55, tmMax: 65 },
   diagnostic: { name: 'Diagnostic PCR', desc: 'Standard detection & identification', prodMin: 200, prodMax: 800, tmMin: 55, tmMax: 65 },
   cloning: { name: 'Cloning', desc: 'Gene cloning & subcloning', prodMin: 100, prodMax: 3000, tmMin: 58, tmMax: 68 },
-  qpcr: { name: 'qPCR (Real-Time)', desc: 'Quantitative real-time PCR', prodMin: 70, prodMax: 200, tmMin: 58, tmMax: 62 },
+  qpcr: { name: 'qPCR (Real-Time)', desc: 'Short amplicons (70-150bp), strict dimers', prodMin: 70, prodMax: 150, tmMin: 58, tmMax: 62 },
+  high_gc: { name: 'High GC PCR', desc: 'GC tolerance up to 70%', prodMin: 150, prodMax: 800, tmMin: 60, tmMax: 70 },
+  long_range: { name: 'Long-Range PCR', desc: 'Large amplicons (>3kb)', prodMin: 3000, prodMax: 10000, tmMin: 58, tmMax: 68 },
+  touchdown: { name: 'Touchdown PCR', desc: 'Gradually lowering annealing temps', prodMin: 200, prodMax: 1000, tmMin: 60, tmMax: 70 },
+  low_template: { name: 'Low Template PCR', desc: 'High sensitivity required', prodMin: 100, prodMax: 500, tmMin: 55, tmMax: 65 },
   mutation: { name: 'Mutation Detection', desc: 'SNP detection & mutagenesis', prodMin: 150, prodMax: 500, tmMin: 60, tmMax: 68 }
 };
 
@@ -706,6 +591,12 @@ export default function PrimerDesigner() {
   const [loadingAI, setLoadingAI] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [activeSample, setActiveSample] = useState(null);
+
+  const [naConc, setNaConc] = useState(50);
+  const [mgConc, setMgConc] = useState(1.5);
+  const [primerConc, setPrimerConc] = useState(250);
+  const [dntpConc, setDntpConc] = useState(0.2);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const mode = APP_MODES[appMode];
   const bpCount = sequence.toUpperCase().replace(/[^ATGC]/g, '').length;
@@ -763,6 +654,11 @@ export default function PrimerDesigner() {
     c += `Annealing Temperature: ${primers.annealing_temperature} \u00b0C\n`;
     c += `Specificity Score: ${primers.specificity_score}/100\n`;
     c += `Cross-Dimer \u0394G: ${primers.cross_dimer_dg} kcal/mol\n\n`;
+    c += `EXPERIMENTAL CONDITIONS:\n`;
+    c += `  Na+: ${primers._meta?.conditions_used?.na || naConc} mM\n`;
+    c += `  Mg2+: ${primers._meta?.conditions_used?.mg || mgConc} mM\n`;
+    c += `  Primer Conc: ${primers._meta?.conditions_used?.primerConc || primerConc} nM\n`;
+    c += `  dNTP: ${primers._meta?.conditions_used?.dntp || dntpConc} mM\n\n`;
     // Evaluation Engine Data
     if (primers.evaluation) {
       c += `RISK ASSESSMENT\n`;
@@ -852,6 +748,10 @@ export default function PrimerDesigner() {
       <p><b>Tm Difference:</b> ${primers.tm_difference} °C</p>
       <p><b>Cross-Dimer ΔG:</b> ${primers.cross_dimer_dg} kcal/mol</p>
       <p><b>Generated:</b> ${new Date().toLocaleString()}</p>
+    </div>
+    <div class="box" style="margin-top: 0;">
+      <h2 style="margin-top:0;">Experimental Conditions</h2>
+      <p><b>Na+:</b> ${primers._meta?.conditions_used?.na || naConc} mM | <b>Mg2+:</b> ${primers._meta?.conditions_used?.mg || mgConc} mM | <b>Primer:</b> ${primers._meta?.conditions_used?.primerConc || primerConc} nM | <b>dNTP:</b> ${primers._meta?.conditions_used?.dntp || dntpConc} mM</p>
     </div>`;
     // Rejection banner
     if (isRejected) {
@@ -917,6 +817,7 @@ export default function PrimerDesigner() {
   const handleDesignFn = async (overrideSample = null) => {
     const targetSeq = overrideSample ? overrideSample.sequence : sequence;
     const targetMode = overrideSample ? APP_MODES[overrideSample.application_mode] : mode;
+    const conditions = { na: parseFloat(naConc) || 50, mg: parseFloat(mgConc) || 1.5, primerConc: parseFloat(primerConc) || 250, dntp: parseFloat(dntpConc) || 0.2 };
 
     if (!targetSeq.trim()) { setError('Please enter a DNA sequence.'); return; }
     const v = validateSequence(targetSeq);
@@ -929,12 +830,12 @@ export default function PrimerDesigner() {
         // Direct evaluation for Curated Samples bypassing the sliding-window search
         const fStr = overrideSample.primer_pair.forward;
         const rStr = overrideSample.primer_pair.reverse;
-        const fHpDg = calcHairpinDG(fStr);
-        const rHpDg = calcHairpinDG(rStr);
-        const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin: { delta_g: fHpDg, risk_level: fHpDg > -3 ? 'low' : fHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(fStr), three_prime_stability_dg: calc3PrimeDG(fStr), last_5bp_gc_percent: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
-        const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin: { delta_g: rHpDg, risk_level: rHpDg > -3 ? 'low' : rHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(rStr), three_prime_stability_dg: calc3PrimeDG(rStr), last_5bp_gc_percent: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
-        const cd = calcCrossDimerDG(fStr, rStr);
-        let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline);
+        const fHpDg = calcHairpinDG(fStr, conditions);
+        const rHpDg = calcHairpinDG(rStr, conditions);
+        const f = { sequence: fStr, length: fStr.length, tm: calcTmNN(fStr, conditions), gc_content: calcGC(fStr), start: 0, end: fStr.length - 1, hairpin: { delta_g: fHpDg, risk_level: fHpDg > -3 ? 'low' : fHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(fStr, conditions), three_prime_stability_dg: calc3PrimeDG(fStr, conditions), last_5bp_gc_percent: calcLast5GC(fStr), gc_clamp: { has_clamp: hasGCClamp(fStr) } };
+        const r = { sequence: rStr, length: rStr.length, tm: calcTmNN(rStr, conditions), gc_content: calcGC(rStr), start: targetSeq.length - rStr.length, end: targetSeq.length - 1, hairpin: { delta_g: rHpDg, risk_level: rHpDg > -3 ? 'low' : rHpDg > -5 ? 'medium' : 'high' }, self_dimer_dg: calcSelfDimerDG(rStr, conditions), three_prime_stability_dg: calc3PrimeDG(rStr, conditions), last_5bp_gc_percent: calcLast5GC(rStr), gc_clamp: { has_clamp: hasGCClamp(rStr) } };
+        const cd = calcCrossDimerDG(fStr, rStr, conditions);
+        let resData = buildResult(f, r, targetSeq.length, cd, v.cleaned, targetMode, overrideSample.relaxLevel, overrideSample.isBorderline, conditions, overrideSample.application_mode);
         f.quality_score = scorePrimerFull(f, v.cleaned, targetMode);
         f.quality_grade = classifyScore(f.quality_score);
         r.quality_score = scorePrimerFull(r, v.cleaned, targetMode);
@@ -949,7 +850,7 @@ export default function PrimerDesigner() {
         await new Promise(res => setTimeout(res, 800));
         setPrimers(resData);
       } else {
-        const res = await designPrimers(v.cleaned, targetMode);
+        const res = await designPrimers(v.cleaned, targetMode, conditions, appMode);
         if (res.success) {
           res.data.forward_primer.detailed_analysis = buildAnalysis(res.data.forward_primer);
           res.data.reverse_primer.detailed_analysis = buildAnalysis(res.data.reverse_primer);
@@ -1333,11 +1234,40 @@ export default function PrimerDesigner() {
         <div style={{ background: 'rgba(0,255,198,0.06)', border: '1px solid rgba(0,255,198,0.18)', borderRadius: 9, padding: '0.62rem 0.9rem', marginBottom: '1.15rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.92rem', color: '#00FFC6', fontWeight: 600 }}>{mode.name}</span>
           <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
-          <span style={{ fontSize: '0.9rem', color: '#8a8f9e' }}>Amplicon {mode.prodMin}–{mode.prodMax} bp</span>
+          <span style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)' }}>Amplicon {mode.prodMin}–{mode.prodMax} bp</span>
           <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
-          <span style={{ fontSize: '0.9rem', color: '#8a8f9e' }}>Tm {mode.tmMin}–{mode.tmMax} °C</span>
+          <span style={{ fontSize: '0.9rem', color: 'rgba(255,255,255,0.7)' }}>Tm {mode.tmMin}–{mode.tmMax} °C</span>
           <span style={{ color: '#3a3d4a', fontSize: '0.84rem' }}>|</span>
           <span style={{ fontSize: '0.9rem', color: '#818cf8' }}>SantaLucia 1998 NN Model</span>
+        </div>
+
+        {/* ═══ ADVANCED SETTINGS ═══ */}
+        <button className="btn-g" onClick={() => setShowAdvanced(v => !v)} style={{ width: '100%', justifyContent: 'space-between', marginBottom: '1rem', background: '#0c0e14' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.42rem' }}>
+            <span style={{ fontSize: '0.94rem' }}>Advanced Experimental Controls</span>
+          </span>
+          <span style={{ fontSize: '0.78rem', color: '#6b7080', transition: 'transform 0.25s', transform: showAdvanced ? 'rotate(180deg)' : 'rotate(0)', display: 'inline-block' }}>▼</span>
+        </button>
+
+        <div className={`info-wrap ${showAdvanced ? 'open' : 'closed'}`}>
+          <div className="pc" style={{ marginBottom: '1.15rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1rem', background: '#080a10', borderColor: '#161923' }}>
+            <div>
+              <label className="lbl">Na+ (mM)</label>
+              <input type="number" step="1" value={naConc} onChange={e => setNaConc(e.target.value)} style={{ width: '100%', background: '#0f1117', border: '1px solid #24272f', borderRadius: '8px', color: '#e2e4e9', padding: '0.6rem 0.8rem', outline: 'none' }} />
+            </div>
+            <div>
+              <label className="lbl">Mg2+ (mM)</label>
+              <input type="number" step="0.1" value={mgConc} onChange={e => setMgConc(e.target.value)} style={{ width: '100%', background: '#0f1117', border: '1px solid #24272f', borderRadius: '8px', color: '#e2e4e9', padding: '0.6rem 0.8rem', outline: 'none' }} />
+            </div>
+            <div>
+              <label className="lbl">Primer (nM)</label>
+              <input type="number" step="10" value={primerConc} onChange={e => setPrimerConc(e.target.value)} style={{ width: '100%', background: '#0f1117', border: '1px solid #24272f', borderRadius: '8px', color: '#e2e4e9', padding: '0.6rem 0.8rem', outline: 'none' }} />
+            </div>
+            <div>
+              <label className="lbl">dNTP (mM)</label>
+              <input type="number" step="0.1" value={dntpConc} onChange={e => setDntpConc(e.target.value)} style={{ width: '100%', background: '#0f1117', border: '1px solid #24272f', borderRadius: '8px', color: '#e2e4e9', padding: '0.6rem 0.8rem', outline: 'none' }} />
+            </div>
+          </div>
         </div>
 
         {/* ═══ SEQUENCE INPUT ═══ */}
@@ -1433,6 +1363,29 @@ export default function PrimerDesigner() {
                 ))}
               </div>
             )}
+
+            {/* EXPERIMENTAL CONDITIONS USED */}
+            <div className="pc" style={{ marginBottom: '1.1rem', padding: '1rem', background: '#0a0c10', borderColor: '#1a1d26' }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.7rem' }}>Experimental Conditions</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
+                <div style={{ background: '#141720', borderRadius: 6, padding: '0.5rem', textAlign: 'center', border: '1px solid #24272f' }}>
+                  <div style={{ fontSize: '1.05rem', color: '#fff', fontWeight: 600 }}>{primers._meta?.conditions_used?.na || naConc} <span style={{ fontSize: '0.7em', color: '#8a8f9e' }}>mM</span></div>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7080', marginTop: '0.2rem' }}>Na+</div>
+                </div>
+                <div style={{ background: '#141720', borderRadius: 6, padding: '0.5rem', textAlign: 'center', border: '1px solid #24272f' }}>
+                  <div style={{ fontSize: '1.05rem', color: '#fff', fontWeight: 600 }}>{primers._meta?.conditions_used?.mg || mgConc} <span style={{ fontSize: '0.7em', color: '#8a8f9e' }}>mM</span></div>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7080', marginTop: '0.2rem' }}>Mg2+</div>
+                </div>
+                <div style={{ background: '#141720', borderRadius: 6, padding: '0.5rem', textAlign: 'center', border: '1px solid #24272f' }}>
+                  <div style={{ fontSize: '1.05rem', color: '#fff', fontWeight: 600 }}>{primers._meta?.conditions_used?.primerConc || primerConc} <span style={{ fontSize: '0.7em', color: '#8a8f9e' }}>nM</span></div>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7080', marginTop: '0.2rem' }}>Primer</div>
+                </div>
+                <div style={{ background: '#141720', borderRadius: 6, padding: '0.5rem', textAlign: 'center', border: '1px solid #24272f' }}>
+                  <div style={{ fontSize: '1.05rem', color: '#fff', fontWeight: 600 }}>{primers._meta?.conditions_used?.dntp || dntpConc} <span style={{ fontSize: '0.7em', color: '#8a8f9e' }}>mM</span></div>
+                  <div style={{ fontSize: '0.72rem', color: '#6b7080', marginTop: '0.2rem' }}>dNTP</div>
+                </div>
+              </div>
+            </div>
 
             {/* STATS */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.52rem', flexWrap: 'wrap', gap: '0.52rem' }}>

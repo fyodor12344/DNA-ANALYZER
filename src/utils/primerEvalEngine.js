@@ -19,7 +19,7 @@ export const revComp = seq => {
     return seq.split('').reverse().map(b => m[b] || b).join('');
 };
 
-export function calcTmNN(seq) {
+export function calcTmNN(seq, conditions = { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 }) {
     seq = seq.toUpperCase();
     if (seq.length < 2) return 0;
     let dH = 0, dS = 0;
@@ -31,8 +31,11 @@ export function calcTmNN(seq) {
         if ('AT'.includes(b)) { dH += INIT_AT[0]; dS += INIT_AT[1]; }
         else { dH += INIT_GC[0]; dS += INIT_GC[1]; }
     });
-    dS += 0.368 * (seq.length - 1) * Math.log(0.05);
-    const CT = 250e-9;
+    const mgEff = Math.max(0, conditions.mg - conditions.dntp);
+    const naEff = conditions.na + (mgEff > 0 ? 3.3 * Math.sqrt(mgEff) : 0);
+    const naEffM = Math.max(1e-5, naEff / 1000);
+    dS += 0.368 * (seq.length - 1) * Math.log(naEffM);
+    const CT = conditions.primerConc * 1e-9;
     const TmK = (dH * 1000) / (dS + R_GAS * Math.log(CT / 4));
     return parseFloat((TmK - 273.15).toFixed(1));
 }
@@ -43,17 +46,21 @@ export function calcGC(seq) {
     return parseFloat(((seq.split('').filter(b => 'GC'.includes(b)).length / seq.length) * 100).toFixed(1));
 }
 
-export function calc3PrimeDG(seq) {
+export function calc3PrimeDG(seq, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
     const end = seq.slice(-5).toUpperCase();
     let dH = 0, dS = 0;
     for (let i = 0; i < end.length - 1; i++) {
         const p = end[i] + end[i + 1];
         if (NN[p]) { dH += NN[p][0]; dS += NN[p][1]; }
     }
+    const mgEff = Math.max(0, conditions.mg - conditions.dntp);
+    const naEff = conditions.na + (mgEff > 0 ? 3.3 * Math.sqrt(mgEff) : 0);
+    const naEffM = Math.max(1e-5, naEff / 1000);
+    dS += 0.368 * (end.length - 1) * Math.log(naEffM);
     return parseFloat((dH - 310.15 * (dS / 1000)).toFixed(2));
 }
 
-export function calcHairpinDG(seq) {
+export function calcHairpinDG(seq, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
     seq = seq.toUpperCase();
     const n = seq.length;
     let bestDG = 0.5; // Small positive default — no structure found
@@ -77,7 +84,10 @@ export function calcHairpinDG(seq) {
                     else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
                 });
 
-                dS += 0.368 * (stemLen - 1) * Math.log(0.05);
+                const mgEff = Math.max(0, conditions.mg - conditions.dntp);
+                const naEff = conditions.na + (mgEff > 0 ? 3.3 * Math.sqrt(mgEff) : 0);
+                const naEffM = Math.max(1e-5, naEff / 1000);
+                dS += 0.368 * (stemLen - 1) * Math.log(naEffM);
 
                 let loopPen = 3.5;
                 if (loopLen === 3) loopPen = 5.4;
@@ -96,7 +106,7 @@ export function calcHairpinDG(seq) {
     return parseFloat(bestDG.toFixed(2));
 }
 
-function calculateDimerDG(seq1, seq2, isCross) {
+function calculateDimerDG(seq1, seq2, isCross, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
     seq1 = seq1.toUpperCase();
     seq2 = seq2.toUpperCase();
     const rc2 = revComp(seq2);
@@ -122,7 +132,10 @@ function calculateDimerDG(seq1, seq2, isCross) {
                     else if ('GC'.includes(b)) { dH += INIT_GC[0]; dS += INIT_GC[1]; }
                 });
 
-                dS += 0.368 * (block.length - 1) * Math.log(0.05);
+                const mgEff = Math.max(0, conditions.mg - conditions.dntp);
+                const naEff = conditions.na + (mgEff > 0 ? 3.3 * Math.sqrt(mgEff) : 0);
+                const naEffM = Math.max(1e-5, naEff / 1000);
+                dS += 0.368 * (block.length - 1) * Math.log(naEffM);
                 let dG = dH - 310.15 * (dS / 1000);
 
                 if (isCross && involved3P) {
@@ -155,12 +168,12 @@ function calculateDimerDG(seq1, seq2, isCross) {
     return parseFloat(bestDG.toFixed(2));
 }
 
-export function calcSelfDimerDG(seq) {
-    return calculateDimerDG(seq, seq, false);
+export function calcSelfDimerDG(seq, conditions) {
+    return calculateDimerDG(seq, seq, false, conditions);
 }
 
-export function calcCrossDimerDG(fwd, rev) {
-    return calculateDimerDG(fwd, rev, true);
+export function calcCrossDimerDG(fwd, rev, conditions) {
+    return calculateDimerDG(fwd, rev, true, conditions);
 }
 
 /* ─── SECONDARY STRUCTURE ANALYSIS ─────────────────────────────────────── */
@@ -217,7 +230,7 @@ export function deriveRiskTier(probability) {
     return 'High Risk';
 }
 
-export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', templateSeq = '') {
+export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', templateSeq = '', conditions = { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 }) {
     fwdSeq = fwdSeq.toUpperCase().replace(/[^ATGC]/g, '');
     revSeq = revSeq.toUpperCase().replace(/[^ATGC]/g, '');
 
@@ -227,17 +240,17 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
     const isDiagnostic = mode === 'diagnostic';
 
     // ─── Calculate thermodynamic properties ──────────────────────────────
-    const fwdTm = calcTmNN(fwdSeq);
-    const revTm = calcTmNN(revSeq);
+    const fwdTm = calcTmNN(fwdSeq, conditions);
+    const revTm = calcTmNN(revSeq, conditions);
     const fwdGC = calcGC(fwdSeq);
     const revGC = calcGC(revSeq);
-    const fwd3DG = calc3PrimeDG(fwdSeq);
-    const rev3DG = calc3PrimeDG(revSeq);
-    let fwdHairpin = calcHairpinDG(fwdSeq);
-    let revHairpin = calcHairpinDG(revSeq);
-    let fwdSelfDimer = calcSelfDimerDG(fwdSeq);
-    let revSelfDimer = calcSelfDimerDG(revSeq);
-    let crossDimer = calcCrossDimerDG(fwdSeq, revSeq);
+    const fwd3DG = calc3PrimeDG(fwdSeq, conditions);
+    const rev3DG = calc3PrimeDG(revSeq, conditions);
+    let fwdHairpin = calcHairpinDG(fwdSeq, conditions);
+    let revHairpin = calcHairpinDG(revSeq, conditions);
+    let fwdSelfDimer = calcSelfDimerDG(fwdSeq, conditions);
+    let revSelfDimer = calcSelfDimerDG(revSeq, conditions);
+    let crossDimer = calcCrossDimerDG(fwdSeq, revSeq, conditions);
     const tmDiff = parseFloat(Math.abs(fwdTm - revTm).toFixed(1));
     const annealingTemp = parseFloat(((fwdTm + revTm) / 2 - 3).toFixed(1));
 
@@ -353,21 +366,27 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'diagnostic', template
     const optimizationSuggestions = [];
 
     if (thermoStatus === 'VALID') {
-        // ─── WEIGHTED SCIENTIFIC SCORE ───────────────────────────────────────
-        const tmScore = Math.max(0, 1 - tmDiff / 10) * 40; // 40% Thermodynamics
-        const specScore = (specificityScore / 100) * 30;   // 30% Specificity
+        // ─── MODE-SPECIFIC WEIGHTS ──────────────────────────────────────────
+        let wTm = 40, wSpec = 30, wStruct = 20, wClamp = 10;
+        if (mode === 'qpcr') { wTm = 35; wSpec = 35; wStruct = 20; wClamp = 10; }
+        else if (mode === 'long_range') { wTm = 45; wSpec = 25; wStruct = 15; wClamp = 15; }
+        else if (mode === 'high_gc') { wTm = 40; wSpec = 30; wStruct = 15; wClamp = 15; }
+        else if (mode === 'low_template' || mode === 'touchdown') { wTm = 35; wSpec = 35; wStruct = 15; wClamp = 15; }
+
+        const tmScoreRaw = Math.max(0, 1 - tmDiff / 10);
+        const specScoreRaw = (specificityScore / 100);
 
         const worstHairpin = Math.min(final_report.hairpin_forward, final_report.hairpin_reverse);
         const worstDimer = Math.min(final_report.self_dimer_forward, final_report.self_dimer_reverse, final_report.cross_dimer);
-        const structureScoreRaw = (worstHairpin > -1 && worstDimer > -2 ? 1.0 : worstHairpin > -3 && worstDimer > -4 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1) * 20; // 20% Structure
+        const structureScoreRawRaw = worstHairpin > -1 && worstDimer > -2 ? 1.0 : worstHairpin > -3 && worstDimer > -4 ? 0.7 : worstHairpin > -5 ? 0.4 : 0.1;
 
         const last2Fwd = fwdSeq.slice(-2);
         const last2Rev = revSeq.slice(-2);
         const fwdClamp = (last2Fwd.match(/[GC]/g) || []).length;
         const revClamp = (last2Rev.match(/[GC]/g) || []).length;
-        const constraintScore = ((fwdClamp > 0 && fwdClamp <= 2 ? 5 : 0) + (revClamp > 0 && revClamp <= 2 ? 5 : 0)); // 10% GC Clamp
+        const constraintScoreRaw = ((fwdClamp > 0 && fwdClamp <= 2 ? 0.5 : 0) + (revClamp > 0 && revClamp <= 2 ? 0.5 : 0));
 
-        weightedScore = Math.round(tmScore + specScore + structureScoreRaw + constraintScore);
+        weightedScore = Math.round(tmScoreRaw * wTm + specScoreRaw * wSpec + structureScoreRawRaw * wStruct + constraintScoreRaw * wClamp);
 
         // ─── SECONDARY STRUCTURE SCORE ───────────────────────────────────────
         combinedStructureScore = Math.min(10, Math.round((fwdStructure.score + revStructure.score) / 2));
@@ -537,7 +556,7 @@ export function generateAlternatives(fwdSeq, revSeq) {
         const newFwd = shiftPrimer(fwdSeq, s.fOff);
         const newRev = shiftPrimer(revSeq, s.rOff);
         if (newFwd.length < 15 || newRev.length < 15) continue;
-        const result = evaluatePrimerPair(newFwd, newRev, 'diagnostic');
+        const result = evaluatePrimerPair(newFwd, newRev, 'diagnostic', '', { na: 50, mg: 1.5, primerConc: 250, dntp: 0.2 });
         if (result.error) continue;
         alternatives.push({
             label: s.label,
