@@ -275,72 +275,78 @@ export default function PrimerEvaluator({ result, setResult }) {
                     )}
 
                     {/* Melting Behavior */}
-                    <div style={S.card}>
-                        <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Melting Behavior</div>
-                        <p style={{ color: '#cbd5e1', fontSize: '0.9rem', lineHeight: 1.6, margin: 0 }}>{result.meltingCurve.overallMeltQuality}</p>
-                        <div style={{ ...S.metricGrid, marginTop: '0.75rem' }}>
-                            <div style={S.metricBox}>
-                                <div style={S.metricLabel}>Forward Melting</div>
-                                <div style={{ ...S.metricValue, color: result.meltingCurve.fwdMeltQuality === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontSize: '0.9rem' }}>{result.meltingCurve.fwdMeltQuality}</div>
-                            </div>
-                            <div style={S.metricBox}>
-                                <div style={S.metricLabel}>Reverse Melting</div>
-                                <div style={{ ...S.metricValue, color: result.meltingCurve.revMeltQuality === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontSize: '0.9rem' }}>{result.meltingCurve.revMeltQuality}</div>
-                            </div>
-                            {result.meltingCurve.asymmetricMelting && (
-                                <div style={{ ...S.metricBox, borderLeft: '3px solid #F59E0B' }}>
-                                    <div style={S.metricLabel}>Asymmetry</div>
-                                    <div style={{ ...S.metricValue, color: '#F59E0B', fontSize: '0.9rem' }}>Detected</div>
+                    {result.thermoStatus !== 'VALIDATION_FAILED' && (
+                        <div style={S.card}>
+                            <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Melting Behavior</div>
+                            <p style={{ color: '#cbd5e1', fontSize: '0.9rem', lineHeight: 1.6, margin: 0 }}>{result.meltingCurve?.overallMeltQuality}</p>
+                            <div style={{ ...S.metricGrid, marginTop: '0.75rem' }}>
+                                <div style={S.metricBox}>
+                                    <div style={S.metricLabel}>Forward Melting</div>
+                                    <div style={{ ...S.metricValue, color: result.meltingCurve?.fwdMeltQuality === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontSize: '0.9rem' }}>{result.meltingCurve?.fwdMeltQuality}</div>
                                 </div>
-                            )}
+                                <div style={S.metricBox}>
+                                    <div style={S.metricLabel}>Reverse Melting</div>
+                                    <div style={{ ...S.metricValue, color: result.meltingCurve?.revMeltQuality === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontSize: '0.9rem' }}>{result.meltingCurve?.revMeltQuality}</div>
+                                </div>
+                                {result.meltingCurve?.asymmetricMelting && (
+                                    <div style={{ ...S.metricBox, borderLeft: '3px solid #F59E0B' }}>
+                                        <div style={S.metricLabel}>Asymmetry</div>
+                                        <div style={{ ...S.metricValue, color: '#F59E0B', fontSize: '0.9rem' }}>Detected</div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Structural Integrity */}
-                    <div style={S.card}>
-                        <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Structural Integrity</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
-                            <div style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem', fontFamily: 'Montserrat, sans-serif', color: result.structureScore >= 6 ? '#EF4444' : result.structureScore >= 3 ? '#F59E0B' : '#00FFC6', background: result.structureScore >= 6 ? 'rgba(239,68,68,0.1)' : result.structureScore >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(0,255,198,0.1)', border: `2px solid ${result.structureScore >= 6 ? '#EF4444' : result.structureScore >= 3 ? '#F59E0B' : '#00FFC6'}` }}>
-                                {result.structureScore}/10
-                            </div>
-                            <div>
-                                <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.95rem' }}>{result.structureInterpretation}</div>
-                                <div style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                                    {result.threePrimeInterference ? "3' end structural interference DETECTED." : "No 3' end structural interference detected."}
+                    {result.thermoStatus !== 'VALIDATION_FAILED' && (
+                        <div style={S.card}>
+                            <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Structural Integrity</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.75rem' }}>
+                                <div style={{ width: '56px', height: '56px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '1.2rem', fontFamily: 'Montserrat, sans-serif', color: result.structureScore >= 6 ? '#EF4444' : result.structureScore >= 3 ? '#F59E0B' : '#00FFC6', background: result.structureScore >= 6 ? 'rgba(239,68,68,0.1)' : result.structureScore >= 3 ? 'rgba(245,158,11,0.1)' : 'rgba(0,255,198,0.1)', border: `2px solid ${result.structureScore >= 6 ? '#EF4444' : result.structureScore >= 3 ? '#F59E0B' : '#00FFC6'}` }}>
+                                    {result.structureScore}/10
+                                </div>
+                                <div>
+                                    <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: '0.95rem' }}>{result.structureInterpretation}</div>
+                                    <div style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                                        {result.threePrimeInterference ? "3' end structural interference DETECTED." : "No 3' end structural interference detected."}
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* Thermodynamic Details */}
-                    <div style={S.card}>
-                        <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Thermodynamic Details</div>
-                        <div style={{ overflowX: 'auto' }}>
-                            <table style={S.table}>
-                                <thead>
-                                    <tr>
-                                        <th style={S.th}>Parameter</th>
-                                        <th style={S.th}>Forward</th>
-                                        <th style={S.th}>Reverse</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr><td style={S.td}>Sequence</td><td style={{ ...S.td, fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all' }}>{result.thermoData.forward.seq}</td><td style={{ ...S.td, fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all' }}>{result.thermoData.reverse.seq}</td></tr>
-                                    <tr><td style={S.td}>Length</td><td style={S.td}>{result.thermoData.forward.len} bp</td><td style={S.td}>{result.thermoData.reverse.len} bp</td></tr>
-                                    <tr><td style={S.td}>Tm</td><td style={S.td}>{result.thermoData.forward.tm} C</td><td style={S.td}>{result.thermoData.reverse.tm} C</td></tr>
-                                    <tr><td style={S.td}>GC Content</td><td style={S.td}>{result.thermoData.forward.gc}%</td><td style={S.td}>{result.thermoData.reverse.gc}%</td></tr>
-                                    <tr><td style={S.td}>Hairpin dG</td><td style={S.td}>{result.thermoData.forward.hairpinDG} kcal/mol</td><td style={S.td}>{result.thermoData.reverse.hairpinDG} kcal/mol</td></tr>
-                                    <tr><td style={S.td}>Self-Dimer dG</td><td style={S.td}>{result.thermoData.forward.selfDimerDG} kcal/mol</td><td style={S.td}>{result.thermoData.reverse.selfDimerDG} kcal/mol</td></tr>
-                                    <tr><td style={S.td}>3' Stability dG</td><td style={S.td}>{result.thermoData.forward.threePrimeDG} kcal/mol</td><td style={S.td}>{result.thermoData.reverse.threePrimeDG} kcal/mol</td></tr>
-                                </tbody>
-                            </table>
+                    {result.thermoStatus !== 'VALIDATION_FAILED' && (
+                        <div style={S.card}>
+                            <div style={{ ...S.cardTitle, color: '#00BFA5' }}>Thermodynamic Details</div>
+                            <div style={{ overflowX: 'auto' }}>
+                                <table style={S.table}>
+                                    <thead>
+                                        <tr>
+                                            <th style={S.th}>Parameter</th>
+                                            <th style={S.th}>Forward</th>
+                                            <th style={S.th}>Reverse</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr><td style={S.td}>Sequence</td><td style={{ ...S.td, fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all' }}>{result.thermoData?.forward?.seq}</td><td style={{ ...S.td, fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all' }}>{result.thermoData?.reverse?.seq}</td></tr>
+                                        <tr><td style={S.td}>Length</td><td style={S.td}>{result.thermoData?.forward?.len} bp</td><td style={S.td}>{result.thermoData?.reverse?.len} bp</td></tr>
+                                        <tr><td style={S.td}>Tm</td><td style={S.td}>{result.thermoData?.forward?.tm} C</td><td style={S.td}>{result.thermoData?.reverse?.tm} C</td></tr>
+                                        <tr><td style={S.td}>GC Content</td><td style={S.td}>{result.thermoData?.forward?.gc}%</td><td style={S.td}>{result.thermoData?.reverse?.gc}%</td></tr>
+                                        <tr><td style={S.td}>Hairpin dG</td><td style={S.td}>{result.thermoData?.forward?.hairpinDG} kcal/mol</td><td style={S.td}>{result.thermoData?.reverse?.hairpinDG} kcal/mol</td></tr>
+                                        <tr><td style={S.td}>Self-Dimer dG</td><td style={S.td}>{result.thermoData?.forward?.selfDimerDG} kcal/mol</td><td style={S.td}>{result.thermoData?.reverse?.selfDimerDG} kcal/mol</td></tr>
+                                        <tr><td style={S.td}>3' Stability dG</td><td style={S.td}>{result.thermoData?.forward?.threePrimeDG} kcal/mol</td><td style={S.td}>{result.thermoData?.reverse?.threePrimeDG} kcal/mol</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div style={{ ...S.metricGrid, marginTop: '0.75rem' }}>
+                                <div style={S.metricBox}><div style={S.metricLabel}>Tm Difference</div><div style={{ ...S.metricValue, color: result.thermoData?.tmDiff > 5 ? '#EF4444' : result.thermoData?.tmDiff > 3 ? '#F59E0B' : '#00FFC6' }}>{result.thermoData?.tmDiff} C</div></div>
+                                <div style={S.metricBox}><div style={S.metricLabel}>Annealing Temp</div><div style={{ ...S.metricValue, color: result.thermoData?.annealingTemp < 50 ? '#EF4444' : '#00FFC6' }}>{result.thermoData?.annealingTemp} C</div></div>
+                                <div style={S.metricBox}><div style={S.metricLabel}>Cross-Dimer dG</div><div style={{ ...S.metricValue, color: result.thermoData?.crossDimerDG < -9 ? '#EF4444' : result.thermoData?.crossDimerDG < -5 ? '#F59E0B' : '#00FFC6' }}>{result.thermoData?.crossDimerDG} kcal/mol</div></div>
+                            </div>
                         </div>
-                        <div style={{ ...S.metricGrid, marginTop: '0.75rem' }}>
-                            <div style={S.metricBox}><div style={S.metricLabel}>Tm Difference</div><div style={{ ...S.metricValue, color: result.thermoData.tmDiff > 5 ? '#EF4444' : result.thermoData.tmDiff > 3 ? '#F59E0B' : '#00FFC6' }}>{result.thermoData.tmDiff} C</div></div>
-                            <div style={S.metricBox}><div style={S.metricLabel}>Annealing Temp</div><div style={{ ...S.metricValue, color: result.thermoData.annealingTemp < 50 ? '#EF4444' : '#00FFC6' }}>{result.thermoData.annealingTemp} C</div></div>
-                            <div style={S.metricBox}><div style={S.metricLabel}>Cross-Dimer dG</div><div style={{ ...S.metricValue, color: result.thermoData.crossDimerDG < -9 ? '#EF4444' : result.thermoData.crossDimerDG < -5 ? '#F59E0B' : '#00FFC6' }}>{result.thermoData.crossDimerDG} kcal/mol</div></div>
-                        </div>
-                    </div>
+                    )}
 
                     {/* Scientific Summary */}
                     <div style={S.card}>

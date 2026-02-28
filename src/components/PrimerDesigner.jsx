@@ -1655,10 +1655,9 @@ export default function PrimerDesigner() {
               </div>
             )}
 
-            {/* PRIMER PAIR CARDS */}
             <div style={{ marginBottom: '0.52rem' }}>
               <span style={{ fontSize: '0.88rem', fontWeight: 600, color: primers.autoRejected ? '#EF4444' : '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-                {primers.autoRejected ? 'Rejected Primers (Reference Only)' : 'Designed Primers'}
+                {primers.thermoStatus === 'VALIDATION_FAILED' ? 'Sequence Complexity Validation Failed' : primers.autoRejected ? 'Rejected Primers (Reference Only)' : 'Designed Primers'}
               </span>
             </div>
             <div className="primer-grid">

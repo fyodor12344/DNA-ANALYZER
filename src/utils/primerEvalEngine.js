@@ -222,6 +222,65 @@ export function calcSecondaryStructureScore(seq, hairpinDG, selfDimerDG) {
 
 /* ─── FULL EVALUATION PIPELINE ─────────────────────────────────────────── */
 
+/* ─── PRE-THERMODYNAMIC VALIDATION ───────────────────────────────────────── */
+export function validateSequenceComplexity(seq, templateSeq) {
+    seq = seq.toUpperCase().replace(/[^ATGC]/g, '');
+    const n = seq.length;
+    if (n === 0) return { valid: false, reason: "Empty sequence" };
+
+    // 1. GC Content
+    const gc = calcGC(seq);
+    if (gc > 80) return { valid: false, reason: `GC Content > 80% (${gc}%)` };
+
+    // 2. Shannon Entropy
+    const counts = { A: 0, T: 0, G: 0, C: 0 };
+    for (let i = 0; i < n; i++) counts[seq[i]]++;
+    let entropy = 0;
+    for (const b in counts) {
+        const p = counts[b] / n;
+        if (p > 0) entropy -= p * Math.log2(p);
+    }
+    if (entropy < 1.2) return { valid: false, reason: `Shannon Entropy < 1.2 (${entropy.toFixed(2)})` };
+
+    // 3. k-mer diversity (k=4)
+    if (n >= 4) {
+        const kmers = new Set();
+        const totalPossible = n - 3;
+        for (let i = 0; i <= n - 4; i++) {
+            kmers.add(seq.slice(i, i + 4));
+        }
+        const diversity = kmers.size / totalPossible;
+        if (diversity < 0.15) {
+            return { valid: false, reason: `Low 4-mer diversity (${(diversity * 100).toFixed(1)}%)` };
+        }
+    }
+
+    // 4. Repetitive 8-mer hits in template
+    let maxHits = 0;
+    if (templateSeq && templateSeq.length > 20) {
+        const fullSeq = templateSeq.toUpperCase().replace(/[^ATGC]/g, '');
+        for (let i = 0; i <= n - 8; i++) {
+            const kmer = seq.slice(i, i + 8);
+            let cnt = 0, pos = 0;
+            while ((pos = fullSeq.indexOf(kmer, pos)) !== -1) { cnt++; pos++; }
+            if (cnt > maxHits) maxHits = cnt;
+        }
+        if (maxHits > 20) {
+            return { valid: false, reason: `Too many repetitive 8-mer hits (>20 hits)` };
+        }
+    }
+
+    return {
+        valid: true,
+        metrics: {
+            gcContent: gc,
+            shannonEntropy: entropy.toFixed(2),
+            kmerDiversityRatio: n >= 4 ? (new Set(Array.from({ length: n - 3 }, (_, i) => seq.slice(i, i + 4))).size / (n - 3)).toFixed(2) : "N/A",
+            maxRepetitive8merHits: maxHits
+        }
+    };
+}
+
 /* ─── Helper: derive risk tier strictly from probability (STEP 2) ──────── */
 export function deriveRiskTier(probability) {
     if (probability >= 80) return 'Low Risk';
@@ -236,6 +295,52 @@ export function evaluatePrimerPair(fwdSeq, revSeq, mode = 'standard', templateSe
 
     if (fwdSeq.length < 15 || fwdSeq.length > 35) return { error: 'Forward primer must be 15-35 bases.' };
     if (revSeq.length < 15 || revSeq.length > 35) return { error: 'Reverse primer must be 15-35 bases.' };
+
+    // ─── Pre-Thermodynamic Validation ───────────────────────────────────
+    const fwdVal = validateSequenceComplexity(fwdSeq, templateSeq);
+    const revVal = validateSequenceComplexity(revSeq, templateSeq);
+
+    if (!fwdVal.valid || !revVal.valid) {
+        const failingVal = !fwdVal.valid ? fwdVal : revVal;
+        const metricsStr = `GC: ${failingVal.metrics?.gcContent}% | Entropy: ${failingVal.metrics?.shannonEntropy} | 4-mer Diversity: ${failingVal.metrics?.kmerDiversityRatio} | Max 8-mer Hits: ${failingVal.metrics?.maxRepetitive8merHits || 0}`;
+        return {
+            autoRejected: true,
+            classification: 'REJECTED',
+            classColor: '#EF4444',
+            weightedScore: 0,
+            confidenceBand: 'High Risk (<50%)',
+            successProbability: 0,
+            riskTier: 'High Risk',
+            failureProbability: 1,
+            thermoStatus: 'VALIDATION_FAILED', // Distinguish from thermo failure
+            specificityScore: 0,
+            optimizationSuggestions: [],
+            meltingCurve: { fwdMeltQuality: 'Unavailable', revMeltQuality: 'Unavailable', overallMeltQuality: 'Thermodynamic simulation skipped to preserve model integrity.', asymmetricMelting: false },
+            structureScore: 10,
+            structureInterpretation: 'Unavailable',
+            threePrimeInterference: false,
+            fwdStructure: { score: 10, interpretation: 'Unavailable', threePrimeInvolved: false, dimerThreePrime: false },
+            revStructure: { score: 10, interpretation: 'Unavailable', threePrimeInvolved: false, dimerThreePrime: false },
+            summaryPoints: [
+                'Sequence exceeds computable thermodynamic bounds.',
+                'Extreme GC content or low complexity detected.',
+                'Thermodynamic simulation skipped to preserve model integrity.',
+                `Trigger: ${failingVal.reason}`,
+                `Metrics: ${metricsStr}`
+            ],
+            // Dummy thermoData to prevent UI crashes expecting these nested objects
+            thermoData: {
+                forward: { seq: fwdSeq, len: fwdSeq.length, tm: 0, gc: failingVal.metrics?.gcContent || 0, threePrimeDG: 0, hairpinDG: 0.5, selfDimerDG: 0.5, structure: { score: 10, interpretation: 'Unavailable', threePrimeInvolved: false, dimerThreePrime: false } },
+                reverse: { seq: revSeq, len: revSeq.length, tm: 0, gc: failingVal.metrics?.gcContent || 0, threePrimeDG: 0, hairpinDG: 0.5, selfDimerDG: 0.5, structure: { score: 10, interpretation: 'Unavailable', threePrimeInvolved: false, dimerThreePrime: false } },
+                crossDimerDG: 0.5, tmDiff: 0, annealingTemp: 0
+            },
+            final_report: { hairpin_forward: 0.5, self_dimer_forward: 0.5, hairpin_reverse: 0.5, self_dimer_reverse: 0.5, cross_dimer: 0.5 },
+            triggers: [
+                'Sequence exceeds computable thermodynamic bounds.',
+                `Failure Reason: ${failingVal.reason}`
+            ]
+        };
+    }
 
     // ─── Calculate thermodynamic properties ──────────────────────────────
     const fwdTm = calcTmNN(fwdSeq, conditions);
