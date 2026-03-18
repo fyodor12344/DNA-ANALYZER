@@ -2533,7 +2533,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
 
         {/* LOAD SAMPLE */}
         <div style={{ position: 'relative', marginBottom: '1.1rem' }}>
-          <button className="btn-sample" onClick={e => { e.stopPropagation(); setShowSampleMenu(v => !v); }}>
+          <button className="btn-sample sample-shine" onClick={e => { e.stopPropagation(); setShowSampleMenu(v => !v); }}>
             <span>Load Sample Mutations</span><span style={{ fontSize: '.82rem', color: '#6b7080', marginLeft: '.25rem' }}>▼</span>
           </button>
           {showSampleMenu && (

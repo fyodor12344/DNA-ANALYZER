@@ -875,7 +875,7 @@ function App() {
                   e.stopPropagation();
                   setShowSampleMenu(!showSampleMenu);
                 }}
-                className="quick-action-btn"
+                className="quick-action-btn sample-shine"
                 data-tour="load-sample"
               >
                 Load Sample

@@ -189,7 +189,7 @@ export default function PrimerEvaluator({ result, setResult }) {
             <div style={S.sampleRow}>
                 <span style={S.sampleLabel}>Load Sample:</span>
                 {Object.entries(SAMPLE_PRIMERS).map(([key, s]) => (
-                    <button key={key} style={S.sampleBtn} onClick={() => loadSample(key)}
+                    <button key={key} className="sample-shine" style={S.sampleBtn} onClick={() => loadSample(key)}
                         onMouseEnter={e => { e.target.style.borderColor = 'rgba(0,191,165,0.3)'; e.target.style.color = '#00FFC6'; }}
                         onMouseLeave={e => { e.target.style.borderColor = 'rgba(255,255,255,0.08)'; e.target.style.color = '#cbd5e1'; }}>
                         {s.name}

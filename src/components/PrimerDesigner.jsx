@@ -1551,7 +1551,7 @@ export default function PrimerDesigner() {
               <div style={{ position: 'relative' }}>
                 <button
                   onClick={handleLoadSampleBtn}
-                  className="btn-sample"
+                  className="btn-sample sample-shine"
                   style={{
                     cursor: 'pointer', margin: 0, padding: '0.4rem 0.85rem'
                   }}

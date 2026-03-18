@@ -397,7 +397,7 @@ const SequenceAlignment = () => {
       {/* Load Sample */}
       <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1.1rem', position: 'relative' }}>
         <div style={{ position: 'relative' }}>
-          <button className="sa-btn" onClick={(e) => { e.stopPropagation(); setShowSampleMenu(!showSampleMenu); }}
+          <button className="sa-btn sample-shine" onClick={(e) => { e.stopPropagation(); setShowSampleMenu(!showSampleMenu); }}
             style={{ background: 'linear-gradient(135deg, #06B6D4, #0891B2)', width: 'auto', padding: '.7rem 1.4rem', fontSize: '.9rem' }}>
             <span>Load Sample</span>
             <span style={{ fontSize: '.7rem', opacity: .7 }}>{showSampleMenu ? '\u25B2' : '\u25BC'}</span>

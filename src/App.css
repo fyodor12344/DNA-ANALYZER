@@ -279,6 +279,49 @@ h1, h2, h3, h4, h5, h6 {
   animation: fadeIn 0.3s ease;
 }
 
+/* Global shine for Load Sample controls across tabs */
+.sample-shine {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.sample-shine::after {
+  content: '';
+  position: absolute;
+  top: -140%;
+  left: -35%;
+  width: 28%;
+  height: 380%;
+  transform: rotate(24deg);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.28) 48%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  pointer-events: none;
+  animation: sampleShineSweep 2.9s ease-in-out infinite;
+}
+
+@keyframes sampleShineSweep {
+  0%, 22% {
+    left: -35%;
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  55% {
+    left: 125%;
+    opacity: 0;
+  }
+  100% {
+    left: 125%;
+    opacity: 0;
+  }
+}
+
 .space-y-6 > * + * {
   margin-top: 1.5rem;
 }

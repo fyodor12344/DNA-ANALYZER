@@ -554,7 +554,7 @@ export default function CRISPRFinder() {
                 Upload FASTA
                 <input type="file" accept=".fasta,.fa,.txt" onChange={handleFileUpload} style={{ display: 'none' }} />
               </label>
-              <button className="btn-sample" onClick={loadSample}>
+              <button className="btn-sample sample-shine" onClick={loadSample}>
                 Load Sample
               </button>
             </div>
