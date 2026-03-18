@@ -347,6 +347,126 @@ def suggest_pcr_protocol(fwd_primer, rev_primer, product_size):
     }
 
 
+def _three_prime_instability_penalty(primer):
+    """Lower is better. Penalize weak or non-optimal 3' end composition."""
+    clamp = primer.get('gc_clamp') or {}
+    penalty = 0.0
+
+    if not clamp.get('has_clamp', False):
+        penalty += 15.0
+
+    gc_last_5 = clamp.get('gc_in_last_5', 0)
+    penalty += abs(gc_last_5 - 2.5) * 4.0
+
+    if not clamp.get('is_optimal', False):
+        penalty += 5.0
+
+    return penalty
+
+
+def _dimer_penalty(dimer):
+    """Convert dimer analysis to a penalty score where lower is better."""
+    if not dimer:
+        return 25.0
+
+    penalty = 0.0
+    level = dimer.get('risk_level', 'medium')
+    if level == 'high':
+        penalty += 20.0
+    elif level == 'medium':
+        penalty += 10.0
+    else:
+        penalty += 3.0
+
+    dg = dimer.get('estimated_dG', 0)
+    penalty += max(0.0, abs(min(0.0, dg)) - 4.0) * 2.0
+    penalty += max(0.0, dimer.get('three_prime_complementarity', 0) - 2) * 4.0
+    return penalty
+
+
+def _rank_primer_pair(forward, reverse, expected_size, min_size, max_size):
+    """
+    Rank a primer pair according to:
+    1) Tm matching (prefer <2°C)
+    2) Combined quality score
+    3) Minimal 3' instability
+    4) Low self/cross dimer risk
+    """
+    tm_diff = abs(forward['tm'] - reverse['tm'])
+    combined_quality = (forward['quality_score'] + reverse['quality_score']) / 2.0
+
+    tm_score = max(0.0, 100.0 - tm_diff * 25.0)
+    if tm_diff <= 2.0:
+        tm_score = min(100.0, tm_score + 10.0)
+
+    instability_penalty = _three_prime_instability_penalty(forward) + _three_prime_instability_penalty(reverse)
+    instability_score = max(0.0, 100.0 - instability_penalty)
+
+    fwd_self = check_primer_dimers(forward['sequence'], forward['sequence'])
+    rev_self = check_primer_dimers(reverse['sequence'], reverse['sequence'])
+    cross = check_primer_dimers(forward['sequence'], reverse['sequence'])
+
+    dimer_total_penalty = _dimer_penalty(fwd_self) + _dimer_penalty(rev_self) + (_dimer_penalty(cross) * 1.3)
+    dimer_score = max(0.0, 100.0 - dimer_total_penalty)
+
+    outside_product_range = not (min_size <= expected_size <= max_size)
+    size_penalty = 0.0
+    if outside_product_range:
+        size_penalty += 25.0
+        if expected_size < min_size:
+            size_penalty += (min_size - expected_size) * 0.15
+        else:
+            size_penalty += (expected_size - max_size) * 0.15
+
+    pair_score = (
+        0.38 * tm_score +
+        0.34 * combined_quality +
+        0.16 * instability_score +
+        0.12 * dimer_score -
+        size_penalty
+    )
+
+    return {
+        'pair_score': round(pair_score, 2),
+        'tm_diff': round(tm_diff, 1),
+        'combined_quality': round(combined_quality, 1),
+        'instability_score': round(instability_score, 1),
+        'dimer_score': round(dimer_score, 1),
+        'outside_product_range': outside_product_range,
+        'self_dimer_forward': fwd_self,
+        'self_dimer_reverse': rev_self,
+        'cross_dimer': cross
+    }
+
+
+def _build_pair_explanation(rank_data):
+    """Human-readable reason and residual risks for the selected pair."""
+    reason_parts = [
+        f"Tm difference is {rank_data['tm_diff']}°C",
+        f"combined primer quality score is {rank_data['combined_quality']}/100",
+        f"3' stability score is {rank_data['instability_score']}/100",
+        f"dimer-risk score is {rank_data['dimer_score']}/100"
+    ]
+
+    risks = []
+    if rank_data['tm_diff'] > 2.0:
+        risks.append(f"Tm mismatch remains above preferred threshold ({rank_data['tm_diff']}°C)")
+    if rank_data['instability_score'] < 65:
+        risks.append("3' end stability is suboptimal in at least one primer")
+    if rank_data['dimer_score'] < 65:
+        risks.append("self-dimer or cross-dimer risk is elevated")
+    if rank_data['outside_product_range']:
+        risks.append("expected amplicon is outside the requested product-size range")
+
+    if not risks:
+        risks.append("No critical residual risks detected under current constraints")
+
+    return {
+        'why_selected': "Selected because " + ", ".join(reason_parts) + ".",
+        'remaining_risks': risks
+    }
+
+
 def design_primers(sequence, target_tm=60, primer_length=20, product_size_range=(200, 500)):
     """
     Enhanced primer design with advanced analysis
@@ -467,7 +587,40 @@ def design_primers(sequence, target_tm=60, primer_length=20, product_size_range=
             })
     
     if not reverse_candidates:
-        print(f"No reverse primer candidates found")
+        # Least-bad fallback: allow any downstream reverse candidate regardless of product-size target.
+        relaxed_start = max(best_forward['position'] + primer_length + 1, primer_length)
+        for i in range(relaxed_start, search_end_rev + 1):
+            if i + primer_length > seq_length:
+                break
+
+            primer_region = sequence[i:i + primer_length]
+            if len(primer_region) < primer_length:
+                continue
+
+            primer_seq = reverse_complement(primer_region)
+            tm = calculate_tm_nearest_neighbor(primer_seq)
+            hairpin = check_hairpin(primer_seq)
+            gc_clamp = check_gc_clamp(primer_seq)
+            grade, score, issues, warnings = evaluate_primer_quality(primer_seq, tm, hairpin, gc_clamp)
+
+            reverse_candidates.append({
+                'sequence': primer_seq,
+                'position': i,
+                'length': len(primer_seq),
+                'tm': tm,
+                'gc_content': calculate_gc_content(primer_seq),
+                'quality_grade': grade,
+                'quality_score': score,
+                'issues': issues,
+                'warnings': warnings,
+                'hairpin': hairpin,
+                'gc_clamp': gc_clamp,
+                'type': 'Reverse',
+                'expected_product': i - best_forward['position'] + primer_length
+            })
+
+    if not reverse_candidates:
+        print("No reverse primer candidates found even after relaxed fallback")
         return {
             'forward_primer': best_forward,
             'reverse_primer': None,
@@ -475,26 +628,62 @@ def design_primers(sequence, target_tm=60, primer_length=20, product_size_range=
             'tm_difference': 0,
             'dimer_analysis': None,
             'pcr_protocol': None,
-            'all_candidates': forward_candidates[:5]
+            'all_candidates': forward_candidates[:5],
+            'selection_explanation': {
+                'why_selected': 'Only a forward primer candidate was available.',
+                'remaining_risks': ['No reverse primer candidate could be generated from the input sequence.']
+            }
         }
-    
-    reverse_candidates.sort(
-        key=lambda x: (x['quality_score'], -abs(x['tm'] - best_forward['tm'])),
-        reverse=True
-    )
-    best_reverse = reverse_candidates[0]
-    
-    # === ANALYZE PRIMER PAIR ===
-    expected_size = best_reverse['position'] - best_forward['position'] + primer_length
-    tm_diff = abs(best_forward['tm'] - best_reverse['tm'])
-    dimer_analysis = check_primer_dimers(best_forward['sequence'], best_reverse['sequence'])
+
+    # Pair-ranking stage:
+    # - Evaluate many fwd/rev combinations
+    # - Prefer close Tm, high combined score, strong 3' stability, low dimer risk
+    # - Still return least-bad pair if no ideal option exists
+    forward_pool = sorted(forward_candidates, key=lambda x: x['quality_score'], reverse=True)[:40]
+    reverse_pool = sorted(reverse_candidates, key=lambda x: x['quality_score'], reverse=True)[:120]
+
+    best_pair = None
+    best_rank = None
+
+    for fwd in forward_pool:
+        for rev in reverse_pool:
+            if rev['position'] <= fwd['position']:
+                continue
+
+            expected_size = rev['position'] - fwd['position'] + primer_length
+            rank_data = _rank_primer_pair(fwd, rev, expected_size, min_size, max_size)
+
+            if best_rank is None or rank_data['pair_score'] > best_rank['pair_score']:
+                best_pair = (fwd, rev, expected_size)
+                best_rank = rank_data
+
+    if best_pair is None:
+        print("No pair combinations survived ordering constraints")
+        return {
+            'forward_primer': best_forward,
+            'reverse_primer': None,
+            'expected_product_size': 0,
+            'tm_difference': 0,
+            'dimer_analysis': None,
+            'pcr_protocol': None,
+            'all_candidates': forward_candidates[:5] + reverse_candidates[:5],
+            'selection_explanation': {
+                'why_selected': 'Forward and reverse candidate ordering could not produce a valid pair.',
+                'remaining_risks': ['No forward/reverse ordering produced a plausible amplicon.']
+            }
+        }
+
+    best_forward, best_reverse, expected_size = best_pair
+    tm_diff = best_rank['tm_diff']
+    dimer_analysis = best_rank['cross_dimer']
     protocol = suggest_pcr_protocol(best_forward, best_reverse, expected_size)
-    
+    pair_explanation = _build_pair_explanation(best_rank)
+
     all_candidates = forward_candidates[:5] + reverse_candidates[:5]
-    
-    print(f"✓ Found primers: Forward at {best_forward['position']}, Reverse at {best_reverse['position']}")
-    print(f"✓ Expected product: {expected_size} bp, Tm diff: {tm_diff:.1f}°C")
-    
+
+    print(f"✓ Found best pair: Forward at {best_forward['position']}, Reverse at {best_reverse['position']}")
+    print(f"✓ Expected product: {expected_size} bp, Tm diff: {tm_diff:.1f}°C, pair score: {best_rank['pair_score']}")
+
     return {
         'forward_primer': best_forward,
         'reverse_primer': best_reverse,
@@ -502,7 +691,15 @@ def design_primers(sequence, target_tm=60, primer_length=20, product_size_range=
         'tm_difference': tm_diff,
         'dimer_analysis': dimer_analysis,
         'pcr_protocol': protocol,
-        'all_candidates': all_candidates
+        'all_candidates': all_candidates,
+        'pair_ranking': {
+            'pair_score': best_rank['pair_score'],
+            'tm_match_score': max(0, round(100 - best_rank['tm_diff'] * 25)),
+            'combined_quality_score': best_rank['combined_quality'],
+            'three_prime_stability_score': best_rank['instability_score'],
+            'dimer_risk_score': best_rank['dimer_score']
+        },
+        'selection_explanation': pair_explanation
     }
 
 

@@ -515,7 +515,7 @@ export default function OverviewTab({ result, originalSequence }) {
       )}
 
       {/* Sequence Statistics */}
-      <div className="ov-card ov-animate">
+      <div className="ov-card ov-animate" data-tour="overview-stats">
         <div className="ov-card-header">
           <div className="ov-card-icon" style={{ background: '#3B82F6' }}>SEQ</div>
           <span className="ov-card-title">Sequence Statistics</span>

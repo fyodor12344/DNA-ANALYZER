@@ -106,7 +106,68 @@ export function calcHairpinDG(seq, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) 
     return parseFloat(bestDG.toFixed(2));
 }
 
-function calculateDimerDG(seq1, seq2, isCross, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
+function estimateDimerByComplementarity(seq1, seq2) {
+    seq1 = (seq1 || '').toUpperCase();
+    seq2 = (seq2 || '').toUpperCase();
+    const rc2 = revComp(seq2);
+
+    let bestRun = 0;
+    let bestGC = 0;
+    let hasThreePrimePairing = false;
+
+    for (let shift = -rc2.length + 1; shift < seq1.length; shift++) {
+        let run = 0;
+        let runGC = 0;
+        for (let i = 0; i < seq1.length; i++) {
+            const j = i - shift;
+            if (j < 0 || j >= rc2.length) {
+                run = 0;
+                runGC = 0;
+                continue;
+            }
+
+            if (seq1[i] === rc2[j]) {
+                run += 1;
+                if (seq1[i] === 'G' || seq1[i] === 'C') runGC += 1;
+                if (run > bestRun || (run === bestRun && runGC > bestGC)) {
+                    bestRun = run;
+                    bestGC = runGC;
+                }
+
+                const seq1Near3Prime = i >= seq1.length - 3;
+                const seq2Near3Prime = j <= 2;
+                if (seq1Near3Prime && seq2Near3Prime) hasThreePrimePairing = true;
+            } else {
+                run = 0;
+                runGC = 0;
+            }
+        }
+    }
+
+    const gcOverlapRatio = bestRun > 0 ? bestGC / bestRun : 0;
+    const core = (bestRun * 1.15) + (bestGC * 0.55) + (hasThreePrimePairing ? 2.0 : 0.5);
+    const estimatedDG = parseFloat(Math.max(-13.5, Math.min(-2.2, -core)).toFixed(2));
+
+    let spread = 0.8;
+    if (bestRun >= 6) spread = 1.8;
+    else if (bestRun >= 4) spread = 1.2;
+
+    const estimatedRange = [
+        parseFloat((estimatedDG - spread).toFixed(2)),
+        parseFloat((estimatedDG + spread).toFixed(2))
+    ];
+
+    return {
+        estimatedDG,
+        estimatedRange,
+        bestRun,
+        bestGC,
+        gcOverlapRatio: parseFloat(gcOverlapRatio.toFixed(2)),
+        hasThreePrimePairing
+    };
+}
+
+function computeThermoDimerDGOrNull(seq1, seq2, isCross, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
     seq1 = seq1.toUpperCase();
     seq2 = seq2.toUpperCase();
     const rc2 = revComp(seq2);
@@ -162,10 +223,18 @@ function calculateDimerDG(seq1, seq2, isCross, conditions = { na: 50, mg: 1.5, d
         evaluateBlock(currentBlock, is3PrimeInvolved);
     }
 
-    // STEP 4: No-zero dG rule — never return exactly 0
-    if (bestDG < -20 || bestDG > 5) return null;
-    if (bestDG === 0 || Math.abs(bestDG) < 0.01) return 0.5;
+    if (bestDG === 0 || Math.abs(bestDG) < 0.01) bestDG = 0.5;
+    if (!isFinite(bestDG) || isNaN(bestDG) || bestDG < -20 || bestDG > 5) return null;
     return parseFloat(bestDG.toFixed(2));
+}
+
+function calculateDimerDG(seq1, seq2, isCross, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
+    const thermoDG = computeThermoDimerDGOrNull(seq1, seq2, isCross, conditions);
+    if (thermoDG !== null) return thermoDG;
+
+    // Fallback estimate if thermodynamic model cannot produce a stable value.
+    const estimated = estimateDimerByComplementarity(seq1, seq2);
+    return estimated.estimatedDG;
 }
 
 export function calcSelfDimerDG(seq, conditions) {
@@ -174,6 +243,47 @@ export function calcSelfDimerDG(seq, conditions) {
 
 export function calcCrossDimerDG(fwd, rev, conditions) {
     return calculateDimerDG(fwd, rev, true, conditions);
+}
+
+export function assessCrossDimerInteraction(fwd, rev, conditions = { na: 50, mg: 1.5, dntp: 0.2 }) {
+    const thermoDG = computeThermoDimerDGOrNull(fwd, rev, true, conditions);
+    const est = estimateDimerByComplementarity(fwd, rev);
+
+    const deltaG = thermoDG !== null ? thermoDG : est.estimatedDG;
+    const estimated = thermoDG === null;
+
+    let riskLevel = 'Low';
+    if (deltaG <= -9) riskLevel = 'High';
+    else if (deltaG <= -5) riskLevel = 'Moderate';
+
+    const deltaGDisplay = estimated
+        ? `${est.estimatedRange[0]} to ${est.estimatedRange[1]} kcal/mol (estimated)`
+        : `${deltaG} kcal/mol`;
+
+    let explanation = `Cross-primer binding risk is ${riskLevel.toLowerCase()} based on ΔG ${deltaGDisplay}.`;
+    if (estimated) {
+        explanation += ` Estimate uses complementarity (max overlap ${est.bestRun} bp), GC-rich overlap ratio ${est.gcOverlapRatio}, and ${est.hasThreePrimePairing ? "observed" : "limited"} 3' end pairing.`;
+    } else if (deltaG <= -9) {
+        explanation += ` Primers are likely to bind each other strongly and can suppress target amplification.`;
+    } else if (deltaG <= -5) {
+        explanation += ` Primer-primer interaction may compete with template binding under some conditions.`;
+    } else {
+        explanation += ` Primer-primer interaction is unlikely to significantly affect amplification.`;
+    }
+
+    return {
+        deltaG,
+        deltaGDisplay,
+        riskLevel,
+        estimated,
+        estimatedRange: estimated ? est.estimatedRange : null,
+        complementarity: {
+            maxOverlapBp: est.bestRun,
+            gcRichOverlapRatio: est.gcOverlapRatio,
+            threePrimePairing: est.hasThreePrimePairing
+        },
+        explanation
+    };
 }
 
 /* ─── SECONDARY STRUCTURE ANALYSIS ─────────────────────────────────────── */

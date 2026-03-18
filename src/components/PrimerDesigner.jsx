@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { evaluatePrimerPair, calcSecondaryStructureScore, calcTmNN, calcGC, calc3PrimeDG, calcHairpinDG, calcSelfDimerDG, calcCrossDimerDG, revComp } from '../utils/primerEvalEngine';
+import { evaluatePrimerPair, calcSecondaryStructureScore, calcTmNN, calcGC, calc3PrimeDG, calcHairpinDG, calcSelfDimerDG, calcCrossDimerDG, assessCrossDimerInteraction, revComp } from '../utils/primerEvalEngine';
 
 /* ─── API CONFIG ─────────────────────────────────────────────────────────── */
 const API_URL = import.meta.env?.VITE_API_URL || 'https://dna-analyzer-1-ipxr.onrender.com';
@@ -152,6 +152,91 @@ function classifyScore(score) {
   return 'Poor';
 }
 
+function simulateMeltingCurveAnalysis(fwdTm, revTm, fwdGc, revGc, productLength, crossDimerDG = null) {
+  const validNum = v => typeof v === 'number' && !isNaN(v) && isFinite(v);
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+  const tmA = validNum(fwdTm) ? fwdTm : null;
+  const tmB = validNum(revTm) ? revTm : null;
+  const gcA = validNum(fwdGc) ? fwdGc : null;
+  const gcB = validNum(revGc) ? revGc : null;
+  const len = validNum(productLength) && productLength > 0 ? productLength : 250;
+
+  const avgTm = tmA != null && tmB != null ? (tmA + tmB) / 2 : (tmA ?? tmB ?? 60);
+  const avgGc = gcA != null && gcB != null ? (gcA + gcB) / 2 : (gcA ?? gcB ?? 50);
+  const tmDiff = tmA != null && tmB != null ? Math.abs(tmA - tmB) : 1.5;
+
+  const gcShift = (avgGc - 50) * 0.05;
+  const lenShift = Math.log10(Math.max(60, len) / 200) * 1.2;
+  const peakMeltingTemperature = parseFloat(clamp(avgTm + gcShift + lenShift, 50, 98).toFixed(1));
+
+  let curveType = 'Sharp';
+  if (tmDiff > 3 || avgGc < 35 || avgGc > 68 || len > 1400) curveType = 'Multiple Peaks';
+  else if (tmDiff > 1.8 || avgGc < 40 || avgGc > 62 || len > 800 || len < 90) curveType = 'Broad';
+
+  if (validNum(crossDimerDG) && crossDimerDG < -7) curveType = 'Multiple Peaks';
+  else if (validNum(crossDimerDG) && crossDimerDG < -5 && curveType === 'Sharp') curveType = 'Broad';
+
+  let interpretation = 'Sharp peak → high specificity';
+  if (curveType === 'Broad') interpretation = 'Broad peak → possible non-specific binding';
+  if (curveType === 'Multiple Peaks') interpretation = 'Multiple peaks → non-specific products or primer dimers';
+
+  let explanation = `Estimated peak melting temperature is ${peakMeltingTemperature}°C with a ${curveType.toLowerCase()} curve profile.`;
+  if (curveType === 'Sharp') {
+    explanation += ' This suggests specific target amplification and generally good PCR quality.';
+  } else if (curveType === 'Broad') {
+    explanation += ' This suggests possible off-target amplification; optimize annealing temperature or primer design.';
+  } else {
+    explanation += ' This suggests mixed products or dimer artifacts; redesign primers or increase stringency.';
+  }
+
+  return {
+    peakMeltingTemperature,
+    curveType,
+    interpretation,
+    summary: explanation,
+    tmDifferenceUsed: parseFloat(tmDiff.toFixed(1)),
+    gcUsed: parseFloat(avgGc.toFixed(1)),
+    estimated: !(tmA != null && tmB != null && gcA != null && gcB != null && validNum(productLength))
+  };
+ }
+
+function buildSpecificityAnalysis(score, maxRepeatHits = 0) {
+  const s = typeof score === 'number' && isFinite(score) ? Math.max(0, Math.min(100, score)) : 0;
+  const issues = [];
+  let interpretation = '';
+
+  if (s >= 80) {
+    interpretation = 'High specificity. Primer is likely to bind only the intended target sequence.';
+  } else if (s >= 60) {
+    interpretation = 'Moderate specificity. Minor off-target binding is possible under less stringent PCR conditions.';
+    issues.push('Off-target binding');
+  } else if (s >= 40) {
+    interpretation = 'Low specificity. Off-target binding is possible and primer sequence may not be sufficiently unique.';
+    issues.push('Off-target binding');
+    issues.push('Low sequence uniqueness');
+  } else {
+    interpretation = 'Poor specificity. High risk of non-specific amplification and unreliable target selectivity.';
+    issues.push('Off-target binding');
+    issues.push('Low sequence uniqueness');
+  }
+
+  if (maxRepeatHits > 5 || s < 60) {
+    issues.push('Repetitive regions');
+  }
+
+  const recommendation = s >= 80
+    ? 'Maintain current design, and confirm with gradient PCR. If optimization is needed, tune primer length by ±1-2 bp while preserving balanced GC.'
+    : 'Improve primer design by adjusting length (typically 18-25 bp), balancing GC content toward ~40-60%, and redesigning toward a more unique target region.';
+
+  return {
+    score: parseFloat(s.toFixed(1)),
+    interpretation,
+    possibleIssues: [...new Set(issues)],
+    recommendation
+  };
+}
+
 /* ─── MAIN PRIMER DESIGN ENGINE ──────────────────────────────────────────── */
 /* ─── CANDIDATE SCANNER ──────────────────────────────────────────────────────
    Scans the sequence with given thresholds and returns raw candidate lists.
@@ -253,6 +338,89 @@ function pickBorderlinePairs(fwds, revs, ampMin, ampMax, conditions, seq, appMod
   return pairs.slice(0, 3);
 }
 
+function buildFallbackEvaluation({ fwd, rev, cross_dimer_dg, tmDiff, autoRejected, safetyTriggers, hasThermoError }) {
+  const fwdStruct = calcSecondaryStructureScore(fwd.sequence, fwd.hairpin_dg, fwd.self_dimer_dg);
+  const revStruct = calcSecondaryStructureScore(rev.sequence, rev.hairpin_dg, rev.self_dimer_dg);
+  const structureScore = Math.round((fwdStruct.score + revStruct.score) / 2);
+  const threePrimeInterference =
+    fwdStruct.threePrimeInvolved || revStruct.threePrimeInvolved || fwdStruct.dimerThreePrime || revStruct.dimerThreePrime;
+
+  const meltQuality = (p) => {
+    if (p.hairpin_dg > -2.5 && p.self_dimer_dg > -4) return 'Sharp & Specific';
+    if (p.hairpin_dg > -4 && p.self_dimer_dg > -6) return 'Broad / Minor Shoulder';
+    return 'Non-specific / Multi-peak Risk';
+  };
+
+  const fwdMeltQ = meltQuality(fwd);
+  const revMeltQ = meltQuality(rev);
+  const asymmetricMelting = fwdMeltQ !== revMeltQ;
+
+  let penalty = 0;
+  penalty += Math.max(0, tmDiff - 1.5) * 9;
+  penalty += Math.max(0, Math.abs(cross_dimer_dg) - 4) * 5;
+  penalty += Math.max(0, Math.abs(Math.min(fwd.hairpin_dg, rev.hairpin_dg)) - 3) * 4;
+  penalty += Math.max(0, Math.abs(Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)) - 4) * 3;
+  if (threePrimeInterference) penalty += 10;
+  if (hasThermoError) penalty += 25;
+  if (autoRejected) penalty += 30;
+
+  const successProbability = Math.round(Math.max(0, Math.min(99, 92 - penalty)));
+
+  let riskTier = 'High Risk';
+  if (successProbability >= 80) riskTier = 'Low Risk';
+  else if (successProbability >= 65) riskTier = 'Moderate Risk';
+  else if (successProbability >= 50) riskTier = 'Elevated Risk';
+
+  let confidenceBand = 'High Risk (<50%)';
+  if (successProbability >= 85) confidenceBand = 'High Confidence (>=85%)';
+  else if (successProbability >= 70) confidenceBand = 'Moderate Confidence (70-84%)';
+  else if (successProbability >= 50) confidenceBand = 'Low Confidence (50-69%)';
+
+  const optimizationSuggestions = [];
+  if (tmDiff > 3) optimizationSuggestions.push('Run temperature-gradient PCR to optimize annealing and reduce mismatch risk.');
+  if (cross_dimer_dg < -5) optimizationSuggestions.push('Reduce primer concentration and use hot-start polymerase to mitigate cross-dimer formation.');
+  if (Math.min(fwd.hairpin_dg, rev.hairpin_dg) < -3) optimizationSuggestions.push('Shift one or both primers by 1-3 bases to reduce hairpin stability.');
+  if (threePrimeInterference) optimizationSuggestions.push("Avoid strong 3' complementarity by redesigning terminal bases.");
+
+  const meltCurve = simulateMeltingCurveAnalysis(
+    fwd.tm,
+    rev.tm,
+    fwd.gc_content,
+    rev.gc_content,
+    null,
+    cross_dimer_dg
+  );
+
+  return {
+    successProbability,
+    riskTier,
+    safetyTriggers,
+    safetyPassed: !autoRejected,
+    thermoStatus: hasThermoError ? 'FAILED' : 'VALID',
+    meltingCurve: {
+      fwdMeltQ,
+      revMeltQ,
+      summary: meltCurve.summary,
+      asymmetric: asymmetricMelting,
+      peakMeltingTemperature: meltCurve.peakMeltingTemperature,
+      curveType: meltCurve.curveType,
+      interpretation: meltCurve.interpretation,
+      estimated: true
+    },
+    structureScore,
+    structureInterpretation: structureScore >= 6
+      ? 'High interference risk from secondary structures.'
+      : structureScore >= 3
+        ? 'Moderate secondary structure presence.'
+        : 'Minimal secondary structure risk.',
+    threePrimeInterference,
+    fwdStructure: fwdStruct,
+    revStructure: revStruct,
+    confidenceBand,
+    optimizationSuggestions
+  };
+}
+
 /* ─── BUILD RESULT OBJECT ────────────────────────────────────────────────────
    Shared result builder for both strict and borderline paths.
    ─────────────────────────────────────────────────────────────────────────── */
@@ -264,13 +432,15 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   const fwdScore = isNaN(fwd.quality_score) || fwd.quality_score == null ? 0 : fwd.quality_score;
   const revScore = isNaN(rev.quality_score) || rev.quality_score == null ? 0 : rev.quality_score;
   const overallScore = Math.round((fwdScore + revScore) / 2);
+  const crossDimerAssessment = assessCrossDimerInteraction(fwd.sequence, rev.sequence, conditions);
+  const effectiveCrossDimerDG = (typeof cross_dimer_dg === 'number' && isFinite(cross_dimer_dg)) ? cross_dimer_dg : crossDimerAssessment.deltaG;
   const hpRisk = dg => dg > -2 ? 'low' : dg > -3 ? 'medium' : 'high';
 
   // Warnings — include relaxation info
   const warnings = [];
   if (tmDiff > 3) warnings.push({ urgency: 'high', text: `Tm difference ${tmDiff}°C exceeds 3°C — compatibility downgraded` });
   if (gcMax > 70) warnings.push({ urgency: 'high', text: `GC content ${gcMax}% exceeds 70% — HIGH RISK of secondary structures` });
-  if (cross_dimer_dg < -4) warnings.push({ urgency: 'medium', text: `Cross-dimer ΔG ${cross_dimer_dg} kcal/mol approaching threshold (limit −6)` });
+  if (effectiveCrossDimerDG < -4) warnings.push({ urgency: 'medium', text: `Cross-dimer ΔG ${crossDimerAssessment.deltaGDisplay} approaching threshold (limit −6)` });
   if (fwd.hairpin_dg < -3) warnings.push({ urgency: 'medium', text: `Forward hairpin ΔG ${fwd.hairpin_dg} kcal/mol — relaxed threshold applied` });
   if (rev.hairpin_dg < -3) warnings.push({ urgency: 'medium', text: `Reverse hairpin ΔG ${rev.hairpin_dg} kcal/mol — relaxed threshold applied` });
   const fwdRep = countRepeatHits(fwd.sequence, seq);
@@ -281,6 +451,14 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   // ─── EVALUATION ENGINE INTEGRATION ───────────────────────────────────────
   const evalResult = evaluatePrimerPair(fwd.sequence, rev.sequence, appModeKey || 'standard', seq, conditions, isHighSensitivity, isTouchdown);
   const ev = evalResult.error ? null : evalResult;
+  const meltCurve = simulateMeltingCurveAnalysis(
+    fwd.tm,
+    rev.tm,
+    fwd.gc_content,
+    rev.gc_content,
+    amp,
+    effectiveCrossDimerDG
+  );
 
   // ─── SAFETY GATE CHECK & THERMO ERRORS ────────────────────────────────────
   const safetyTriggers = [];
@@ -296,17 +474,18 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   if (rev.tm === 0) { safetyTriggers.push('Reverse Tm = 0°C (invalid)'); hasThermoError = true; }
   checkThermo(fwd.hairpin_dg, 'Forward Hairpin ΔG'); checkThermo(rev.hairpin_dg, 'Reverse Hairpin ΔG');
   checkThermo(fwd.self_dimer_dg, 'Forward Self-dimer ΔG'); checkThermo(rev.self_dimer_dg, 'Reverse Self-dimer ΔG');
-  checkThermo(cross_dimer_dg, 'Cross-dimer ΔG');
+  checkThermo(effectiveCrossDimerDG, 'Cross-dimer ΔG');
 
   if (tmDiff > 5) safetyTriggers.push(`Tm mismatch ${tmDiff}°C exceeds 5°C limit`);
   if (annealT < 50) safetyTriggers.push(`Annealing temperature ${annealT}°C below 50°C`);
   if (Math.min(fwd.self_dimer_dg, rev.self_dimer_dg) < -9) safetyTriggers.push(`Self-dimer ΔG ${Math.min(fwd.self_dimer_dg, rev.self_dimer_dg)} kcal/mol below -9 kcal/mol`);
-  if (cross_dimer_dg < -9) safetyTriggers.push(`Cross-dimer ΔG ${cross_dimer_dg} kcal/mol below -9 kcal/mol`);
+  if (effectiveCrossDimerDG < -9) safetyTriggers.push(`Cross-dimer ΔG ${crossDimerAssessment.deltaGDisplay} below -9 kcal/mol`);
   const worstHairpin = Math.min(fwd.hairpin_dg, rev.hairpin_dg);
   if (worstHairpin < -6) safetyTriggers.push(`Hairpin ΔG ${worstHairpin} kcal/mol below -6 kcal/mol`);
   if (relaxLevel >= 3) safetyTriggers.push(`Relaxation pass ${relaxLevel} reached`);
 
   const autoRejected = safetyTriggers.length > 0;
+  const fallbackEvaluation = buildFallbackEvaluation({ fwd, rev, cross_dimer_dg: effectiveCrossDimerDG, tmDiff, autoRejected, safetyTriggers, hasThermoError });
 
   // ─── CLASSIFICATION LOGIC ─────────────────────────────────────────────────
   let classification;
@@ -335,6 +514,7 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   }
 
   const specScore = parseFloat(Math.max(0, 100 - (fwdRep + revRep) * 5).toFixed(1));
+  const specificityAnalysis = buildSpecificityAnalysis(specScore, Math.max(fwdRep, revRep));
 
   const mkPrimer = (p, isRev) => ({
     sequence: p.sequence, length: p.length,
@@ -376,33 +556,52 @@ function buildResult(fwd, rev, amp, cross_dimer_dg, seq, mode, relaxLevel, isBor
   return {
     forward_primer: mkPrimer(fwd, false),
     reverse_primer: mkPrimer(rev, true),
-    cross_dimer_dg,
+    cross_dimer_dg: effectiveCrossDimerDG,
+    cross_dimer_display: crossDimerAssessment.deltaGDisplay,
     expected_product_size: amp,
     tm_difference: tmDiff,
     annealing_temperature: annealT,
     specificity_score: specScore,
+    specificity_analysis: specificityAnalysis,
     overall_score: overallScore,
     classification,
     autoRejected,
     warnings,
     isBorderline,
     relaxLevel,
-    dimer_analysis: { risk_level: cross_dimer_dg < -4 ? 'medium' : 'low' },
+    dimer_analysis: {
+      delta_g: effectiveCrossDimerDG,
+      delta_g_display: crossDimerAssessment.deltaGDisplay,
+      risk_level: crossDimerAssessment.riskLevel.toLowerCase(),
+      estimated: crossDimerAssessment.estimated,
+      estimated_range: crossDimerAssessment.estimatedRange,
+      complementarity: crossDimerAssessment.complementarity,
+      explanation: crossDimerAssessment.explanation
+    },
     // ─── EVALUATION ENGINE DATA ───
     evaluation: {
-      successProbability: ev ? ev.successProbability : 50,
-      riskTier: ev ? ev.riskTier : 'High',
-      safetyTriggers: ev ? ev.triggers : safetyTriggers,
+      successProbability: ev ? ev.successProbability : fallbackEvaluation.successProbability,
+      riskTier: ev ? ev.riskTier : fallbackEvaluation.riskTier,
+      safetyTriggers: ev ? ev.triggers : fallbackEvaluation.safetyTriggers,
       safetyPassed: !autoRejected,
-      thermoStatus: ev ? ev.thermoStatus : 'VALID',
-      meltingCurve: ev ? { fwdMeltQ: ev.meltingCurve.fwdMeltQuality, revMeltQ: ev.meltingCurve.revMeltQuality, summary: ev.meltingCurve.overallMeltQuality, asymmetric: ev.meltingCurve.asymmetricMelting } : {},
-      structureScore: ev ? ev.structureScore : 10,
-      structureInterpretation: ev ? ev.structureInterpretation : 'Unknown risk',
-      threePrimeInterference: ev ? ev.threePrimeInterference : true,
-      fwdStructure: ev ? ev.fwdStructure : null,
-      revStructure: ev ? ev.revStructure : null,
-      confidenceBand: ev ? ev.confidenceBand : 'High Risk (<50%)',
-      optimizationSuggestions: ev ? ev.optimizationSuggestions : [],
+      thermoStatus: ev ? ev.thermoStatus : fallbackEvaluation.thermoStatus,
+      meltingCurve: {
+        fwdMeltQ: ev ? ev.meltingCurve.fwdMeltQuality : fallbackEvaluation.meltingCurve.fwdMeltQ,
+        revMeltQ: ev ? ev.meltingCurve.revMeltQuality : fallbackEvaluation.meltingCurve.revMeltQ,
+        summary: meltCurve.summary,
+        asymmetric: ev ? ev.meltingCurve.asymmetricMelting : fallbackEvaluation.meltingCurve.asymmetric,
+        peakMeltingTemperature: meltCurve.peakMeltingTemperature,
+        curveType: meltCurve.curveType,
+        interpretation: meltCurve.interpretation,
+        estimated: meltCurve.estimated
+      },
+      structureScore: ev ? ev.structureScore : fallbackEvaluation.structureScore,
+      structureInterpretation: ev ? ev.structureInterpretation : fallbackEvaluation.structureInterpretation,
+      threePrimeInterference: ev ? ev.threePrimeInterference : fallbackEvaluation.threePrimeInterference,
+      fwdStructure: ev ? ev.fwdStructure : fallbackEvaluation.fwdStructure,
+      revStructure: ev ? ev.revStructure : fallbackEvaluation.revStructure,
+      confidenceBand: ev ? ev.confidenceBand : fallbackEvaluation.confidenceBand,
+      optimizationSuggestions: ev ? ev.optimizationSuggestions : fallbackEvaluation.optimizationSuggestions,
     },
     pcr_protocol: {
       annealing_temp: annealT,
@@ -660,7 +859,10 @@ export default function PrimerDesigner() {
     c += `Tm Difference: ${primers.tm_difference} \u00b0C\n`;
     c += `Annealing Temperature: ${primers.annealing_temperature} \u00b0C\n`;
     c += `Specificity Score: ${primers.specificity_score}/100\n`;
-    c += `Cross-Dimer \u0394G: ${primers.cross_dimer_dg} kcal/mol\n\n`;
+    c += `Cross-Dimer \u0394G: ${primers.cross_dimer_display || `${primers.cross_dimer_dg} kcal/mol`}\n`;
+    c += `Cross-Dimer Risk Level: ${primers.dimer_analysis?.risk_level || 'low'}\n`;
+    if (primers.dimer_analysis?.explanation) c += `Cross-Dimer Explanation: ${primers.dimer_analysis.explanation}\n`;
+    c += `\n`;
     c += `EXPERIMENTAL CONDITIONS:\n`;
     c += `  Na+: ${primers._meta?.conditions_used?.na || naConc} mM\n`;
     c += `  Mg2+: ${primers._meta?.conditions_used?.mg || mgConc} mM\n`;
@@ -682,7 +884,26 @@ export default function PrimerDesigner() {
         primers.evaluation.optimizationSuggestions.forEach(s => { c += `  - ${s}\n`; });
         c += '\n';
       }
-      c += `MELTING CURVE: ${primers.evaluation.meltingCurve.summary}\n`;
+        if (primers.specificity_analysis) {
+          c += `Specificity Analysis:\n`;
+          c += `Score: ${primers.specificity_analysis.score}/100\n\n`;
+          c += `Interpretation:\n`;
+          c += `${primers.specificity_analysis.interpretation}\n\n`;
+          c += `Possible Issues:\n`;
+          if (primers.specificity_analysis.possibleIssues.length > 0) {
+            primers.specificity_analysis.possibleIssues.forEach(i => { c += `- ${i}\n`; });
+          } else {
+            c += `- None significant under current constraints\n`;
+          }
+          c += `\nRecommendation:\n`;
+          c += `- ${primers.specificity_analysis.recommendation}\n\n`;
+        }
+      c += `Melting Curve Summary:\n`;
+      c += `- Peak Melting Temperature: ${primers.evaluation.meltingCurve.peakMeltingTemperature}°C\n`;
+      c += `- Curve Type: ${primers.evaluation.meltingCurve.curveType}\n`;
+      c += `Interpretation:\n`;
+      c += `- ${primers.evaluation.meltingCurve.interpretation}\n`;
+      c += `- PCR Quality Note: ${primers.evaluation.meltingCurve.summary}\n`;
       c += `STRUCTURE SCORE: ${primers.evaluation.structureScore}/10 - ${primers.evaluation.structureInterpretation}\n\n`;
     }
     if (primers.warnings?.length) {
@@ -753,7 +974,9 @@ export default function PrimerDesigner() {
       <p><b>Classification:</b> ${primers.classification}${!isRejected ? ` (${primers.overall_score}/100)` : ''}</p>
       <p><b>Product Size:</b> ${primers.expected_product_size} bp</p>
       <p><b>Tm Difference:</b> ${primers.tm_difference} °C</p>
-      <p><b>Cross-Dimer ΔG:</b> ${primers.cross_dimer_dg} kcal/mol</p>
+      <p><b>Cross-Dimer ΔG:</b> ${primers.cross_dimer_display || `${primers.cross_dimer_dg} kcal/mol`}</p>
+      <p><b>Cross-Dimer Risk Level:</b> ${primers.dimer_analysis?.risk_level || 'low'}</p>
+      <p><b>Cross-Dimer Explanation:</b> ${primers.dimer_analysis?.explanation || 'Primer-primer interaction appears limited under current constraints.'}</p>
       <p><b>Generated:</b> ${new Date().toLocaleString()}</p>
     </div>
     <div class="box" style="margin-top: 0;">
@@ -771,9 +994,19 @@ export default function PrimerDesigner() {
         <tr><td>PCR Success Probability</td><td>${ev.successProbability}%</td></tr>
         <tr><td>Risk Tier</td><td>${ev.riskTier}</td></tr>
         <tr><td>Safety Gates</td><td>${ev.safetyPassed ? 'All Passed' : 'FAILED'}</td></tr>
-        <tr><td>Melting Profile</td><td>${ev.meltingCurve.summary}</td></tr>
+        <tr><td>Peak Melting Temperature</td><td>${ev.meltingCurve.peakMeltingTemperature}°C</td></tr>
+        <tr><td>Curve Type</td><td>${ev.meltingCurve.curveType}</td></tr>
+        <tr><td>Melting Interpretation</td><td>${ev.meltingCurve.interpretation}</td></tr>
+        <tr><td>PCR Quality Note</td><td>${ev.meltingCurve.summary}</td></tr>
         <tr><td>Structure Score</td><td>${ev.structureScore}/10 — ${ev.structureInterpretation}</td></tr>
         </table></div>`;
+      if (primers.specificity_analysis) {
+        h += `<div class="box"><h2>Specificity Analysis</h2>
+          <p><b>Score:</b> ${primers.specificity_analysis.score}/100</p>
+          <p><b>Interpretation:</b> ${primers.specificity_analysis.interpretation}</p>
+          <p><b>Possible Issues:</b> ${primers.specificity_analysis.possibleIssues.length ? primers.specificity_analysis.possibleIssues.join(', ') : 'None significant under current constraints'}</p>
+          <p><b>Recommendation:</b> ${primers.specificity_analysis.recommendation}</p></div>`;
+      }
       if (ev.safetyTriggers.length > 0) {
         h += `<h2 style="color:#dc2626">Safety Gate Triggers</h2>`;
         ev.safetyTriggers.forEach(t => { h += `<div class="trigger">${t}</div>`; });
@@ -1490,7 +1723,11 @@ export default function PrimerDesigner() {
                   l: 'Compatibility', v: primers.tm_difference <= 2 ? 'Excellent' : primers.tm_difference <= 3 ? 'Acceptable' : 'Poor',
                   c: primers.tm_difference <= 2 ? '#00FFC6' : primers.tm_difference <= 3 ? '#F59E0B' : '#EF4444'
                 },
-                { l: 'Cross-Dimer ΔG', v: `${primers.cross_dimer_dg} kcal/mol`, c: primers.cross_dimer_dg > -3 ? '#00FFC6' : primers.cross_dimer_dg > -5 ? '#F59E0B' : '#EF4444' }
+                {
+                  l: 'Cross-Dimer ΔG',
+                  v: primers.cross_dimer_display || `${primers.cross_dimer_dg} kcal/mol`,
+                  c: primers.dimer_analysis?.risk_level === 'high' ? '#EF4444' : primers.dimer_analysis?.risk_level === 'moderate' ? '#F59E0B' : '#00FFC6'
+                }
               ].map((s, i) => (
                 <div key={i} className="stat-b">
                   <div className="stat-v" style={{ color: s.c, fontSize: s.v.length > 8 ? '1.05rem' : '1.42rem' }}>{s.v}</div>
@@ -1498,6 +1735,56 @@ export default function PrimerDesigner() {
                 </div>
               ))}
             </div>
+
+            {primers.evaluation?.meltingCurve && (
+              <div className="pc" style={{ marginBottom: '1.1rem', background: '#0a0c10', borderColor: '#1a1d26' }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.65rem' }}>
+                  Melting Curve Summary
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.55rem', marginBottom: '0.55rem' }}>
+                  <div className="stat-b">
+                    <div className="stat-v" style={{ color: '#60A5FA' }}>{primers.evaluation.meltingCurve.peakMeltingTemperature}°C</div>
+                    <div className="stat-l">Peak Melting Temperature</div>
+                  </div>
+                  <div className="stat-b">
+                    <div className="stat-v" style={{ fontSize: '1.05rem', color: primers.evaluation.meltingCurve.curveType === 'Sharp' ? '#00FFC6' : primers.evaluation.meltingCurve.curveType === 'Broad' ? '#F59E0B' : '#EF4444' }}>
+                      {primers.evaluation.meltingCurve.curveType}
+                    </div>
+                    <div className="stat-l">Curve Type</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: '0.88rem', color: '#c8cad4', lineHeight: 1.5, marginBottom: '0.35rem' }}>
+                  {primers.evaluation.meltingCurve.interpretation}
+                </div>
+                <div style={{ fontSize: '0.84rem', color: '#8a8f9e', lineHeight: 1.55 }}>
+                  {primers.evaluation.meltingCurve.summary}
+                  {primers.evaluation.meltingCurve.estimated ? ' (Estimated from available Tm and GC data.)' : ''}
+                </div>
+              </div>
+            )}
+
+            {primers.specificity_analysis && (
+              <div className="pc" style={{ marginBottom: '1.1rem', background: '#0a0c10', borderColor: '#1a1d26' }}>
+                <div style={{ fontSize: '0.86rem', fontWeight: 700, color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.65rem' }}>
+                  Specificity Analysis
+                </div>
+                <div style={{ fontSize: '1.2rem', fontWeight: 700, color: primers.specificity_analysis.score >= 80 ? '#00FFC6' : primers.specificity_analysis.score >= 60 ? '#F59E0B' : '#EF4444', marginBottom: '0.45rem' }}>
+                  Score: {primers.specificity_analysis.score}/100
+                </div>
+                <div style={{ fontSize: '0.9rem', color: '#c8cad4', lineHeight: 1.5, marginBottom: '0.45rem' }}>
+                  {primers.specificity_analysis.interpretation}
+                </div>
+                <div style={{ fontSize: '0.84rem', color: '#8a8f9e', marginBottom: '0.35rem' }}>
+                  Possible Issues:
+                </div>
+                <div style={{ fontSize: '0.84rem', color: '#8a8f9e', lineHeight: 1.45, marginBottom: '0.45rem' }}>
+                  {primers.specificity_analysis.possibleIssues.length > 0 ? primers.specificity_analysis.possibleIssues.map((x, idx) => <div key={idx}>- {x}</div>) : <div>- None significant under current constraints</div>}
+                </div>
+                <div style={{ fontSize: '0.84rem', color: '#8a8f9e', lineHeight: 1.5 }}>
+                  <strong style={{ color: '#c8cad4' }}>Recommendation:</strong> {primers.specificity_analysis.recommendation}
+                </div>
+              </div>
+            )}
 
             {/* ═══ EVALUATION ENGINE RESULTS ═══ */}
             {primers.evaluation && primers.evaluation.thermoStatus === 'FAILED' && (
@@ -1517,13 +1804,8 @@ export default function PrimerDesigner() {
                 </div>
 
                 <div style={{ marginBottom: '1rem' }}>
-                  <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Melting Behavior</div>
-                  <div style={{ color: '#8a8f9e' }}>Unavailable</div>
-                </div>
-
-                <div style={{ marginBottom: '1rem' }}>
                   <div style={{ fontSize: '0.78rem', color: '#6b7080', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.2rem' }}>Secondary Structure</div>
-                  <div style={{ color: '#8a8f9e' }}>Unavailable</div>
+                  <div style={{ color: '#8a8f9e' }}>{primers.evaluation?.structureInterpretation || 'Estimated from primer thermodynamics.'}</div>
                 </div>
 
                 <div>
@@ -1578,10 +1860,17 @@ export default function PrimerDesigner() {
                     <div style={{ background: '#141720', padding: '0.85rem', borderRadius: 8, border: '1px solid #24272f' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
                         <span style={{ fontSize: '0.8rem', color: '#8a8f9e', fontWeight: 600 }}>Cross-Dimer Risk</span>
-                        <span style={{ fontSize: '0.8rem', color: primers.cross_dimer_dg > -5 ? '#00FFC6' : primers.cross_dimer_dg > -7 ? '#F59E0B' : '#EF4444', fontWeight: 700 }}>{primers.cross_dimer_dg} kcal</span>
+                        <span style={{ fontSize: '0.8rem', color: primers.dimer_analysis?.risk_level === 'high' ? '#EF4444' : primers.dimer_analysis?.risk_level === 'moderate' ? '#F59E0B' : '#00FFC6', fontWeight: 700 }}>
+                          {primers.cross_dimer_display || `${primers.cross_dimer_dg} kcal/mol`}
+                        </span>
                       </div>
                       <div style={{ height: 6, background: '#1e2130', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', width: `${Math.max(5, 100 - (Math.abs(primers.cross_dimer_dg) * 10))}%`, background: primers.cross_dimer_dg > -5 ? '#00FFC6' : primers.cross_dimer_dg > -7 ? '#F59E0B' : '#EF4444', transition: 'width 1s ease' }}></div>
+                        <div style={{
+                          height: '100%',
+                          width: `${Math.max(5, 100 - (Math.abs(primers.dimer_analysis?.delta_g ?? primers.cross_dimer_dg) * 10))}%`,
+                          background: primers.dimer_analysis?.risk_level === 'high' ? '#EF4444' : primers.dimer_analysis?.risk_level === 'moderate' ? '#F59E0B' : '#00FFC6',
+                          transition: 'width 1s ease'
+                        }}></div>
                       </div>
                     </div>
 
@@ -1626,25 +1915,27 @@ export default function PrimerDesigner() {
                 )}
 
                 {/* Melting Behavior */}
-                <div className="pc">
-                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Melting Curve Simulation</div>
-                  <p style={{ fontSize: '0.92rem', color: '#8a8f9e', lineHeight: 1.75, margin: '0 0 0.65rem' }}>{primers.evaluation.meltingCurve.summary}</p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.45rem' }}>
-                    <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Forward</span>
-                      <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.fwdMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.fwdMeltQ}</span>
-                    </div>
-                    <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Reverse</span>
-                      <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.revMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.revMeltQ}</span>
-                    </div>
-                    {primers.evaluation.meltingCurve.asymmetric && (
-                      <div style={{ background: 'rgba(245,158,11,0.08)', borderRadius: 7, padding: '0.5rem 0.65rem', borderLeft: '3px solid #F59E0B' }}>
-                        <span style={{ fontSize: '0.82rem', color: '#F59E0B', fontWeight: 600 }}>Asymmetric melting detected</span>
+                {typeof meltingCurveData !== 'undefined' && meltingCurveData !== undefined && (
+                  <div className="pc">
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#00FFC6', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '0.55rem' }}>Melting Curve Simulation</div>
+                    <p style={{ fontSize: '0.92rem', color: '#8a8f9e', lineHeight: 1.75, margin: '0 0 0.65rem' }}>{primers.evaluation.meltingCurve.summary}</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '0.45rem' }}>
+                      <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Forward</span>
+                        <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.fwdMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.fwdMeltQ}</span>
                       </div>
-                    )}
+                      <div style={{ background: '#0f1117', borderRadius: 7, padding: '0.5rem 0.65rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.8rem', color: '#6b7080' }}>Reverse</span>
+                        <span style={{ fontSize: '0.82rem', color: primers.evaluation.meltingCurve.revMeltQ === 'Sharp & Specific' ? '#00FFC6' : '#F59E0B', fontWeight: 600 }}>{primers.evaluation.meltingCurve.revMeltQ}</span>
+                      </div>
+                      {primers.evaluation.meltingCurve.asymmetric && (
+                        <div style={{ background: 'rgba(245,158,11,0.08)', borderRadius: 7, padding: '0.5rem 0.65rem', borderLeft: '3px solid #F59E0B' }}>
+                          <span style={{ fontSize: '0.82rem', color: '#F59E0B', fontWeight: 600 }}>Asymmetric melting detected</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Structural Integrity */}
                 <div className="pc">
@@ -1669,7 +1960,7 @@ export default function PrimerDesigner() {
             {!primers.autoRejected && (
               <div style={{ marginBottom: '1.1rem' }}>
                 <button className="btn-ai" onClick={handleAI} disabled={loadingAI}>
-                  {loadingAI ? <><span className="spin"></span> Generating AI Analysis…</> : <>Get AI Explanation</>}
+                  {loadingAI ? <><span className="spin"></span> Generating Detailed AI Analysis…</> : <>Get Detailed AI Analysis</>}
                 </button>
               </div>
             )}

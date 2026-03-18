@@ -2320,7 +2320,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: '#0c0e14', color: '#e2e4e9', fontFamily: '"Sora",sans-serif', fontSize: '1.05em' }}>
+    <div data-tour="mutation-panel" style={{ minHeight: '100vh', background: '#0c0e14', color: '#e2e4e9', fontFamily: '"Sora",sans-serif', fontSize: '1.05em' }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
         *{ box-sizing:border-box; margin:0; padding:0; }
@@ -2709,7 +2709,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
 
           {/* MUTATION OVERVIEW TABLE */}
           {annotatedMutations.length > 0 && (
-            <div className="pc">
+            <div className="pc" data-tour="mutation-details">
               <div style={{ display: 'flex', alignItems: 'center', gap: '.55rem', marginBottom: '.8rem' }}>
                 <span style={{ fontSize: '1rem', fontWeight: 600, color: '#c8cad4' }}>Mutation Overview Table</span>
                 <span style={{ background: 'rgba(16,185,129,.18)', color: '#10B981', fontSize: '.8rem', fontWeight: 600, padding: '.18rem .48rem', borderRadius: 8 }}>{annotatedMutations.length} annotated</span>
@@ -2743,7 +2743,7 @@ Write in clear scientific prose. No emojis. No bullet lists — full paragraphs 
             const mutPins = annotatedMutations.map(am => ({ pos: am.positions.aaPosition, hgvs: am.hgvs, color: am.mutation.is_frameshift ? '#EF4444' : am.mutation.mutation_class === 'Missense' ? '#FBBF24' : am.mutation.mutation_class === 'Nonsense' ? '#EF4444' : '#10B981' }));
 
             return (
-              <div className="pc" style={{ borderColor: 'rgba(99,102,241,.35)', background: 'rgba(99,102,241,.04)' }}>
+              <div className="pc" data-tour="mutation-structure" style={{ borderColor: 'rgba(99,102,241,.35)', background: 'rgba(99,102,241,.04)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '.5rem' }}>
 

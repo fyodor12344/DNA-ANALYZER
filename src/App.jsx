@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { summary } from "./utils/dnaUtils";
 import "./App.css";
 
@@ -31,6 +31,8 @@ const SAMPLE_SEQUENCES = {
   }
 };
 
+const ONBOARDING_PREF_KEY = 'dna_analyzer_onboarding_opt_out';
+
 function App() {
   // Input state
   const [dna, setDna] = useState("");
@@ -41,6 +43,85 @@ function App() {
   const [showHelp, setShowHelp] = useState(false);
   const darkMode = true; // Always dark mode
   const [showSuccessMessage, setShowSuccessMessage] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const [tourTargetRect, setTourTargetRect] = useState(null);
+  const [isTourMobile, setIsTourMobile] = useState(false);
+  const [tourOptOut, setTourOptOut] = useState(() => {
+    try {
+      return localStorage.getItem(ONBOARDING_PREF_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [didAutoLaunchTour, setDidAutoLaunchTour] = useState(false);
+  const highlightedElRef = useRef(null);
+
+  const onboardingSteps = [
+    {
+      title: '👋 Welcome!',
+      lines: [
+        'Paste your DNA sequence here or click "Load Sample" to try instantly.'
+      ],
+      selectors: ['[data-tour="dna-input"]']
+    },
+    {
+      title: '⚡ Run Analysis',
+      lines: [
+        'Click here to analyze your sequence and generate results across all tools.'
+      ],
+      selectors: ['[data-tour="analyze-btn"]']
+    },
+    {
+      title: '📊 Overview',
+      lines: [
+        'Start here to see basic stats like sequence length, GC content, and melting temperature.'
+      ],
+      selectors: ['[data-tour="overview-tab"]'],
+      setTab: 'overview'
+    },
+    {
+      title: '📈 Quick Insights',
+      lines: [
+        'These cards give you a fast summary of your DNA before deeper analysis.'
+      ],
+      selectors: ['[data-tour="overview-stats"]', '[data-tour="quick-insights"]', '.results-section'],
+      setTab: 'overview'
+    },
+    {
+      title: '🧬 Mutation Analysis',
+      lines: [
+        'This section shows changes in your DNA sequence that may affect function or structure.'
+      ],
+      selectors: ['[data-tour="mutations-tab"]'],
+      setTab: 'mutations'
+    },
+    {
+      title: '🔍 Detailed View',
+      lines: [
+        'Explore mutations by position, type, and impact in this detailed panel.',
+        'You may also see 2D or 3D views that explain structural effects.'
+      ],
+      selectors: ['[data-tour="mutation-details"]', '[data-tour="mutation-panel"]'],
+      setTab: 'mutations'
+    },
+    {
+      title: '🧪 Structural Insight',
+      lines: [
+        'Visualize mutation effects in 2D or 3D to understand possible shape and behavior changes.'
+      ],
+      selectors: ['[data-tour="mutation-structure"]', '[data-tour="mutation-panel"]'],
+      setTab: 'mutations'
+    },
+    {
+      title: '🚀 Try It Yourself',
+      lines: [
+        'All tools follow one workflow: Load sequence → Analyze → Explore → Download or get AI insights.',
+        'Start with "Load Sample" and explore freely.'
+      ],
+      selectors: ['[data-tour="load-sample"]']
+    }
+  ];
 
   // ============================================================
   // CENTRALIZED STATE MANAGEMENT FOR ALL TOOL RESULTS
@@ -65,6 +146,97 @@ function App() {
       return () => document.removeEventListener('click', handleClickOutside);
     }
   }, [showSampleMenu]);
+
+  useEffect(() => {
+    const onResize = () => setIsTourMobile(window.innerWidth < 700);
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  useEffect(() => {
+    if (tourOptOut || showOnboarding || didAutoLaunchTour) return;
+    const timer = setTimeout(() => {
+      setTourStep(0);
+      setShowOnboarding(true);
+      setDidAutoLaunchTour(true);
+    }, 1100);
+    return () => clearTimeout(timer);
+  }, [tourOptOut, showOnboarding, didAutoLaunchTour]);
+
+  useEffect(() => {
+    if (!showOnboarding) {
+      if (highlightedElRef.current) {
+        highlightedElRef.current.classList.remove('tour-highlighted');
+        highlightedElRef.current = null;
+      }
+      setTourTargetRect(null);
+      return;
+    }
+
+    const step = onboardingSteps[tourStep];
+    if (!step) return;
+
+    if (step.setTab && activeTab !== step.setTab) {
+      setActiveTab(step.setTab);
+    }
+
+    const timer = setTimeout(() => {
+      const target = step.selectors
+        .map((s) => document.querySelector(s))
+        .find(Boolean);
+
+      if (highlightedElRef.current && highlightedElRef.current !== target) {
+        highlightedElRef.current.classList.remove('tour-highlighted');
+        highlightedElRef.current = null;
+      }
+
+      if (target) {
+        target.classList.add('tour-highlighted');
+        highlightedElRef.current = target;
+        target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        const r = target.getBoundingClientRect();
+        setTourTargetRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+      } else {
+        setTourTargetRect(null);
+      }
+    }, 180);
+
+    return () => clearTimeout(timer);
+  }, [showOnboarding, tourStep, activeTab]);
+
+  const startOnboarding = () => {
+    setShowHelp(false);
+    setDidAutoLaunchTour(true);
+    setTourStep(0);
+    setShowOnboarding(true);
+  };
+
+  const closeOnboarding = () => {
+    setShowOnboarding(false);
+  };
+
+  const toggleTourOptOut = () => {
+    const next = !tourOptOut;
+    setTourOptOut(next);
+    try {
+      localStorage.setItem(ONBOARDING_PREF_KEY, next ? '1' : '0');
+    } catch {
+      // no-op if storage is unavailable
+    }
+  };
+
+  const nextTourStep = () => {
+    if (tourStep >= onboardingSteps.length - 1) {
+      closeOnboarding();
+      return;
+    }
+    setTourStep((s) => s + 1);
+  };
+
+  const prevTourStep = () => {
+    setTourStep((s) => Math.max(0, s - 1));
+  };
 
   const handleAnalyze = () => {
     setError("");
@@ -467,6 +639,80 @@ function App() {
         .dark-mode .help-content h3 {
           color: #00BFA5;
         }
+
+        .tour-highlighted {
+          position: relative;
+          z-index: 1202 !important;
+          border-radius: 12px !important;
+          box-shadow: 0 0 0 3px rgba(0, 191, 165, 0.95), 0 0 0 6px rgba(0, 191, 165, 0.2), 0 0 18px rgba(0, 191, 165, 0.45) !important;
+          transition: box-shadow 0.25s ease;
+        }
+
+        .onboarding-overlay {
+          position: fixed;
+          inset: 0;
+          z-index: 1200;
+          background: rgba(2, 6, 23, 0.72);
+          backdrop-filter: blur(2px);
+        }
+
+        .onboarding-panel {
+          position: fixed;
+          z-index: 1203;
+          width: min(360px, calc(100vw - 1.2rem));
+          background: rgba(15, 23, 42, 0.96);
+          border: 1px solid rgba(0, 191, 165, 0.35);
+          border-radius: 12px;
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+          padding: 0.95rem;
+          font-family: 'Inter', sans-serif;
+        }
+
+        .onboarding-title {
+          font-family: 'Montserrat', sans-serif;
+          font-weight: 700;
+          font-size: 1rem;
+          color: #e2f7f2;
+          margin-bottom: 0.45rem;
+        }
+
+        .onboarding-line {
+          color: #cbd5e1;
+          font-size: 0.9rem;
+          line-height: 1.5;
+          margin: 0;
+        }
+
+        .onboarding-footer {
+          margin-top: 0.8rem;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.6rem;
+        }
+
+        .onboarding-nav {
+          display: flex;
+          align-items: center;
+          gap: 0.4rem;
+        }
+
+        .onboarding-btn {
+          border: 1px solid rgba(148, 163, 184, 0.25);
+          background: rgba(15, 23, 42, 0.8);
+          color: #e2e8f0;
+          border-radius: 7px;
+          padding: 0.45rem 0.75rem;
+          font-size: 0.82rem;
+          font-weight: 600;
+          cursor: pointer;
+        }
+
+        .onboarding-btn.primary {
+          border-color: rgba(0, 191, 165, 0.45);
+          background: linear-gradient(135deg, #00A389, #00BFA5);
+          color: #fff;
+        }
         
         .dark-mode .help-content ul {
           color: #cbd5e1;
@@ -500,6 +746,14 @@ function App() {
             padding: 1.5rem;
             max-width: 95%;
           }
+
+          .onboarding-panel {
+            width: calc(100vw - 1rem);
+            left: 0.5rem !important;
+            right: 0.5rem !important;
+            top: auto !important;
+            bottom: 0.7rem !important;
+          }
         }
       `}</style>
 
@@ -515,6 +769,13 @@ function App() {
               </p>
             </div>
             <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+              <button
+                onClick={startOnboarding}
+                className="quick-action-btn"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                Start Tour
+              </button>
               <button
                 onClick={() => setShowHelp(true)}
                 className="quick-action-btn"
@@ -538,6 +799,7 @@ function App() {
                   setShowSampleMenu(!showSampleMenu);
                 }}
                 className="quick-action-btn"
+                data-tour="load-sample"
               >
                 Load Sample
               </button>
@@ -572,13 +834,14 @@ function App() {
             onChange={(e) => setDna(e.target.value)}
             placeholder="Paste your DNA sequence here (A, T, G, C)..."
             className="dna-input"
+            data-tour="dna-input"
             rows={6}
             disabled={loading}
             style={{ fontFamily: 'monospace' }}
           />
 
           {dna && (
-            <div className="stats-bar slide-down">
+            <div className="stats-bar slide-down" data-tour="quick-insights">
               <div className="stat-item">
                 <strong>Length:</strong> {stats.length} bp
               </div>
@@ -601,6 +864,7 @@ function App() {
             <button
               onClick={handleAnalyze}
               className="analyze-btn"
+              data-tour="analyze-btn"
               disabled={loading}
               style={{ flex: 1, minWidth: '200px' }}
             >
@@ -655,6 +919,7 @@ function App() {
           <div className="tab-nav">
             <button
               onClick={() => setActiveTab("overview")}
+              data-tour="overview-tab"
               className={`tab-btn ${activeTab === "overview" ? "active" : ""}`}
               disabled={!overviewResult}
             >
@@ -662,6 +927,7 @@ function App() {
             </button>
             <button
               onClick={() => setActiveTab("mutations")}
+              data-tour="mutations-tab"
               className={`tab-btn ${activeTab === "mutations" ? "active" : ""}`}
             >
               Mutations
@@ -692,7 +958,7 @@ function App() {
           {/* All tool components receive their result state and setter */}
           {/* as props. This ensures results persist across tab switches. */}
           {/* ============================================================ */}
-          <div className="tab-content">
+          <div className="tab-content" data-tour="tab-content">
             {activeTab === "overview" && overviewResult && (
               <OverviewTab
                 result={overviewResult}
@@ -812,6 +1078,24 @@ function App() {
               </div>
 
               <button
+                onClick={startOnboarding}
+                style={{
+                  width: '100%',
+                  marginTop: '0.75rem',
+                  padding: '0.75rem',
+                  background: 'linear-gradient(135deg, #0EA5E9, #0284C7)',
+                  border: 'none',
+                  borderRadius: '8px',
+                  color: 'white',
+                  fontWeight: 600,
+                  fontFamily: 'Inter, sans-serif',
+                  cursor: 'pointer'
+                }}
+              >
+                Start Interactive Tour
+              </button>
+
+              <button
                 onClick={() => setShowHelp(false)}
                 style={{
                   width: '100%',
@@ -846,6 +1130,55 @@ function App() {
           </div>
         </footer>
       </div>
+
+      {showOnboarding && (
+        <>
+          <div className="onboarding-overlay" onClick={closeOnboarding}></div>
+          <div
+            className="onboarding-panel"
+            style={(() => {
+              const defaultTop = isTourMobile ? undefined : 84;
+              if (!tourTargetRect || isTourMobile) {
+                return isTourMobile ? { left: '0.5rem', right: '0.5rem', bottom: '0.7rem' } : { top: defaultTop, right: 20 };
+              }
+              const panelWidth = 360;
+              const spaceBelow = window.innerHeight - (tourTargetRect.top + tourTargetRect.height);
+              const top = spaceBelow > 240
+                ? Math.min(window.innerHeight - 260, tourTargetRect.top + tourTargetRect.height + 12)
+                : Math.max(12, tourTargetRect.top - 230);
+              const centeredLeft = tourTargetRect.left + (tourTargetRect.width / 2) - (panelWidth / 2);
+              const left = Math.max(12, Math.min(window.innerWidth - panelWidth - 12, centeredLeft));
+              return { top, left };
+            })()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="onboarding-title">{onboardingSteps[tourStep].title}</div>
+            {onboardingSteps[tourStep].lines.map((line, idx) => (
+              <p key={idx} className="onboarding-line">{line}</p>
+            ))}
+            <div style={{ marginTop: '0.7rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <input
+                id="tour-optout"
+                type="checkbox"
+                checked={tourOptOut}
+                onChange={toggleTourOptOut}
+                style={{ accentColor: '#00BFA5', width: 14, height: 14 }}
+              />
+              <label htmlFor="tour-optout" style={{ fontSize: '0.78rem', color: '#94a3b8', cursor: 'pointer' }}>
+                Do not auto-show this tour again
+              </label>
+            </div>
+            <div className="onboarding-footer">
+              <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Step {tourStep + 1}/{onboardingSteps.length}</span>
+              <div className="onboarding-nav">
+                <button className="onboarding-btn" onClick={closeOnboarding}>Close</button>
+                {tourStep > 0 && <button className="onboarding-btn" onClick={prevTourStep}>Back</button>}
+                <button className="onboarding-btn primary" onClick={nextTourStep}>{tourStep === onboardingSteps.length - 1 ? 'Finish' : 'Next'}</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

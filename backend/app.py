@@ -335,12 +335,27 @@ def primers():
             primer_length=primer_length,
             product_size_range=tuple(product_size_range)
         )
-        
-        if not result.get('forward_primer') or not result.get('reverse_primer'):
-            return jsonify({
-                'error': 'Could not find suitable primers for this sequence. Try adjusting parameters.',
-                'partial_results': result
-            }), 422
+
+        fwd = result.get('forward_primer') or {}
+        rev = result.get('reverse_primer') or {}
+        if fwd and rev:
+            result['recommended_primers'] = {
+                'forward': {
+                    'sequence': fwd.get('sequence', ''),
+                    'length_bp': fwd.get('length', 0),
+                    'tm_c': fwd.get('tm', 0),
+                    'gc_percent': fwd.get('gc_content', 0),
+                    'score': fwd.get('quality_score', 0)
+                },
+                'reverse': {
+                    'sequence': rev.get('sequence', ''),
+                    'length_bp': rev.get('length', 0),
+                    'tm_c': rev.get('tm', 0),
+                    'gc_percent': rev.get('gc_content', 0),
+                    'score': rev.get('quality_score', 0)
+                },
+                'selection_explanation': result.get('selection_explanation', {})
+            }
         
         return jsonify(result)
     
@@ -562,37 +577,110 @@ def build_ai_context(tool, results):
     if tool == "PCR Primer Designer":
         fwd = results.get('forward_primer', {})
         rev = results.get('reverse_primer', {})
-        
-        return f"""I designed PCR primers for amplification. Please provide a comprehensive analysis:
+        product_size = results.get('expected_product_size', results.get('product_size', 'N/A'))
 
-FORWARD PRIMER:
-- Sequence: {fwd.get('sequence', 'N/A')}
-- Melting Temperature (Tm): {fwd.get('tm', 'N/A')}°C
-- GC Content: {fwd.get('gc_content', 'N/A')}%
-- Quality Score: {fwd.get('quality_score', 'N/A')}/100
-- Quality Grade: {fwd.get('quality_grade', 'N/A')}
-- Issues: {', '.join(fwd.get('issues', [])) if fwd.get('issues') else 'None detected'}
+        tm_diff = abs((fwd.get('tm') or 0) - (rev.get('tm') or 0)) if fwd and rev else 0
+        pair_rank = results.get('pair_ranking', {})
+        selection = results.get('selection_explanation', {})
+        dimer = results.get('dimer_analysis', {})
 
-REVERSE PRIMER:
-- Sequence: {rev.get('sequence', 'N/A')}
-- Melting Temperature (Tm): {rev.get('tm', 'N/A')}°C
-- GC Content: {rev.get('gc_content', 'N/A')}%
-- Quality Score: {rev.get('quality_score', 'N/A')}/100
-- Quality Grade: {rev.get('quality_grade', 'N/A')}
-- Issues: {', '.join(rev.get('issues', [])) if rev.get('issues') else 'None detected'}
+        return f"""You are a PCR primer optimization engine.
 
-AMPLICON DETAILS:
-- Product Size: {results.get('product_size', 'N/A')} bp
-- Tm Difference: {abs(fwd.get('tm', 0) - rev.get('tm', 0)):.1f}°C
+    Given candidate forward and reverse primers, choose and present the BEST possible pair.
 
-Please provide a detailed analysis covering:
-1. Overall primer quality assessment and suitability for PCR
-2. Explanation of the Tm values and whether they're optimal
-3. GC content analysis and implications
-4. Any potential issues (primer dimers, hairpins, mispriming risks)
-5. Recommended PCR conditions (annealing temperature, extension time)
-6. Troubleshooting suggestions if quality is suboptimal
-7. Best practices for using these primers"""
+    Selection priorities (in order):
+    1. Closest Tm match (difference < 2°C preferred)
+    2. Highest combined forward+reverse quality score
+    3. Minimal 3' end instability
+    4. Low self-dimer and cross-dimer risk
+
+    Critical rule:
+    - Always return a best possible pair.
+    - If all options are weak, pick the least-bad pair.
+    - Never respond with "Unavailable".
+
+    Input selected pair and metrics:
+    - Forward Sequence: {fwd.get('sequence', 'Not provided')}
+    - Forward Length: {fwd.get('length', 0)} bp
+    - Forward Tm: {fwd.get('tm', 0)}°C
+    - Forward GC: {fwd.get('gc_content', 0)}%
+    - Forward Score: {fwd.get('quality_score', 0)}/100
+    - Reverse Sequence: {rev.get('sequence', 'Not provided')}
+    - Reverse Length: {rev.get('length', 0)} bp
+    - Reverse Tm: {rev.get('tm', 0)}°C
+    - Reverse GC: {rev.get('gc_content', 0)}%
+    - Reverse Score: {rev.get('quality_score', 0)}/100
+    - Product Size: {product_size} bp
+    - Tm Difference: {tm_diff:.1f}°C
+    - Cross-Dimer Risk Level: {dimer.get('risk_level', 'unknown')}
+    - Cross-Dimer dG: {dimer.get('delta_g_display', dimer.get('estimated_dG', 'unknown'))}
+    - Specificity Score: {results.get('specificity_score', 'unknown')}/100
+    - Pair Score: {pair_rank.get('pair_score', 'unknown')}
+    - Pair Selection Reason: {selection.get('why_selected', 'Not provided')}
+    - Remaining Risks: {', '.join(selection.get('remaining_risks', [])) if selection.get('remaining_risks') else 'None listed'}
+
+    Output format (exact heading structure):
+
+    Recommended Primers:
+    Forward Primer: <sequence>
+    - Length: <bp>
+    - Tm: <°C>
+    - GC Content: <percentage>
+    - Score: <score>/100
+
+    Reverse Primer: <sequence>
+    - Length: <bp>
+    - Tm: <°C>
+    - GC Content: <percentage>
+    - Score: <score>/100
+
+    Short explanation:
+    - Why this pair was selected
+    - Any remaining risks
+
+    Melting Curve Summary:
+    - Peak Melting Temperature: <°C>
+    - Curve Type: (Sharp / Broad / Multiple Peaks)
+
+    Interpretation:
+    - Sharp peak -> high specificity
+    - Broad peak -> possible non-specific binding
+    - Multiple peaks -> non-specific products or primer dimers
+
+    Short PCR quality explanation:
+    - Explain what the curve suggests about PCR quality.
+
+    Specificity Analysis:
+    Score: <value>/100
+
+    Interpretation:
+    <Clear explanation based on score>
+
+    Rules:
+    - If score >= 80: High specificity; likely binds only target sequence
+    - If score is 60-79: Moderate specificity; minor off-target binding possible
+    - If score is 40-59: Low specificity; possible off-target binding; primer sequence may not be unique
+    - If score < 40: Poor specificity; high risk of non-specific amplification
+
+    Possible Issues:
+    - Off-target binding
+    - Low sequence uniqueness
+    - Repetitive regions (if applicable)
+
+    Recommendation:
+    - Suggest improving primer length, GC balance, or redesigning sequence
+
+        Cross-Dimer Summary:
+        - Cross-Dimer dG: <value or estimated range>
+        - Risk Level:
+            Low (>-5 kcal/mol)
+            Moderate (-5 to -9 kcal/mol)
+            High (<-9 kcal/mol)
+        - Explanation: Briefly explain whether primers are likely to bind each other.
+
+    If data is incomplete, estimate a realistic curve based on Tm and GC content.
+        If cross-dimer dG cannot be computed, estimate risk from complementarity, GC-rich overlaps, and 3' end pairing.
+    Never return "Unavailable"."""
     
     elif tool == "Mutation Finder":
         summary = results.get('summary', {})
