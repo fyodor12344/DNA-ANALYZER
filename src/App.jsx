@@ -47,6 +47,7 @@ function App() {
   const [tourStep, setTourStep] = useState(0);
   const [tourTargetRect, setTourTargetRect] = useState(null);
   const [isTourMobile, setIsTourMobile] = useState(false);
+  const [tourPanelReady, setTourPanelReady] = useState(false);
   const [tourOptOut, setTourOptOut] = useState(() => {
     try {
       return localStorage.getItem(ONBOARDING_PREF_KEY) === '1';
@@ -171,6 +172,7 @@ function App() {
         highlightedElRef.current = null;
       }
       setTourTargetRect(null);
+      setTourPanelReady(false);
       return;
     }
 
@@ -180,6 +182,10 @@ function App() {
     if (step.setTab && activeTab !== step.setTab) {
       setActiveTab(step.setTab);
     }
+
+    let t1 = null;
+    let t2 = null;
+    let onViewportMove = null;
 
     const timer = setTimeout(() => {
       const target = step.selectors
@@ -194,16 +200,49 @@ function App() {
       if (target) {
         target.classList.add('tour-highlighted');
         highlightedElRef.current = target;
+        setTourPanelReady(false);
         target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
-        const r = target.getBoundingClientRect();
-        setTourTargetRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+
+        const syncRect = () => {
+          if (!highlightedElRef.current) return;
+          const r = highlightedElRef.current.getBoundingClientRect();
+          setTourTargetRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+          setTourPanelReady(true);
+        };
+
+        syncRect();
+        t1 = setTimeout(syncRect, 220);
+        t2 = setTimeout(syncRect, 420);
+        onViewportMove = () => syncRect();
+        window.addEventListener('scroll', onViewportMove, true);
+        window.addEventListener('resize', onViewportMove);
       } else {
         setTourTargetRect(null);
+        setTourPanelReady(true);
       }
     }, 180);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      if (t1) clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+      if (onViewportMove) {
+        window.removeEventListener('scroll', onViewportMove, true);
+        window.removeEventListener('resize', onViewportMove);
+      }
+    };
   }, [showOnboarding, tourStep, activeTab]);
+
+  useEffect(() => {
+    if (!showOnboarding) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') closeOnboarding();
+      if (e.key === 'ArrowRight') nextTourStep();
+      if (e.key === 'ArrowLeft') prevTourStep();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showOnboarding, tourStep]);
 
   const startOnboarding = () => {
     setShowHelp(false);
@@ -652,20 +691,24 @@ function App() {
           position: fixed;
           inset: 0;
           z-index: 1200;
-          background: rgba(2, 6, 23, 0.72);
-          backdrop-filter: blur(2px);
+          background: rgba(2, 6, 23, 0.58);
+          backdrop-filter: blur(1.3px);
+          animation: tourOverlayIn 220ms ease-out;
         }
 
         .onboarding-panel {
           position: fixed;
           z-index: 1203;
           width: min(360px, calc(100vw - 1.2rem));
-          background: rgba(15, 23, 42, 0.96);
-          border: 1px solid rgba(0, 191, 165, 0.35);
+          background: linear-gradient(180deg, rgba(14, 24, 43, 0.97), rgba(13, 20, 34, 0.97));
+          border: 1px solid rgba(0, 191, 165, 0.28);
           border-radius: 12px;
-          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
-          padding: 0.95rem;
+          box-shadow: 0 14px 40px rgba(0, 0, 0, 0.48);
+          padding: 1rem;
           font-family: 'Inter', sans-serif;
+          transform-origin: top center;
+          animation: tourPanelIn 260ms cubic-bezier(.2,.7,.2,1);
+          transition: top 220ms ease, left 220ms ease, right 220ms ease, bottom 220ms ease;
         }
 
         .onboarding-title {
@@ -680,7 +723,7 @@ function App() {
           color: #cbd5e1;
           font-size: 0.9rem;
           line-height: 1.5;
-          margin: 0;
+          margin: 0 0 0.22rem 0;
         }
 
         .onboarding-footer {
@@ -706,12 +749,46 @@ function App() {
           font-size: 0.82rem;
           font-weight: 600;
           cursor: pointer;
+          transition: all 180ms ease;
+        }
+
+        .onboarding-btn:hover {
+          transform: translateY(-1px);
+          border-color: rgba(148, 163, 184, 0.4);
         }
 
         .onboarding-btn.primary {
           border-color: rgba(0, 191, 165, 0.45);
           background: linear-gradient(135deg, #00A389, #00BFA5);
           color: #fff;
+        }
+
+        .onboarding-dots {
+          display: flex;
+          align-items: center;
+          gap: 0.28rem;
+        }
+
+        .onboarding-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
+          background: rgba(148, 163, 184, 0.4);
+        }
+
+        .onboarding-dot.active {
+          width: 18px;
+          background: #00BFA5;
+        }
+
+        @keyframes tourOverlayIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+
+        @keyframes tourPanelIn {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
         
         .dark-mode .help-content ul {
@@ -1133,13 +1210,14 @@ function App() {
 
       {showOnboarding && (
         <>
-          <div className="onboarding-overlay" onClick={closeOnboarding}></div>
+          <div className="onboarding-overlay"></div>
           <div
+            key={`tour-step-${tourStep}`}
             className="onboarding-panel"
             style={(() => {
               const defaultTop = isTourMobile ? undefined : 84;
               if (!tourTargetRect || isTourMobile) {
-                return isTourMobile ? { left: '0.5rem', right: '0.5rem', bottom: '0.7rem' } : { top: defaultTop, right: 20 };
+                return isTourMobile ? { left: '0.5rem', right: '0.5rem', bottom: '0.7rem', opacity: tourPanelReady ? 1 : 0.15 } : { top: defaultTop, right: 20, opacity: tourPanelReady ? 1 : 0.15 };
               }
               const panelWidth = 360;
               const spaceBelow = window.innerHeight - (tourTargetRect.top + tourTargetRect.height);
@@ -1148,7 +1226,7 @@ function App() {
                 : Math.max(12, tourTargetRect.top - 230);
               const centeredLeft = tourTargetRect.left + (tourTargetRect.width / 2) - (panelWidth / 2);
               const left = Math.max(12, Math.min(window.innerWidth - panelWidth - 12, centeredLeft));
-              return { top, left };
+              return { top, left, opacity: tourPanelReady ? 1 : 0.15 };
             })()}
             onClick={(e) => e.stopPropagation()}
           >
@@ -1169,7 +1247,14 @@ function App() {
               </label>
             </div>
             <div className="onboarding-footer">
-              <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Step {tourStep + 1}/{onboardingSteps.length}</span>
+              <div>
+                <span style={{ fontSize: '0.78rem', color: '#94a3b8', display: 'block', marginBottom: '0.2rem' }}>Step {tourStep + 1}/{onboardingSteps.length}</span>
+                <div className="onboarding-dots">
+                  {onboardingSteps.map((_, i) => (
+                    <span key={i} className={`onboarding-dot ${i === tourStep ? 'active' : ''}`}></span>
+                  ))}
+                </div>
+              </div>
               <div className="onboarding-nav">
                 <button className="onboarding-btn" onClick={closeOnboarding}>Close</button>
                 {tourStep > 0 && <button className="onboarding-btn" onClick={prevTourStep}>Back</button>}
